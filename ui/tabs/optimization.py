@@ -308,11 +308,14 @@ def render() -> None:
                 disabled=not data_ready,
             )
         with cols[1]:
-            default_workers = 8
-            workers = [1, 2, 4, 8, 12, 16, 20, 30]
             max_workers = st.selectbox(
-                "Parallel workers", workers, index=0, key="opt_max_workers",
-                help="Threads used for multi-year solving. Ignored for single-year runs.",
+                "Parallel workers", [1, 2, 4, 8, 16, 24, 30], index=2, key="opt_max_workers",
+                help=(
+                    "Max parallel year-solves. Automatically capped to the available "
+                    "CPU and RAM (~0.9 GB per worker), so memory-limited hosts like "
+                    "Streamlit Cloud fall back to serial regardless of this value. "
+                    "Ignored for single-year runs."
+                ),
             )
         with cols[2]:
             if not data_ready:
