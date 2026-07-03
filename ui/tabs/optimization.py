@@ -312,7 +312,7 @@ def render() -> None:
                 "Parallel workers", [1, 2, 4, 8, 16, 24, 30], index=2, key="opt_max_workers",
                 help=(
                     "Max parallel year-solves. Automatically capped to the available "
-                    "CPU and RAM (~0.9 GB per worker), so memory-limited hosts like "
+                    "CPU and RAM (~1.2 GB per worker), so memory-limited hosts like "
                     "Streamlit Cloud fall back to serial regardless of this value. "
                     "Ignored for single-year runs."
                 ),
