@@ -193,6 +193,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             )
         else:
             chosen_day = initial.chosen_day
+            cols[0].write(f"Day: {chosen_day}")
 
     return dataclasses.replace(
         initial,
