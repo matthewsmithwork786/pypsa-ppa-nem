@@ -42,12 +42,25 @@ def _render_scenario_summary(s) -> None:
         cols = st.columns(4)
         with cols[0]:
             st.markdown("**Portfolio**")
-            st.markdown(f"- Wind: **{s.onsw_mw:.0f} MW**")
-            st.markdown(f"- Solar: **{s.pv_mw:.0f} MWac**")
-            if s.include_bess:
-                st.markdown(f"- BESS: **{s.effective_bess_mw:.0f} MW / {s.effective_bess_mwh:.0f} MWh**")
+            if s.optimize_capacity:
+                st.markdown("- Mode: **co-optimized sizing** ⚡")
+                st.markdown(
+                    f"- Max build: wind **{s.max_build_wind_mw:.0f}** / "
+                    f"solar **{s.max_build_pv_mw:.0f}** / "
+                    f"BESS **{s.max_build_bess_mw:.0f} MW**"
+                )
+                st.markdown(f"- Sizing LP resolution: **{s.sizing_resolution_h}h**")
+                if s.include_bess:
+                    st.markdown(f"- BESS duration: **{s.bess_max_hours:.1f} h** (fixed)")
+                else:
+                    st.markdown("- BESS: *disabled*")
             else:
-                st.markdown("- BESS: *disabled*")
+                st.markdown(f"- Wind: **{s.onsw_mw:.0f} MW**")
+                st.markdown(f"- Solar: **{s.pv_mw:.0f} MWac**")
+                if s.include_bess:
+                    st.markdown(f"- BESS: **{s.effective_bess_mw:.0f} MW / {s.effective_bess_mwh:.0f} MWh**")
+                else:
+                    st.markdown("- BESS: *disabled*")
 
         with cols[1]:
             st.markdown("**PPA contract**")
@@ -173,6 +186,64 @@ def _run_simulation(scenario, max_workers: int) -> None:
 
     progress_bar = st.progress(0, text="Starting optimization ...")
     status_text = st.empty()
+
+    # ── Capacity co-optimization pre-step ─────────────────────────────────────
+    if scenario.optimize_capacity:
+        import time
+
+        from ppa.sizing import (
+            apply_sizing,
+            build_sizing_timeseries,
+            clamp_sizing_years,
+            run_sizing_subprocess,
+            weather_cycle_years,
+        )
+
+        n_sizing_years, cycle_note = weather_cycle_years(
+            scenario.simulation_years, len(pv_by_year), len(prices_by_year)
+        )
+        if cycle_note:
+            st.info(cycle_note)
+        n_sizing_years, notice = clamp_sizing_years(
+            n_sizing_years, scenario.sizing_resolution_h
+        )
+        if notice:
+            st.warning(notice)
+        progress_bar.progress(
+            0.0,
+            text=(
+                f"Sizing portfolio (co-optimizing capacities, {n_sizing_years}-year LP "
+                f"at {scenario.sizing_resolution_h}h resolution)..."
+            ),
+        )
+        sizing_ts = build_sizing_timeseries(
+            scenario, pv_by_year, wind_by_year, prices_by_year, n_sizing_years
+        )
+
+        _t0 = time.monotonic()
+
+        def _sizing_heartbeat() -> None:
+            status_text.text(
+                f"Solving the sizing LP in a background process... "
+                f"{time.monotonic() - _t0:.0f}s elapsed. Press Stop to cancel."
+            )
+
+        sized = run_sizing_subprocess(sizing_ts, scenario, heartbeat=_sizing_heartbeat)
+        if sized.status != "ok":
+            raise RuntimeError(
+                f"Capacity sizing LP failed: {sized.status} / {sized.condition}"
+            )
+        # Keep the sized scenario local to this run: the user's scenario keeps
+        # optimize_capacity=True so re-runs re-size; the optimized fleet is
+        # surfaced via state.set_optimized_sizes.
+        scenario = apply_sizing(scenario, sized)
+        state.set_optimized_sizes(sized)
+        status_text.success(
+            f"Optimized portfolio — Wind {sized.onsw_mw:.0f} MW · "
+            f"Solar {sized.pv_mw:.0f} MW · BESS {sized.bess_mw:.0f} MW / "
+            f"{sized.bess_mwh:.0f} MWh (sized over {sized.sizing_years_used} year(s) "
+            f"at {sized.resolution_h}h resolution) — running hourly dispatch..."
+        )
 
     def _on_progress(done: int, total: int, sim_year: int) -> None:
         progress_bar.progress(done / total, text=f"Year {sim_year} ({done}/{total})")
@@ -367,6 +438,14 @@ def render() -> None:
 
     if state.has_multi_year_financial():
         # st.markdown("---")
+        if s.optimize_capacity and state.has_optimized_sizes():
+            sized = state.get_optimized_sizes()
+            st.info(
+                f"⚡ **Optimized portfolio** — Wind **{sized.onsw_mw:.0f} MW** · "
+                f"Solar **{sized.pv_mw:.0f} MW** · BESS **{sized.bess_mw:.0f} MW / "
+                f"{sized.bess_mwh:.0f} MWh** (sized over {sized.sizing_years_used} year(s) "
+                f"at {getattr(sized, 'resolution_h', 1)}h resolution; dispatch & financials run hourly)"
+            )
         _render_results(state.get_multi_year_financial(), s.simulation_years)
 
     # ── Single-day reference optimization (European reference month) ──────────
@@ -408,6 +487,24 @@ def render() -> None:
                             from ppa.counterfactuals import compute_counterfactuals
 
                             ts_prep = prepare_timeseries(ts, s)
+
+                            # Capacity co-optimization pre-step (reference month → fast)
+                            if s.optimize_capacity:
+                                from ppa.sizing import apply_sizing, optimize_capacities
+
+                                sized = optimize_capacities(ts_prep, s)
+                                if sized.status != "ok":
+                                    raise RuntimeError(
+                                        f"Capacity sizing LP failed: {sized.status} / {sized.condition}"
+                                    )
+                                s = apply_sizing(s, sized)
+                                state.set_optimized_sizes(sized)
+                                st.info(
+                                    f"Optimized portfolio — Wind {sized.onsw_mw:.0f} MW · "
+                                    f"Solar {sized.pv_mw:.0f} MW · BESS {sized.bess_mw:.0f} MW / "
+                                    f"{sized.bess_mwh:.0f} MWh (sized on the reference month)"
+                                )
+
                             n = build_network(ts_prep, s)
                             status, condition = solve(n, s, ts_prep)
                             result = extract_results(n, s, ts_prep, status, condition)

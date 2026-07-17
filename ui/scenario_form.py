@@ -27,18 +27,72 @@ def render_scenario_form(initial: Scenario) -> Scenario:
     cols = st.columns(4)
     enable_penalty = cols[0].toggle("Enable penalty regime", value=initial.enable_penalty, key="sf_enable_penalty")
     run_financial_analysis = cols[1].toggle("Run financial analysis", value=initial.run_financial_analysis, key="sf_run_financial_analysis")
+    optimize_capacity = cols[2].toggle(
+        "Co-optimize capacities & dispatch",
+        value=initial.optimize_capacity,
+        key="sf_optimize_capacity",
+        help=(
+            "Let PyPSA size wind, solar and BESS together with dispatch "
+            "(least-cost portfolio to serve the PPA). The fixed MW values below "
+            "are ignored; set per-technology max build limits instead."
+        ),
+    )
 
     with st.expander("Portfolio assets", expanded=True):
+        if optimize_capacity:
+            st.info(
+                "⚡ **Capacity co-optimization is ON** — the sliders below are ignored. "
+                "The optimizer sizes each technology up to its max build limit; "
+                "BESS duration is fixed at the MWh/MW ratio below."
+            )
+            cols = st.columns(4)
+            max_build_wind_mw = cols[0].number_input(
+                "Max wind build (MW)", 0.0, 10_000.0, float(initial.max_build_wind_mw),
+                50.0, key="sf_max_build_wind",
+            )
+            max_build_pv_mw = cols[1].number_input(
+                "Max solar build (MW)", 0.0, 10_000.0, float(initial.max_build_pv_mw),
+                50.0, key="sf_max_build_pv",
+            )
+            max_build_bess_mw = cols[2].number_input(
+                "Max BESS build (MW)", 0.0, 10_000.0, float(initial.max_build_bess_mw),
+                50.0, key="sf_max_build_bess",
+            )
+            _res_options = [1, 2, 3, 4, 6]
+            _res_idx = (
+                _res_options.index(int(initial.sizing_resolution_h))
+                if int(initial.sizing_resolution_h) in _res_options
+                else _res_options.index(3)
+            )
+            sizing_resolution_h = cols[3].selectbox(
+                "Sizing LP resolution (h)", _res_options, index=_res_idx,
+                key="sf_sizing_resolution",
+                help=(
+                    "Time resolution of the capacity-sizing LP only. Coarser "
+                    "blocks (e.g. 3h) solve much faster and use less memory; the "
+                    "sized portfolio is then always re-simulated at hourly "
+                    "resolution for dispatch and financials."
+                ),
+            )
+        else:
+            max_build_wind_mw = initial.max_build_wind_mw
+            max_build_pv_mw = initial.max_build_pv_mw
+            max_build_bess_mw = initial.max_build_bess_mw
+            sizing_resolution_h = initial.sizing_resolution_h
+
         cols = st.columns(4)
-        onsw_mw = cols[0].slider("Onshore wind (MW)", 0, max_cap_per_technology, int(initial.onsw_mw), step=10, key="sf_onsw_mw")
-        pv_mw = cols[1].slider("Solar PV (MWac)", 0, max_cap_per_technology, int(initial.pv_mw), step=10, key="sf_pv_mw")
+        onsw_mw = cols[0].slider("Onshore wind (MW)", 0, max_cap_per_technology, int(initial.onsw_mw), step=10, key="sf_onsw_mw",
+                                 disabled=optimize_capacity)
+        pv_mw = cols[1].slider("Solar PV (MWac)", 0, max_cap_per_technology, int(initial.pv_mw), step=10, key="sf_pv_mw",
+                               disabled=optimize_capacity)
         bess_mw = cols[2].slider(
             "BESS power (MW)", 0, max_cap_per_technology, int(initial.bess_mw), step=10,
-            key="sf_bess_mw"
+            key="sf_bess_mw", disabled=optimize_capacity,
         )
         bess_mwh = cols[3].slider(
             "BESS energy (MWh)", 0, max_cap_per_technology*max_bes_hours, int(initial.bess_mwh), step=20,
-            key="sf_bess_mwh"
+            key="sf_bess_mwh",
+            help="With co-optimization on, only the MWh/MW ratio (duration) is used." if optimize_capacity else None,
         )
 
     with st.expander("PPA contract terms", expanded=True):
@@ -50,7 +104,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                                           value=float(initial.ppa_price), step=5.0, key="sf_ppa_price")
         required_delivery_share = cols[2].slider(
             "Required delivery share (%)", 50, 100, int(initial.required_delivery_share * 100),
-            step=5, format="%d%%",
+            step=1, format="%d%%",
             help="Fraction of total contracted load that must be delivered on average.",
             key="sf_required_delivery_share",
         ) / 100.0
@@ -333,6 +387,11 @@ def render_scenario_form(initial: Scenario) -> Scenario:
 
     return dataclasses.replace(
         initial,
+        optimize_capacity=optimize_capacity,
+        max_build_wind_mw=float(max_build_wind_mw),
+        max_build_pv_mw=float(max_build_pv_mw),
+        max_build_bess_mw=float(max_build_bess_mw),
+        sizing_resolution_h=int(sizing_resolution_h),
         include_bess=include_bess,
         enable_market_buy=enable_market_buy,
         enable_market_sell=enable_market_sell,
