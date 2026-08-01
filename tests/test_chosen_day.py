@@ -21,7 +21,6 @@ def _march_ts() -> pd.DataFrame:
 
 # ── W5: default reference day must be 2025 ───────────────────────────────────
 
-@pytest.mark.xfail(strict=True, reason="W5: default chosen_day is still 2023-03-15")
 def test_scenario_default_chosen_day_is_2025():
     assert Scenario().chosen_day.startswith("2025-")
 
