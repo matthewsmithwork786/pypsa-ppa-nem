@@ -24,6 +24,7 @@ def _dual_axis_supply_mix(
     x_col: str,
     title: str,
     ppaload_mw: float,
+    rangeslider: bool = False,
 ) -> go.Figure:
     y_max = max(
         df[_POSITIVE_COLS].sum(axis=1).max() if len(df) else 0,
@@ -87,15 +88,18 @@ def _dual_axis_supply_mix(
         legend_title="Source",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
+    if rangeslider:
+        fig.update_xaxes(rangeslider=dict(visible=True))
     return fig
 
 
-def make_supply_mix_24h_chart(avg_24h: pd.DataFrame, ppaload_mw: float) -> go.Figure:
+def make_supply_mix_24h_chart(avg_24h: pd.DataFrame, ppaload_mw: float, rangeslider: bool = False) -> go.Figure:
     return _dual_axis_supply_mix(
         avg_24h,
-        x_col="hour",
-        title="Average hourly supply mix across the modelled period",
+        x_col="slot",
+        title="Average supply mix by time of day",
         ppaload_mw=ppaload_mw,
+        rangeslider=rangeslider,
     )
 
 
@@ -147,7 +151,7 @@ def make_revenue_breakdown_chart(revenue: RevenueBreakdown) -> go.Figure:
     return fig
 
 
-def make_soc_chart(soc: "pd.Series", bess_mwh: float) -> go.Figure:
+def make_soc_chart(soc: "pd.Series", bess_mwh: float, rangeslider: bool = False) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -169,16 +173,22 @@ def make_soc_chart(soc: "pd.Series", bess_mwh: float) -> go.Figure:
         annotation_font_size=10,
     )
     fig.update_layout(
-        title="BESS state of charge over the modelled period",
+        title="BESS state of charge",
         xaxis_title="Time",
         yaxis_title="MWh",
         height=300,
         showlegend=False,
     )
+    if rangeslider:
+        fig.update_xaxes(rangeslider=dict(visible=True))
     return fig
 
 
-def make_price_series_chart(prices: "pd.Series | pd.DataFrame", title: str = "Market spot price") -> go.Figure:
+def make_price_series_chart(
+    prices: "pd.Series | pd.DataFrame",
+    title: str = "Market spot price",
+    rangeslider: bool = False,
+) -> go.Figure:
     if hasattr(prices, "columns"):
         prices = prices["ts_MktPrice"]
     fig = go.Figure()
@@ -197,6 +207,111 @@ def make_price_series_chart(prices: "pd.Series | pd.DataFrame", title: str = "Ma
         yaxis_title="A$/MWh",
         height=300,
         showlegend=False,
+    )
+    if rangeslider:
+        fig.update_xaxes(rangeslider=dict(visible=True))
+    return fig
+
+
+def make_price_24h_chart(prices_avg: "pd.DataFrame", title: str = "Average spot price by time of day") -> go.Figure:
+    """Mean spot price by time-of-day with a P10-P90 band across the days in
+    the selected range, so the average profile shows its spread, not just the
+    midpoint."""
+    x = prices_avg["slot"]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=prices_avg["p90"],
+            mode="lines",
+            line=dict(color="rgba(255,111,0,0)", width=0),
+            fill=None,
+            name="P90",
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=prices_avg["p10"],
+            mode="lines",
+            line=dict(color="rgba(255,111,0,0)", width=0),
+            fill="tonexty",
+            fillcolor="rgba(255,111,0,0.15)",
+            name="P10-P90 band",
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=prices_avg["mean"],
+            mode="lines",
+            name="Mean spot price",
+            line=dict(color="#FF6F00", width=1.5),
+        )
+    )
+    fig.update_layout(
+        title=title,
+        xaxis_title="Hour of day",
+        yaxis_title="A$/MWh",
+        height=300,
+    )
+    return fig
+
+
+def make_soc_24h_chart(soc_avg: "pd.DataFrame", bess_mwh: float) -> go.Figure:
+    """Average BESS state of charge by time-of-day with a P10-P90 band."""
+    x = soc_avg["slot"]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=soc_avg["p90"],
+            mode="lines",
+            line=dict(color="rgba(21,101,192,0)", width=0),
+            name="P90",
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=soc_avg["p10"],
+            mode="lines",
+            line=dict(color="rgba(21,101,192,0)", width=0),
+            fill="tonexty",
+            fillcolor="rgba(21,101,192,0.15)",
+            name="P10-P90 band",
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=soc_avg["mean"],
+            mode="lines",
+            name="Mean SoC (MWh)",
+            line=dict(color="#1565C0", width=1.5),
+        )
+    )
+    fig.add_hline(
+        y=bess_mwh,
+        line_dash="dash",
+        line_color="#555",
+        annotation_text=f"Full capacity ({bess_mwh:.0f} MWh)",
+        annotation_position="top right",
+        annotation_font_size=10,
+    )
+    fig.update_layout(
+        title="Average BESS state of charge by time of day",
+        xaxis_title="Hour of day",
+        yaxis_title="MWh",
+        height=300,
     )
     return fig
 

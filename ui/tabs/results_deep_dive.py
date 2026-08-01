@@ -7,12 +7,20 @@ import pandas as pd
 import streamlit as st
 
 from ppa.counterfactuals import compute_counterfactuals
-from ppa.results import build_supply_mix_df, build_ops_day_df
+from ppa.results import (
+    build_supply_mix_df,
+    build_24h_avg,
+    build_24h_band,
+    build_ops_day_df,
+    filter_dispatch_range,
+)
 from ui import state
 from ui.charts import (
-    make_supply_mix_day_chart,
+    make_supply_mix_24h_chart,
     make_soc_chart,
+    make_soc_24h_chart,
     make_price_series_chart,
+    make_price_24h_chart,
     make_counterfactual_bar_chart,
     make_cumulative_cost_chart,
     make_multi_year_counterfactual_chart,
@@ -23,33 +31,94 @@ def _fmt_m(v: float) -> str:
     return f"A${v / 1e6:,.2f}M"
 
 
+_MAX_DISPLAY_POINTS = 5000
+
+
+def _downsample_series(series: pd.Series) -> pd.Series:
+    """Cap displayed points so a full-year 5-min upload (105k rows) does not
+    hang the browser. Keeps every `n`th sample while preserving the range."""
+    n = len(series)
+    if n <= _MAX_DISPLAY_POINTS:
+        return series
+    step = max(1, int(np.ceil(n / _MAX_DISPLAY_POINTS)))
+    return series.iloc[::step]
+
+
 def _render_dispatch_section(result, s, chosen_day: str) -> None:
     supply_mix = build_supply_mix_df(result.dispatch)
-    day_mix = supply_mix[supply_mix.index.strftime("%Y-%m-%d") == chosen_day]
+    ts_index = supply_mix.index
+    first_day = ts_index.normalize().min()
+    last_day = ts_index.normalize().max()
+    default_start = min(pd.Timestamp(chosen_day), last_day)
+    default_end = min(default_start + pd.Timedelta(days=7), last_day)
+
+    if last_day > first_day:
+        start, end = st.slider(
+            "Date range to inspect",
+            min_value=first_day,
+            max_value=last_day,
+            value=(default_start, default_end),
+            format="DD MMM",
+        )
+    else:
+        start = end = first_day
+
+    range_mix = filter_dispatch_range(supply_mix, start, end)
+    window_label = f"{start.strftime('%d %b')} – {end.strftime('%d %b')}"
 
     tab_chart1, tab_chart2, tab_chart3 = st.tabs([
-        "| Actual hourly supply mix", 
+        "| Actual hourly supply mix",
         "| Market spot price",
-        "| BESS SoC", 
+        "| BESS SoC",
     ])
     with tab_chart1:
-        fig = make_supply_mix_day_chart(day_mix, s.ppaload_mw, chosen_day)
-        st.plotly_chart(fig, width="stretch", height=400)
+        tab_ts, tab_avg = st.tabs(["| Time series", "| Average 24 h"])
+        with tab_ts:
+            fig = make_supply_mix_24h_chart(
+                range_mix.assign(slot=range_mix.index),
+                s.ppaload_mw,
+                rangeslider=True,
+            )
+            fig.update_layout(title=f"Supply mix — {window_label}")
+            st.plotly_chart(fig, width="stretch", height=400)
+        with tab_avg:
+            fig = make_supply_mix_24h_chart(build_24h_avg(range_mix), s.ppaload_mw)
+            fig.update_layout(title=f"Average supply mix by time of day — {window_label}")
+            st.plotly_chart(fig, width="stretch", height=400)
 
     with tab_chart2:
         if getattr(result, "market_prices", None) is not None:
-            # st.subheader("Market spot price")
-            price_day = result.market_prices[result.market_prices.index.strftime("%Y-%m-%d") == chosen_day]
-            fig_price = make_price_series_chart(price_day, title=f"Day-ahead price — {chosen_day}")
-            st.plotly_chart(fig_price, width="stretch", height=400)
+            price_range = filter_dispatch_range(result.market_prices, start, end)
+            tab_ts, tab_avg = st.tabs(["| Time series", "| Average 24 h"])
+            with tab_ts:
+                fig_price = make_price_series_chart(
+                    _downsample_series(price_range),
+                    title=f"Day-ahead price — {window_label}",
+                    rangeslider=True,
+                )
+                st.plotly_chart(fig_price, width="stretch", height=400)
+            with tab_avg:
+                fig_price = make_price_24h_chart(build_24h_band(price_range))
+                st.plotly_chart(fig_price, width="stretch", height=400)
         else:
             st.info("No market price data available for this scenario.")
 
     with tab_chart3:
         if s.include_bess and s.effective_bess_mwh > 0:
-            #st.subheader("BESS state of charge")
-            fig_soc = make_soc_chart(result.dispatch.soc, s.effective_bess_mwh)
-            st.plotly_chart(fig_soc, width="stretch", height=400)
+            soc_range = filter_dispatch_range(result.dispatch.soc, start, end)
+            tab_ts, tab_avg = st.tabs(["| Time series", "| Average 24 h"])
+            with tab_ts:
+                fig_soc = make_soc_chart(
+                    _downsample_series(soc_range),
+                    s.effective_bess_mwh,
+                    rangeslider=True,
+                )
+                st.plotly_chart(fig_soc, width="stretch", height=400)
+            with tab_avg:
+                fig_soc = make_soc_24h_chart(
+                    build_24h_band(soc_range), s.effective_bess_mwh
+                )
+                st.plotly_chart(fig_soc, width="stretch", height=400)
         else:
             st.info("No BESS included in this scenario.")
 
@@ -75,6 +144,27 @@ def _render_gen_stats(result, s) -> None:
     )
     cols = st.columns(2)
     cols[0].dataframe(stats_df, hide_index=True, width="stretch")
+
+    lu = getattr(result, "link_utilisation", None)
+    if lu is not None and not lu.empty:
+        with cols[1]:
+            st.markdown("**Connection (link) capacity**")
+            st.dataframe(
+                lu.reset_index()
+                .rename(columns={"link": "Link"})
+                .assign(
+                    sized_mw=lambda d: d["sized_mw"].round(1),
+                    peak_flow=lambda d: d["peak_flow"].round(1),
+                    utilisation=lambda d: (d["utilisation"] * 100).round(1),
+                )
+                .rename(columns={"utilisation": "utilisation %"}),
+                hide_index=True,
+                width="stretch",
+            )
+            st.caption(
+                "Utilisation near 100 % on a link signals a binding "
+                "`grid_connection_max_mw` is curtailing the build."
+            )
 
 
 def _render_multi_year_counterfactuals(results, fin, s) -> None:

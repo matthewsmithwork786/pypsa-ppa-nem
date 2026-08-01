@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from ppa.results import build_24h_avg
 
@@ -42,7 +41,6 @@ def test_build_24h_avg_returns_24_rows_with_correct_means():
     np.testing.assert_allclose(avg["Wind"].to_numpy(), np.arange(24), rtol=1e-9)
 
 
-@pytest.mark.xfail(strict=True, reason="W16: build_24h_avg groups by hour only, not hour+minute")
 def test_build_24h_avg_sub_hourly_cadence_gives_48_rows():
     """30-min data must average onto its own cadence (24 h × 2 slots), not
     collapse onto 24 hourly points."""
@@ -54,7 +52,6 @@ def test_build_24h_avg_sub_hourly_cadence_gives_48_rows():
 
 # ── 16.1 inclusive date-range filter ─────────────────────────────────────────
 
-@pytest.mark.xfail(strict=True, reason="W16: filter_dispatch_range helper does not exist yet")
 def test_range_filter_inclusive_of_both_endpoints():
     from ppa.results import filter_dispatch_range
 
@@ -67,7 +64,6 @@ def test_range_filter_inclusive_of_both_endpoints():
     assert len(sliced) == 25  # 24-hour span + inclusive second edge
 
 
-@pytest.mark.xfail(strict=True, reason="W16: filter_dispatch_range helper does not exist yet")
 def test_range_filter_defaults_to_chosen_day_window():
     from ppa.results import filter_dispatch_range
 
@@ -78,7 +74,6 @@ def test_range_filter_defaults_to_chosen_day_window():
 
 # ── 16.3 link (connection) MW reporting ──────────────────────────────────────
 
-@pytest.mark.xfail(strict=True, reason="W16: OptimizationResult has no link_utilisation table yet")
 def test_extract_results_reports_link_sized_and_peak_mw():
     """A dispatch solve must yield, per link, sized MW (p_nom_opt, falling back
     to p_nom) and the realised peak flow — the table used to spot a binding

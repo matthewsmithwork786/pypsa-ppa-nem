@@ -70,6 +70,29 @@ class OptimizationResult:
     solver_condition: str
     n_period_hours: float
     market_prices: pd.Series = None  # type: ignore[assignment]
+    link_utilisation: pd.DataFrame = None  # type: ignore[assignment]
+
+
+def _extract_link_utilisation(n: pypsa.Network) -> pd.DataFrame:
+    static = n.links.static
+    if static.empty:
+        return pd.DataFrame()
+    if "p_nom_opt" in static.columns:
+        sized = static["p_nom_opt"].fillna(0.0)
+    else:
+        sized = static["p_nom"]
+    rows = []
+    for name in static.index:
+        cap = float(sized[name]) if name in sized.index else 0.0
+        if cap <= 0:
+            cap = float(static.at[name, "p_nom"]) if "p_nom" in static.columns else 0.0
+        peak = 0.0
+        if name in n.links.dynamic.p.columns:
+            peak = float(n.links.dynamic.p[name].abs().max())
+        rows.append((name, cap, peak))
+    table = pd.DataFrame(rows, columns=["link", "sized_mw", "peak_flow"]).set_index("link")
+    table["utilisation"] = (table["peak_flow"] / table["sized_mw"].replace(0, np.nan)).fillna(0.0)
+    return table
 
 
 def extract_results(
@@ -186,6 +209,7 @@ def extract_results(
         solver_condition=solver_condition,
         n_period_hours=len(ts) * resolution_h,
         market_prices=ts["ts_MktPrice"],
+        link_utilisation=_extract_link_utilisation(n),
     )
 
 
@@ -206,8 +230,41 @@ def build_supply_mix_df(dispatch: DispatchSeries, ts: pd.DataFrame | None = None
     return df
 
 
+def _time_slot(series: "pd.Series | pd.Index") -> pd.Series:
+    """0..23 hour-of-day for hourly data; fractional hour for 30/5-min data
+    (e.g. 07:30 -> 7.5), so a 30-min run averages onto 48 slots instead of
+    collapsing onto 24 hourly points."""
+    idx = pd.DatetimeIndex(series)
+    return pd.Series(idx.hour + idx.minute / 60.0 + idx.second / 3600.0, index=idx)
+
+
+def filter_dispatch_range(
+    obj: "pd.Series | pd.DataFrame",
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
+    chosen_day: str | None = None,
+) -> "pd.Series | pd.DataFrame":
+    """Inclusive [start, end] slice of `obj` by its datetime index. With no
+    explicit range and no `chosen_day`, defaults to a 7-day window from the
+    first timestamp."""
+    if start is None or end is None:
+        if chosen_day is None:
+            chosen_day = pd.Timestamp(obj.index[0]).strftime("%Y-%m-%d")
+        start = pd.Timestamp(chosen_day)
+        end = start + pd.Timedelta(days=7)
+    return obj.loc[(obj.index >= start) & (obj.index <= end)]
+
+
 def build_24h_avg(supply_mix_df: pd.DataFrame) -> pd.DataFrame:
-    return supply_mix_df.groupby("hour").mean().reset_index()
+    avg = supply_mix_df.groupby(_time_slot(supply_mix_df.index)).mean()
+    avg.index.name = "slot"
+    return avg.reset_index()
+
+
+def build_24h_band(series: "pd.Series") -> pd.DataFrame:
+    """Mean + P10/P90 by time-of-day slot for a single series."""
+    g = pd.DataFrame({"slot": _time_slot(series.index), "value": series.values}).groupby("slot")["value"]
+    return pd.DataFrame({"mean": g.mean(), "p10": g.quantile(0.10), "p90": g.quantile(0.90)}).reset_index()
 
 
 def build_ops_day_df(dispatch: DispatchSeries, chosen_day: str) -> pd.DataFrame:
