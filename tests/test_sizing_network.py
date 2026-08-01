@@ -21,7 +21,7 @@ import pytest
 
 from ppa.network import build_network
 from ppa.scenario import Scenario
-from ppa.sizing import optimize_capacities
+from ppa.sizing import apply_sizing, optimize_capacities
 from ppa.solver import solve
 
 TRANSPORT_LINKS = [
@@ -76,12 +76,11 @@ def _toy_scenario(**overrides) -> Scenario:
 
 def _peak_link_flow(n) -> dict[str, float]:
     """Absolute peak flow (MW) on each link over the horizon."""
-    return {name: float(n.links.dynamic.p[name].abs().max()) for name in n.links.index}
+    return {name: float(n.links.dynamic.p[name].abs().max()) for name in n.links.static.index}
 
 
 # ── (a) transport links extendable in sizing mode, fixed in dispatch mode ────
 
-@pytest.mark.xfail(strict=True, reason="W12a: transport links are pinned to the slider MW in sizing mode")
 def test_links_extendable_in_sizing_mode():
     ts = _toy_ts()
     n = build_network(ts, _toy_scenario())
@@ -110,7 +109,6 @@ def test_offtake_and_market_buy_links_never_extendable():
 
 # ── (a) sized link MW equals realised peak flow ──────────────────────────────
 
-@pytest.mark.xfail(strict=True, reason="W12a: links not extendable, so no link p_nom_opt yet")
 def test_link_pnom_opt_matches_peak_flow():
     """With a strictly-positive capital cost the extendable link's `p_nom_opt`
     is pinned to the realised peak flow (no degenerate over-build)."""
@@ -133,7 +131,6 @@ def test_link_pnom_opt_matches_peak_flow():
 
 # ── (c) LP cost basis includes devex and uses target_irr ─────────────────────
 
-@pytest.mark.xfail(strict=True, reason="W12c: capex annualised at discount_rate without devex")
 def test_generator_capital_cost_includes_devex_and_target_irr():
     ts = _toy_ts()
     scn = _toy_scenario()
@@ -167,7 +164,6 @@ def test_generator_capital_cost_includes_devex_and_target_irr():
 
 # ── (b) merchant haircut applies to positive prices only ─────────────────────
 
-@pytest.mark.xfail(strict=True, reason="W12b: sizing_merchant_value_share field does not exist yet")
 def test_merchant_negative_price_hours_undiscounted():
     """`sizing_merchant_value_share` haircuts positive prices only; negative
     hours keep their full disincentive so the LP curtails rather than sells."""
@@ -191,7 +187,6 @@ def test_merchant_negative_price_hours_undiscounted():
 
 # ── Acceptance: the toy LP must build MORE than the (disabled) slider values ─
 
-@pytest.mark.xfail(strict=True, reason="W12a: SizedCapacities lacks link MW — links pinned to the slider caps")
 def test_toy_lp_builds_more_than_slider_values():
     """With cheap capex and generous caps the sizing LP must size the transport
     links well beyond the (disabled) slider caps (wind 50 + PV 50 = 100 MW).
@@ -205,3 +200,59 @@ def test_toy_lp_builds_more_than_slider_values():
         f"capacity (wind {sized.wind_link_mw:.1f} + pv+bess {sized.pvbess_link_mw:.1f}) "
         "— links still pinned to the slider caps?"
     )
+
+
+# ── apply_sizing carries the sized connection MW into dispatch ───────────────
+
+def test_apply_sizing_carries_link_mw_into_dispatch():
+    ts = _toy_ts()
+    scn = _toy_scenario()
+    sized = optimize_capacities(ts, scn)
+    sim = apply_sizing(scn, sized)
+    # The dispatch scenario must pin the transport links to the sized MW, not
+    # re-derive them from nameplate, so the simulation matches what the LP sized.
+    assert sim.wind_link_mw == pytest.approx(round(sized.wind_link_mw, 1))
+    assert sim.pvbess_link_mw == pytest.approx(round(sized.pvbess_link_mw, 1))
+    assert sim.sell_link_mw == pytest.approx(round(sized.sell_link_mw, 1))
+    assert not sim.optimize_capacity
+
+    n = build_network(ts, sim)
+    assert not n.links.static.p_nom_extendable.any()
+    assert n.links.static.p_nom["OnshoreWind_to_IPPGeneration"] == pytest.approx(round(sized.wind_link_mw, 1))
+    assert n.links.static.p_nom["PVBESS_to_IPPGeneration"] == pytest.approx(round(sized.pvbess_link_mw, 1))
+    assert n.links.static.p_nom["IPPGen_to_SellToMarket"] == pytest.approx(round(sized.sell_link_mw, 1))
+
+
+# ── grid_connection_max_mw caps the sized links ──────────────────────────────
+
+def test_grid_connection_cap_limits_link_builds():
+    ts = _toy_ts()
+    scn = dataclasses.replace(_toy_scenario(), grid_connection_max_mw=120.0)
+    n = build_network(ts, scn)
+    assert n.links.static.p_nom_extendable["OnshoreWind_to_IPPGeneration"]
+    assert n.links.static.p_nom_max["OnshoreWind_to_IPPGeneration"] == pytest.approx(120.0)
+    sized = optimize_capacities(ts, scn)
+    assert sized.wind_link_mw <= 120.0 * (1.0 + 1e-3) + 1e-3
+    assert sized.pvbess_link_mw <= 120.0 * (1.0 + 1e-3) + 1e-3
+    assert sized.sell_link_mw <= 120.0 * (1.0 + 1e-3) + 1e-3
+
+
+# ── sizing diagnostics (W12e) ────────────────────────────────────────────────
+
+def test_sizing_diagnostics_reports_costs_and_binding():
+    from ppa.sizing import sizing_diagnostics
+
+    ts = _toy_ts()
+    scn = _toy_scenario()
+    sized = optimize_capacities(ts, scn)
+    diag = sizing_diagnostics(sized, scn, ts)
+    assert len(diag["tech_rows"]) == 2  # wind + solar
+    assert len(diag["link_rows"]) == 3  # three transport links
+    assert diag["ppa_price"] == pytest.approx(scn.ppa_price)
+    assert diag["penalty_price"] == pytest.approx(scn.penalty_price)
+    # Cheap capex with generous caps → the caps bind (the LP builds to them).
+    assert diag["tech_rows"][0]["Sized (MW)"] == pytest.approx(round(sized.onsw_mw, 1))
+    assert diag["tech_rows"][0]["Implied LCOE (A$/MWh)"] is not None
+    assert diag["avg_spot"] is not None
+    # Binding flags: with max_build_wind_mw=2000 and cheap capex the wind cap binds.
+    assert any(r["Max-build cap binding"] == "Yes" for r in diag["tech_rows"])

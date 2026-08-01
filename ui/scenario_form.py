@@ -180,11 +180,35 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                     "resolution for dispatch and financials."
                 ),
             )
+            cols = st.columns(4)
+            grid_connection = cols[0].text_input(
+                "Grid connection limit (MW)",
+                value="" if initial.grid_connection_max_mw == float("inf") else str(initial.grid_connection_max_mw),
+                key="sf_grid_connection",
+                help=(
+                    "Hard cap on the transport/connection links in the sizing LP. "
+                    "Blank = unlimited. A real NEM project has a physical "
+                    "connection limit; when it binds it curtails the build."
+                ),
+            )
+            cols[1].caption("")
+            merchant_share = cols[2].slider(
+                "Merchant value share", 0.0, 1.0, float(initial.sizing_merchant_value_share),
+                0.05, key="sf_merchant_share",
+                help=(
+                    "Merchant sales earn this fraction of positive historic spot "
+                    "in the sizing LP (a haircut for capture-price cannibalisation, "
+                    "MLF and curtailment). Negative-price hours are never "
+                    "discounted, so the LP curtails rather than sells into them."
+                ),
+            )
         else:
             max_build_wind_mw = initial.max_build_wind_mw
             max_build_pv_mw = initial.max_build_pv_mw
             max_build_bess_mw = initial.max_build_bess_mw
             sizing_resolution_h = initial.sizing_resolution_h
+            grid_connection = "" if initial.grid_connection_max_mw == float("inf") else str(initial.grid_connection_max_mw)
+            merchant_share = float(initial.sizing_merchant_value_share)
 
         cols = st.columns(4)
         onsw_mw = cols[0].slider("Onshore wind (MW)", 0, max_cap_per_technology, int(initial.onsw_mw), step=10, key="sf_onsw_mw",
@@ -478,6 +502,10 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         max_build_pv_mw=float(max_build_pv_mw),
         max_build_bess_mw=float(max_build_bess_mw),
         sizing_resolution_h=int(sizing_resolution_h),
+        grid_connection_max_mw=(
+            float("inf") if not str(grid_connection).strip() else float(str(grid_connection).strip())
+        ),
+        sizing_merchant_value_share=float(merchant_share),
         include_bess=include_bess,
         enable_market_buy=enable_market_buy,
         enable_market_sell=enable_market_sell,

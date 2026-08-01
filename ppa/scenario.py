@@ -48,6 +48,19 @@ class Scenario:
     # Time resolution (hours) of the sizing LP only. The subsequent dispatch
     # simulation and financials always run hourly on the sized portfolio.
     sizing_resolution_h: int = 3
+    # Merchant sales earn revenue in the sizing LP at this fraction of historic
+    # spot (a haircut for capture-price cannibalisation, MLF and curtailment).
+    # Applied to positive prices only — negative hours keep their full
+    # disincentive so the LP curtails rather than dumps energy at negative spot.
+    sizing_merchant_value_share: float = 0.5
+    # Hard cap (MW) on the transport/connection links in sizing mode. Default
+    # float("inf") = unlimited; real NEM projects have a physical connection limit.
+    grid_connection_max_mw: float = float("inf")
+    # Sized connection MW carried through from the sizing LP into the dispatch
+    # simulation (set by ppa.sizing.apply_sizing). None = derive from nameplate.
+    wind_link_mw: "float | None" = None
+    pvbess_link_mw: "float | None" = None
+    sell_link_mw: "float | None" = None
 
     # Portfolio sizing
     onsw_mw: float = 250.0
@@ -103,6 +116,12 @@ class Scenario:
     project_life_yrs: int = 30
     discount_rate: float = 0.08
     target_irr: float = 0.10
+    # Grid-connection capital cost (A$/MW) for the transport links in sizing
+    # mode. Matches ProjectFinanceInputs' onsw/pv connection cost (A$0.15M/MW);
+    # a strictly positive value pins each extendable link's p_nom_opt to its
+    # realised peak flow (no degenerate over-build) and makes connection a
+    # genuine part of the sizing trade-off.
+    connection_cost_aud_mw: float = 150_000.0
 
     # ── Derived properties ─────────────────────────────────────────────────────
 
@@ -316,6 +335,10 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
             errors.append("At least one of wind/solar max build must be > 0 MW.")
         if int(s.sizing_resolution_h) < 1 or int(s.sizing_resolution_h) > 24:
             errors.append("Sizing LP resolution must be between 1 and 24 hours.")
+        if s.grid_connection_max_mw is not None and s.grid_connection_max_mw < 0:
+            errors.append("Grid connection limit must be ≥ 0 MW (blank = unlimited).")
+        if not (0.0 <= s.sizing_merchant_value_share <= 1.0):
+            errors.append("Merchant value share must be between 0 and 1.")
     else:
         if s.onsw_mw < 0:
             errors.append("Onshore wind capacity must be ≥ 0 MW.")

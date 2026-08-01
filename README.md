@@ -105,6 +105,8 @@ pypsa-ppa/
 
 Market prices and renewable capacity factors are sourced from the Australian NEM: AEMO regional spot prices and 5-minute SCADA output for user-selected wind/solar plants (cached via the acquisition scripts under `scripts/`).
 
+**Capacity sizing caveat:** only one weather year (2025 SCADA) is currently cached, so a sized portfolio is tuned to 2025 weather. Fetching additional SCADA years (e.g. via `scripts/fetch_nem_scada_prices.py` for earlier/later years) is a future TODO — the sizing code already cycles multiple cached weather years when present.
+
 ### Industrial load profiles
 
 Offtaker demand shapes for **cement** and **steel** are derived from real measured hourly profiles published by the [Forschungsstelle für Energiewirtschaft (FfE)](https://www.ffe.de) via their open data API (`id_opendata=59`), following the approach of [PyPSA-EUR PR #1875](https://github.com/PyPSA/pypsa-eur/pull/1875). The 2017 reference year data is bundled at `ppa/data/ffe_profiles.json` and mapped to any simulation year by averaging over (month, day-of-week, hour) triplets to preserve seasonal and weekday patterns.

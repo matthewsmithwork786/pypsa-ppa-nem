@@ -37,6 +37,17 @@ class SizedCapacities:
     sizing_years_used: int
     horizon_clamped: bool
     resolution_h: int = 1
+    # Sized connection/transport link MW (carried into dispatch via apply_sizing)
+    wind_link_mw: float = 0.0
+    pvbess_link_mw: float = 0.0
+    sell_link_mw: float = 0.0
+    # Which caps bind at the optimum (for the diagnostics expander)
+    wind_cap_binding: bool = False
+    pv_cap_binding: bool = False
+    bess_cap_binding: bool = False
+    wind_link_binding: bool = False
+    pvbess_link_binding: bool = False
+    sell_link_binding: bool = False
 
 
 def weather_cycle_years(
@@ -211,6 +222,20 @@ def optimize_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         pv_mw = 0.0
         bess_mw = 0.0
 
+    # Sized connection/transport link MW (the W12a fix: no longer pinned to the
+    # disabled slider caps — the LP co-sizes these with generation).
+    if "p_nom_opt" in n.links.static.columns:
+        wind_link_mw = max(0.0, float(n.links.static.p_nom_opt["OnshoreWind_to_IPPGeneration"]))
+        pvbess_link_mw = max(0.0, float(n.links.static.p_nom_opt["PVBESS_to_IPPGeneration"]))
+        sell_link_mw = max(0.0, float(n.links.static.p_nom_opt["IPPGen_to_SellToMarket"]))
+    else:
+        wind_link_mw = pvbess_link_mw = sell_link_mw = 0.0
+
+    def _at_cap(opt: float, cap: float, tol: float = 1e-6) -> bool:
+        if cap is None or cap == float("inf"):
+            return False
+        return opt >= float(cap) - tol * max(1.0, float(cap))
+
     # Report undegraded nameplate energy (the simulation applies fade per year itself)
     bess_mwh = bess_mw * scenario.bess_max_hours
 
@@ -224,7 +249,81 @@ def optimize_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         sizing_years_used=n_years,
         horizon_clamped=n_years < scenario.simulation_years,
         resolution_h=resolution_h,
+        wind_link_mw=wind_link_mw,
+        pvbess_link_mw=pvbess_link_mw,
+        sell_link_mw=sell_link_mw,
+        wind_cap_binding=_at_cap(onsw_mw, sizing_scn.max_build_wind_mw),
+        pv_cap_binding=_at_cap(pv_mw, sizing_scn.max_build_pv_mw),
+        bess_cap_binding=_at_cap(bess_mw, sizing_scn.max_build_bess_mw),
+        wind_link_binding=_at_cap(wind_link_mw, sizing_scn.grid_connection_max_mw),
+        pvbess_link_binding=_at_cap(pvbess_link_mw, sizing_scn.grid_connection_max_mw),
+        sell_link_binding=_at_cap(sell_link_mw, sizing_scn.grid_connection_max_mw),
     )
+
+
+def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFrame) -> dict:
+    """Per-technology economics + binding constraints for the sizing run.
+
+    Pure, unit-testable summary the Optimisation tab renders in its sizing
+    diagnostics expander so "strange sizing results" become an explainable
+    answer (plan W12e): annualised A$/MW/yr, achieved CF from the loaded
+    profile, implied LCOE, and the PPA tariff / penalty / average spot for
+    comparison, plus which caps bind at the optimum.
+    """
+    horizon_years = len(ts) / 8760.0
+
+    def _crf(rate: float, life: int) -> float:
+        return rate / (1 - (1 + rate) ** -life) if rate > 0 else 1.0 / life
+
+    crf = _crf(scenario.target_irr, scenario.project_life_yrs)
+    devex = 1.0 + scenario.devex_pct_of_capex
+    opex = scenario.opex_rate
+
+    tech_rows = []
+    for label, capex_per_kw, cf_col, mw, binding in [
+        ("Onshore wind", scenario.wind_capex_per_kw, "ts_WindGen", sized.onsw_mw, sized.wind_cap_binding),
+        ("Solar PV", scenario.pv_capex_per_kw, "ts_PVGen", sized.pv_mw, sized.pv_cap_binding),
+    ]:
+        annualised_per_mw = capex_per_kw * 1_000 * devex * (crf + opex)
+        achieved_cf = float(ts[cf_col].mean()) if cf_col in ts.columns else 0.0
+        implied_lcoe = (
+            annualised_per_mw / (achieved_cf * 8760.0) if achieved_cf > 0 else None
+        )
+        tech_rows.append(
+            {
+                "Technology": label,
+                "Sized (MW)": round(mw, 1),
+                "Annualised cost (A$/MW/yr)": round(annualised_per_mw, 0),
+                "Achieved CF": f"{achieved_cf:.2%}",
+                "Implied LCOE (A$/MWh)": None if implied_lcoe is None else round(implied_lcoe, 1),
+                "Max-build cap binding": "Yes" if binding else "No",
+            }
+        )
+
+    link_rows = []
+    for label, mw, binding in [
+        ("Wind link", sized.wind_link_mw, sized.wind_link_binding),
+        ("PV+BESS link", sized.pvbess_link_mw, sized.pvbess_link_binding),
+        ("Export link", sized.sell_link_mw, sized.sell_link_binding),
+    ]:
+        link_rows.append(
+            {
+                "Link": label,
+                "Sized (MW)": round(mw, 1),
+                "Connection limit binding": "Yes" if binding else "No",
+            }
+        )
+
+    avg_spot = float(ts["ts_MktPrice"].mean()) if "ts_MktPrice" in ts.columns else None
+    return {
+        "tech_rows": tech_rows,
+        "link_rows": link_rows,
+        "ppa_price": scenario.ppa_price,
+        "penalty_price": scenario.penalty_price,
+        "avg_spot": None if avg_spot is None else round(avg_spot, 1),
+        "horizon_years": horizon_years,
+        "sizing_merchant_value_share": scenario.sizing_merchant_value_share,
+    }
 
 
 def _sizing_worker(conn, ts: pd.DataFrame, scenario_fields: dict) -> None:
@@ -309,5 +408,10 @@ def apply_sizing(scenario: Scenario, sized: SizedCapacities) -> Scenario:
         bess_mw=round(sized.bess_mw, 1) if bess_built else 0.0,
         bess_mwh=round(sized.bess_mwh, 1) if bess_built else 0.0,
         include_bess=scenario.include_bess and bess_built,
+        # Carry the sized connection MW into dispatch so the simulation uses the
+        # same connection capacity the LP assumed (plan W12a carry-through).
+        wind_link_mw=round(sized.wind_link_mw, 1),
+        pvbess_link_mw=round(sized.pvbess_link_mw, 1),
+        sell_link_mw=round(sized.sell_link_mw, 1),
         optimize_capacity=False,
     )

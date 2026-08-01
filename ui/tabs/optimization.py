@@ -12,6 +12,42 @@ from ui import state
 from ui.constants import NEM_RESOLUTION_MINUTES
 
 
+def _sized_banner_text(sized) -> str:
+    """'Optimised portfolio' summary including the sized connection (link) MW."""
+    return (
+        f"Wind **{sized.onsw_mw:.0f} MW** · Solar **{sized.pv_mw:.0f} MW** · "
+        f"BESS **{sized.bess_mw:.0f} MW / {sized.bess_mwh:.0f} MWh** · "
+        f"Wind link **{sized.wind_link_mw:.0f} MW** · PV+BESS link **{sized.pvbess_link_mw:.0f} MW** · "
+        f"Export link **{sized.sell_link_mw:.0f} MW**"
+    )
+
+
+def _render_sizing_diagnostics() -> None:
+    """Sizing diagnostics expander (plan W12e): per-technology economics and
+    which caps bind, so "strange sizing results" become an explainable answer."""
+    if not state.has_sizing_diagnostics():
+        return
+    diag = state.get_sizing_diagnostics()
+    avg_spot = diag.get("avg_spot")
+    avg_spot_text = f"A${avg_spot:.1f}/MWh" if avg_spot is not None else "n/a"
+    with st.expander("🔎 Sizing diagnostics", expanded=False):
+        st.caption(
+            "LP cost basis: annualised at **target_IRR** incl. devex; merchant revenue "
+            f"credited at **{float(diag.get('sizing_merchant_value_share', 0.5)):.0%}** of "
+            f"positive spot. Reference prices: PPA **A${diag['ppa_price']:.0f}/MWh** · "
+            f"penalty **A${diag['penalty_price']:.0f}/MWh** · avg spot **{avg_spot_text}**."
+        )
+        st.markdown("**Per technology**")
+        st.dataframe(diag["tech_rows"], width="stretch")
+        st.markdown("**Connection links**")
+        st.dataframe(diag["link_rows"], width="stretch")
+        st.caption(
+            "“Max-build cap binding / Connection limit binding = Yes” means that cap is what "
+            "stopped the LP building more — the binding constraint is the real sizing decision. "
+            "A single cached weather year (2025 SCADA) means the sized fleet is tuned to 2025 "
+            "weather; multi-year SCADA is a TODO (see README)."
+        )
+
 # ── timeseries loader (NEM period path) ───────────────────────────────────────
 
 @st.cache_data
@@ -302,6 +338,7 @@ def _run_simulation(scenario, max_workers: int) -> None:
             build_sizing_timeseries,
             clamp_sizing_years,
             run_sizing_subprocess,
+            sizing_diagnostics,
             weather_cycle_years,
         )
 
@@ -345,11 +382,13 @@ def _run_simulation(scenario, max_workers: int) -> None:
         # surfaced via state.set_optimized_sizes.
         scenario = apply_sizing(scenario, sized)
         state.set_optimized_sizes(sized)
+        state.set_sizing_diagnostics(
+            sizing_diagnostics(sized, scenario, sizing_ts)
+        )
         status_text.success(
-            f"Optimized portfolio — Wind {sized.onsw_mw:.0f} MW · "
-            f"Solar {sized.pv_mw:.0f} MW · BESS {sized.bess_mw:.0f} MW / "
-            f"{sized.bess_mwh:.0f} MWh (sized over {sized.sizing_years_used} year(s) "
-            f"at {sized.resolution_h}h resolution) — running hourly dispatch..."
+            f"Optimized portfolio — {_sized_banner_text(sized)} "
+            f"(sized over {sized.sizing_years_used} year(s) at {sized.resolution_h}h resolution) — "
+            "running hourly dispatch..."
         )
 
     def _on_progress(done: int, total: int, sim_year: int) -> None:
@@ -549,11 +588,11 @@ def render() -> None:
         if s.optimize_capacity and state.has_optimized_sizes():
             sized = state.get_optimized_sizes()
             st.info(
-                f"⚡ **Optimized portfolio** — Wind **{sized.onsw_mw:.0f} MW** · "
-                f"Solar **{sized.pv_mw:.0f} MW** · BESS **{sized.bess_mw:.0f} MW / "
-                f"{sized.bess_mwh:.0f} MWh** (sized over {sized.sizing_years_used} year(s) "
+                f"⚡ **Optimized portfolio** — {_sized_banner_text(sized)} "
+                f"(sized over {sized.sizing_years_used} year(s) "
                 f"at {getattr(sized, 'resolution_h', 1)}h resolution; dispatch & financials run hourly)"
             )
+            _render_sizing_diagnostics()
         _render_results(state.get_multi_year_financial(), s.simulation_years)
 
     # ── Single-day reference optimization ──────────────────────────────────────
@@ -652,7 +691,7 @@ def render() -> None:
                             # scenario.sizing_resolution_h regardless of ts_prep's own
                             # resolution, so it needs no resolution_h argument here).
                             if s.optimize_capacity:
-                                from ppa.sizing import apply_sizing, optimize_capacities
+                                from ppa.sizing import apply_sizing, optimize_capacities, sizing_diagnostics
 
                                 sized = optimize_capacities(ts_prep, s)
                                 if sized.status != "ok":
@@ -661,10 +700,10 @@ def render() -> None:
                                     )
                                 s = apply_sizing(s, sized)
                                 state.set_optimized_sizes(sized)
+                                state.set_sizing_diagnostics(sizing_diagnostics(sized, s, ts_prep))
                                 st.info(
-                                    f"Optimized portfolio — Wind {sized.onsw_mw:.0f} MW · "
-                                    f"Solar {sized.pv_mw:.0f} MW · BESS {sized.bess_mw:.0f} MW / "
-                                    f"{sized.bess_mwh:.0f} MWh (sized on the reference period)"
+                                    f"Optimized portfolio — {_sized_banner_text(sized)} "
+                                    "(sized on the reference period)"
                                 )
 
                             n = build_network(ts_prep, s, resolution_h=resolution_h)
@@ -682,3 +721,4 @@ def render() -> None:
                             st.error(f"Optimization failed: {exc}")
                         else:
                             st.success(f"Complete — {status} / {condition}. See Results tabs.")
+                            _render_sizing_diagnostics()

@@ -21,6 +21,7 @@ MULTI_YEAR_RESULTS_KEY = "multi_year_results"
 MULTI_YEAR_FINANCIAL_KEY = "multi_year_financial"
 PROJECT_FINANCE_KEY = "project_finance_result"
 OPTIMIZED_SIZES_KEY = "optimized_sizes"
+SIZING_DIAGNOSTICS_KEY = "sizing_diagnostics"
 NEM_SELECTION_KEY = "nem_selection"
 CUSTOM_UPLOAD_KEY = "custom_upload"
 
@@ -199,6 +200,18 @@ def has_optimized_sizes() -> bool:
     return OPTIMIZED_SIZES_KEY in st.session_state
 
 
+def get_sizing_diagnostics() -> "dict | None":
+    return st.session_state.get(SIZING_DIAGNOSTICS_KEY)
+
+
+def set_sizing_diagnostics(diag: "dict") -> None:
+    st.session_state[SIZING_DIAGNOSTICS_KEY] = diag
+
+
+def has_sizing_diagnostics() -> bool:
+    return SIZING_DIAGNOSTICS_KEY in st.session_state
+
+
 def get_project_finance() -> "object | None":
     return st.session_state.get(PROJECT_FINANCE_KEY)
 
@@ -250,5 +263,6 @@ def clear_run_outputs() -> None:
     timeseries (relevant once a NEM/custom-CSV selection changes the data source).
     """
     clear_result()
-    for key in (MULTI_YEAR_RESULTS_KEY, MULTI_YEAR_FINANCIAL_KEY, OPTIMIZED_SIZES_KEY, TIMESERIES_KEY):
+    for key in (MULTI_YEAR_RESULTS_KEY, MULTI_YEAR_FINANCIAL_KEY, OPTIMIZED_SIZES_KEY,
+                SIZING_DIAGNOSTICS_KEY, TIMESERIES_KEY):
         st.session_state.pop(key, None)
