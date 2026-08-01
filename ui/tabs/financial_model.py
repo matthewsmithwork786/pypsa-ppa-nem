@@ -66,14 +66,14 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
     """Render the editable assumption form and return a ProjectFinanceInputs."""
     f = "fm_"
 
-    with st.expander("💶 Costs (build, connection, devex, O&M)", expanded=False):
+    with st.expander("💰 Costs (build, connection, devex, O&M)", expanded=False):
         cols = st.columns(4, vertical_alignment="bottom")
         cols[1].markdown("**Onshore wind**")
         cols[2].markdown("**Solar PV**")
         cols[3].markdown("**BESS**")
 
         cols = st.columns(4, vertical_alignment="bottom")
-        cols[0].markdown("**Investment** (€M/MW, €M/MWh):")
+        cols[0].markdown("**Investment** (A$M/MW, A$M/MWh):")
 
         with cols[1]:
             onsw_build = _num("**Onshore wind**", f + "onsw_build", seed.onsw_build_cost, step=0.05, fmt="%.3f", label_visibility="collapsed")
@@ -85,7 +85,7 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
             bess_build = _num("**BESS**", f + "bess_build", seed.bess_build_cost, step=0.05, fmt="%.3f", label_visibility="collapsed")
 
         cols = st.columns(4)
-        cols[0].markdown("**Connection** (€M/MW, €M/MWh):")
+        cols[0].markdown("**Connection** (A$M/MW, A$M/MWh):")
 
         with cols[1]:
             onsw_conn = _num("Onshore wind ", f + "onsw_conn", seed.onsw_connection_cost, step=0.01, fmt="%.3f", label_visibility="collapsed")
@@ -97,7 +97,7 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
             bess_conn = _num("BESS ", f + "bess_conn", seed.bess_connection_cost, step=0.01, fmt="%.3f", label_visibility="collapsed")
 
         cols = st.columns(4)
-        cols[0].markdown("**Devex** (€/MW, €M/MWh):")
+        cols[0].markdown("**Devex** (A$/MW, A$M/MWh):")
 
         with cols[1]:
             onsw_devex = _num("Onshore wind  ", f + "onsw_devex", seed.onsw_devex, step=0.01, fmt="%.3f", label_visibility="collapsed")
@@ -109,7 +109,7 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
             bess_devex = _num("BESS  ", f + "bess_devex", seed.bess_devex, step=0.01, fmt="%.3f", label_visibility="collapsed")
 
         cols = st.columns(4)
-        cols[0].markdown("**Fixed O&M** (€M/MW, €M/MWh p.a.)")
+        cols[0].markdown("**Fixed O&M** (A$M/MW, A$M/MWh p.a.)")
 
         with cols[1]:
             onsw_om = _num("Onshore wind   ", f + "onsw_om", seed.onsw_fixed_om, step=0.005, fmt="%.3f", label_visibility="collapsed")
@@ -126,12 +126,13 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
         with cols[1]:
             anc = _num("Ancillary (% of revenue)", f + "anc", seed.ancillary_pct, step=0.1, fmt="%.2f", pct=True, label_visibility="collapsed")
 
-    with st.expander("📅 Timing (development, construction, life)", expanded=False):
+    with st.expander("📅 Timing (construction, operating life)", expanded=False):
+        st.caption("Devex is paid as a single bullet at FID — the first construction period.")
         cols = st.columns(4, vertical_alignment="bottom")
         with cols[0]:
             st.markdown("**Overall Settings (yrs)**")
         with cols[1]:
-            dev_start = int(_num("Development start period", f + "dev_start", seed.development_start, step=1))
+            dev_start = int(_num("FID / financial close period", f + "dev_start", seed.development_start, step=1))
         with cols[2]:
             duration = int(_num("Model duration (yrs)", f + "duration", seed.model_duration, step=1))
         with cols[3]:
@@ -141,16 +142,6 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
         cols[1].markdown("**Wind**")
         cols[2].markdown("**Solar PV**")
         cols[3].markdown("**BESS**")
-
-        cols = st.columns(4, vertical_alignment="bottom")
-        with cols[0]:
-            st.markdown("**Development (yrs)**")
-        with cols[1]:
-            onsw_dev = int(_num("Onshore wind", f + "onsw_dev", seed.onsw_dev_years, step=1, label_visibility="collapsed"))
-        with cols[2]:
-            pv_dev = int(_num("Solar PV", f + "pv_dev", seed.pv_dev_years, step=1, label_visibility="collapsed"))
-        with cols[3]:
-            bess_dev = int(_num("BESS", f + "bess_dev", seed.bess_dev_years, step=1, label_visibility="collapsed"))
 
         cols = st.columns(4, vertical_alignment="bottom")
         with cols[0]:
@@ -166,10 +157,10 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
         cols = st.columns(4)
         with cols[0]:
             tenor = int(_num("PPA contract tenor (yrs)", f + "tenor", seed.ppa_tenor, step=1))
-            tariff = _num("PPA tariff (€/MWh)", f + "tariff", seed.ppa_tariff, step=1.0)
+            tariff = _num("PPA tariff (A$/MWh)", f + "tariff", seed.ppa_tariff, step=1.0)
         with cols[1]:
             pen = _num("Penalty multiple (×)", f + "pen", seed.penalty_multiple, step=0.1, fmt="%.2f")
-            lgc = _num("LGC / GO price (€/MWh)", f + "lgc", seed.lgc_price, step=1.0)
+            lgc = _num("LGC / GO price (A$/MWh)", f + "lgc", seed.lgc_price, step=1.0)
         with cols[2]:
             offset = int(_num("Indexation offset (yrs)", f + "offset", seed.indexation_offset_years, step=1))
             cost_infl = _num("Cost inflation (%/yr)", f + "cost_infl", seed.cost_inflation, step=0.1, fmt="%.2f", pct=True)
@@ -223,7 +214,6 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
         onsw_devex=onsw_devex, pv_devex=pv_devex, bess_devex=bess_devex,
         onsw_fixed_om=onsw_om, pv_fixed_om=pv_om, bess_fixed_om=bess_om, ancillary_pct=anc,
         model_duration=duration, development_start=dev_start,
-        onsw_dev_years=onsw_dev, pv_dev_years=pv_dev, bess_dev_years=bess_dev,
         onsw_constr_years=onsw_con, pv_constr_years=pv_con, bess_constr_years=bess_con,
         operating_life=life,
         ppa_tenor=tenor, ppa_tariff=tariff, penalty_multiple=pen, lgc_price=lgc,
@@ -248,14 +238,14 @@ def _render_results(r) -> None:
         cols[0].metric("Project IRR", irr(r.project_irr), help="Unlevered FCFF return")
         cols[1].metric("Equity IRR", irr(r.equity_irr), help="Levered FCFE return")
         cols[2].metric("Gearing", f"{r.gearing:.1%}")
-        cols[3].metric("NPV @ WACC", f"€{r.npv_project:,.0f}m")
+        cols[3].metric("NPV @ WACC", f"A${r.npv_project:,.0f}m")
 
         cols = st.columns(4)
-        cols[0].metric("Total funding (incl. IDC)", f"€{r.total_capex:,.0f}m")
-        cols[1].metric("Debt / Equity", f"€{r.total_debt:,.0f}m / €{r.total_equity:,.0f}m")
+        cols[0].metric("Total funding (incl. IDC)", f"A${r.total_capex:,.0f}m")
+        cols[1].metric("Debt / Equity", f"A${r.total_debt:,.0f}m / A${r.total_equity:,.0f}m")
         cols[2].metric("Min / Avg DSCR", f"{r.min_dscr:.2f} / {r.avg_dscr:.2f}")
         pb = f"{r.payback_years:.1f} yrs" if r.payback_years < 1e8 else "n/a"
-        cols[3].metric("Equity payback / LCOE", f"{pb} · €{r.lcoe:,.0f}/MWh")
+        cols[3].metric("Equity payback / LCOE", f"{pb} · A${r.lcoe:,.0f}/MWh")
 
     sc = r.schedule
     periods = r.periods
@@ -281,7 +271,7 @@ def _render_results(r) -> None:
                                     fillcolor="rgba(46,125,50,0.08)"))
             fig.add_hline(y=0, line_dash="dash", line_color="gray")
             fig.update_layout(height=400, margin=dict(t=10, b=30), xaxis_title="Period",
-                            yaxis_title="€m")
+                            yaxis_title="A$m")
             st.plotly_chart(fig, width="stretch")
 
         with tab_chart2:
@@ -293,7 +283,7 @@ def _render_results(r) -> None:
             fig.add_trace(go.Bar(x=periods[ops], y=sc["net_uncontracted_rev"][ops],
                                 name="Uncontracted (merchant + LGC)", marker_color="#90CAF9"))
             fig.update_layout(barmode="stack", height=400, margin=dict(t=10, b=30),
-                            xaxis_title="Period", yaxis_title="€m",
+                            xaxis_title="Period", yaxis_title="A$m",
                             legend=dict(orientation="h", y=1.15))
             st.plotly_chart(fig, width="stretch")
 
@@ -307,7 +297,7 @@ def _render_results(r) -> None:
             fig.add_trace(go.Scatter(x=periods[ops], y=dscr[ops], name="DSCR", yaxis="y2",
                                     mode="lines+markers", line=dict(color="#1B5E20", width=2)))
             fig.update_layout(barmode="stack", height=400, margin=dict(t=10, b=30),
-                            xaxis_title="Period", yaxis_title="€m",
+                            xaxis_title="Period", yaxis_title="A$m",
                             yaxis2=dict(title="DSCR", overlaying="y", side="right", showgrid=False),
                             legend=dict(orientation="h", y=1.15))
             st.plotly_chart(fig, width="stretch")
@@ -383,7 +373,7 @@ def render() -> None:
 
         with cols[3]:
             st.metric("Merchant capture (solar / non-solar)",
-                      f"€{energy.sell_solar_price:,.0f} / €{energy.sell_nonsolar_price:,.0f}")
+                      f"A${energy.sell_solar_price:,.0f} / A${energy.sell_nonsolar_price:,.0f}")
             st.metric("Capacity (BESS)",
                       f"{energy.bess_mw:,.0f} MW / {energy.bess_mwh:,.0f} MWh")
 

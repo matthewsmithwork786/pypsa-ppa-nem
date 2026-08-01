@@ -16,8 +16,9 @@ The model is driven by two input objects:
   capture prices, …). Build these from an ``OptimizationResult`` with
   :func:`energy_inputs_from_result`.
 * :class:`ProjectFinanceInputs` — all the financial assumptions (costs, debt,
-  tax, depreciation, timing). Defaults are European 2024 benchmarks; every value
-  is user-editable in the dashboard.
+  tax, depreciation, timing). Defaults are Australian NEM benchmarks sourced
+  from the Aus247RE_FM reference model (AUD); every value is user-editable in
+  the dashboard.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ SOLAR_HOUR_END = 17    # exclusive
 class EnergyInputs:
     """Annualised energy-model results consumed by the financial model.
 
-    Volumes are GWh per operating year; prices are €/MWh. The split between
+    Volumes are GWh per operating year; prices are A$/MWh. The split between
     *solar hours* (09–17) and *non-solar hours* preserves the price distinction
     in the source model (solar-heavy hours capture lower merchant prices)."""
 
@@ -62,7 +63,7 @@ class EnergyInputs:
     total_solar_gwh: float         # total generation in solar hours
     total_nonsolar_gwh: float      # total generation in non-solar hours
 
-    # Capture / purchase prices (real, €/MWh)
+    # Capture / purchase prices (real, A$/MWh)
     sell_solar_price: float
     sell_nonsolar_price: float
     purchase_price: float = 0.0
@@ -73,38 +74,36 @@ class EnergyInputs:
 
 @dataclass
 class ProjectFinanceInputs:
-    """All financial assumptions. Defaults are European 2024 benchmarks.
+    """All financial assumptions. Defaults are Australian NEM benchmarks sourced
+    from the Aus247RE_FM reference model (AUD).
 
-    Costs are expressed as €m per MW (or per MWh for BESS energy) to mirror the
-    source model's units; the dashboard converts the familiar €/kW figures."""
+    Costs are expressed as A$m per MW (or per MWh for BESS energy) to mirror the
+    source model's units; the dashboard converts the familiar A$/kW figures."""
 
-    # ── Build cost (€m/MW, €m/MWh for BESS) ─────────────────────────────────
-    onsw_build_cost: float = 1.20      # €m/MW   (1200 €/kW)
-    pv_build_cost: float = 0.75        # €m/MW   (750 €/kW)
-    bess_build_cost: float = 0.38      # €m/MWh  (380 €/kWh)
+    # ── Build cost (A$m/MW, A$m/MWh for BESS) ────────────────────────────────
+    onsw_build_cost: float = 2.9       # A$m/MW   (2900 A$/kW)
+    pv_build_cost: float = 1.7186      # A$m/MW   (1718.6 A$/kW)
+    bess_build_cost: float = 0.2765    # A$m/MWh  (276.5 A$/kWh)
 
     # ── Connection cost ─────────────────────────────────────────────────────
-    onsw_connection_cost: float = 0.10
-    pv_connection_cost: float = 0.08
-    bess_connection_cost: float = 0.05  # €m/MWh
+    onsw_connection_cost: float = 0.15
+    pv_connection_cost: float = 0.15
+    bess_connection_cost: float = 0.0225  # A$m/MWh
 
     # ── Project development cost (devex) ────────────────────────────────────
-    onsw_devex: float = 0.13           # €m/MW   (~10% of build)
-    pv_devex: float = 0.083            # €m/MW
-    bess_devex: float = 0.043          # €m/MWh
+    onsw_devex: float = 0.29           # A$m/MW   (~10% of build)
+    pv_devex: float = 0.17186          # A$m/MW
+    bess_devex: float = 0.02765        # A$m/MWh
 
-    # ── Fixed O&M (€m/MW p.a., €m/MWh p.a. for BESS) ────────────────────────
-    onsw_fixed_om: float = 0.025
-    pv_fixed_om: float = 0.010
-    bess_fixed_om: float = 0.010       # €m/MWh
+    # ── Fixed O&M (A$m/MW p.a., A$m/MWh p.a. for BESS) ───────────────────────
+    onsw_fixed_om: float = 0.028
+    pv_fixed_om: float = 0.012
+    bess_fixed_om: float = 0.0105      # A$m/MWh
     ancillary_pct: float = 0.01        # % of revenue
 
     # ── Timing (years) ──────────────────────────────────────────────────────
     model_duration: int = 40
     development_start: int = 1
-    onsw_dev_years: int = 3
-    pv_dev_years: int = 3
-    bess_dev_years: int = 2
     onsw_constr_years: int = 2
     pv_constr_years: int = 1
     bess_constr_years: int = 1
@@ -112,16 +111,16 @@ class ProjectFinanceInputs:
 
     # ── Revenue ─────────────────────────────────────────────────────────────
     ppa_tenor: int = 15                # PPA contract length (years)
-    ppa_tariff: float = 100.0          # €/MWh (base, pre-indexation)
+    ppa_tariff: float = 100.0          # A$/MWh (base, pre-indexation)
     penalty_multiple: float = 1.5      # penalty tariff = multiple × PPA tariff
-    lgc_price: float = 5.0             # €/MWh green-certificate revenue on excess
+    lgc_price: float = 5.0             # A$/MWh green-certificate revenue on excess
 
     # ── Indexation (% p.a.) ─────────────────────────────────────────────────
     indexation_offset_years: int = 2   # years of escalation already elapsed at period 1
-    cost_inflation: float = 0.02
-    ppa_indexation: float = 0.02
+    cost_inflation: float = 0.025
+    ppa_indexation: float = 0.025
     solar_price_inflation: float = 0.01
-    nonsolar_price_inflation: float = 0.02
+    nonsolar_price_inflation: float = 0.025
     # Whether the model escalates merchant capture prices over the project life.
     # Turn OFF when the energy inputs already come from a multi-year simulation that
     # escalated market prices per year, so price growth is not double-counted.
@@ -153,7 +152,7 @@ def project_finance_inputs_from_scenario(scenario) -> "ProjectFinanceInputs":
 
     Carries across the overlapping assumptions (costs, PPA terms, life, discount
     rate, escalation) so the financial tab starts aligned with the run that
-    produced the energy results. Costs convert €/kW → €m/MW (and €/kWh → €m/MWh)."""
+    produced the energy results. Costs convert A$/kW → A$m/MW (and A$/kWh → A$m/MWh)."""
     s = scenario
     return ProjectFinanceInputs(
         onsw_build_cost=s.wind_capex_per_kw / 1000.0,
@@ -182,13 +181,13 @@ class ProjectFinanceResult:
     equity_irr: float
     npv_project: float
     gearing: float
-    total_capex: float            # €m, nominal incl. devex & IDC
-    total_debt: float             # €m, incl. IDC
-    total_equity: float           # €m
+    total_capex: float            # A$m, nominal incl. devex & IDC
+    total_debt: float             # A$m, incl. IDC
+    total_equity: float           # A$m
     min_dscr: float
     avg_dscr: float
     payback_years: float
-    lcoe: float                   # €/MWh
+    lcoe: float                   # A$/MWh
 
     # Per-period schedules (length = model_duration); index 0 = period 1
     periods: np.ndarray = field(repr=False, default=None)  # type: ignore
@@ -304,16 +303,12 @@ def energy_inputs_from_results(results: list) -> EnergyInputs:
 @dataclass
 class _Timeline:
     duration: int
-    dev_end: int          # period at which the longest development finishes
+    constr_start: int     # financial close / FID — construction begins immediately
     constr_end: int       # period at which construction finishes
-    ops_start: int        # first operating period
+    ops_start: int        # first operating period (COD)
     ops_end: int
     ppa_end: int
     debt_end: int
-
-    def tech_dev(self, dev_years: int) -> tuple[int, int]:
-        """Development periods for a tech (back-aligned to dev_end)."""
-        return self.dev_end - dev_years + 1, self.dev_end
 
     def tech_constr(self, constr_years: int) -> tuple[int, int]:
         """Construction periods for a tech (back-aligned to constr_end)."""
@@ -321,15 +316,15 @@ class _Timeline:
 
 
 def _build_timeline(p: ProjectFinanceInputs) -> _Timeline:
-    max_dev = max(p.onsw_dev_years, p.pv_dev_years, p.bess_dev_years)
     max_constr = max(p.onsw_constr_years, p.pv_constr_years, p.bess_constr_years)
-    dev_end = p.development_start + max_dev - 1
-    constr_end = dev_end + max_constr
-    ops_start = constr_end + 1
+    constr_start = p.development_start          # devex bullet + construction both start at FID
+    constr_end = constr_start + max_constr - 1
+    ops_start = constr_end + 1                  # == development_start + max_constr
     ops_end = ops_start + p.operating_life - 1
     ppa_end = ops_start + p.ppa_tenor - 1
     debt_end = ops_start + p.debt_tenor - 1
-    return _Timeline(p.model_duration, dev_end, constr_end, ops_start, ops_end, ppa_end, debt_end)
+    return _Timeline(p.model_duration, constr_start, constr_end,
+                     ops_start, ops_end, ppa_end, debt_end)
 
 
 def _spread(total: float, first: int, last: int, n: int, mult: np.ndarray) -> np.ndarray:
@@ -417,12 +412,13 @@ def run_project_finance(
     pv_capex_tot = (p.pv_build_cost + p.pv_connection_cost) * e.pv_mw
     bess_capex_tot = (p.bess_build_cost + p.bess_connection_cost) * e.bess_mwh
 
-    df, dl = tl.tech_dev(p.onsw_dev_years)
-    devex = _spread(onsw_devex_tot, df, dl, n, cost_idx)
-    df, dl = tl.tech_dev(p.pv_dev_years)
-    devex += _spread(pv_devex_tot, df, dl, n, cost_idx)
-    df, dl = tl.tech_dev(p.bess_dev_years)
-    devex += _spread(bess_devex_tot, df, dl, n, cost_idx)
+    # Devex is a single bullet paid at FID (= development_start), immediately
+    # before construction spend begins. Not spread over a development phase.
+    devex = np.zeros(n)
+    devex_total = onsw_devex_tot + pv_devex_tot + bess_devex_tot
+    fid = tl.constr_start
+    if 1 <= fid <= n:
+        devex[fid - 1] = devex_total * cost_idx[fid - 1]
 
     cf, cl = tl.tech_constr(p.onsw_constr_years)
     capex = _spread(onsw_capex_tot, cf, cl, n, cost_idx)
@@ -441,11 +437,11 @@ def run_project_finance(
     lgc = p.lgc_price * ppa_idx
 
     GWh = 1000.0  # GWh → MWh
-    M = 1e6       # €/€m
+    M = 1e6       # A$/A$m
 
     # PPA period revenue
     ppa_rev = ppa_flag * e.ppa_gwh * GWh * ppa_tariff / M
-    penalty_cost = ppa_flag * e.penalty_gwh * GWh * penalty_tariff / M  # cost (positive €m)
+    penalty_cost = ppa_flag * e.penalty_gwh * GWh * penalty_tariff / M  # cost (positive A$m)
     merch_solar_rev = ppa_flag * e.excess_solar_gwh * GWh * merch_solar / M
     merch_nonsolar_rev = ppa_flag * e.excess_nonsolar_gwh * GWh * merch_nonsolar / M
     lgc_rev = ppa_flag * (e.excess_solar_gwh + e.excess_nonsolar_gwh) * GWh * lgc / M
@@ -511,8 +507,7 @@ def run_project_finance(
     # closing balance (opening + drawdown) and capitalised at the operations
     # start. The pre-IDC debt limit is solved iteratively so drawdowns + IDC equal
     # the sized debt.
-    max_constr = max(p.onsw_constr_years, p.pv_constr_years, p.bess_constr_years)
-    fc_period = tl.constr_end - max_constr + 1  # financial close = first construction period
+    fc_period = tl.constr_start  # financial close = FID = first construction period
     cum_spend = np.cumsum(total_capital_spend)
     total_debt = target_debt
 

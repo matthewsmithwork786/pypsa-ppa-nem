@@ -21,6 +21,8 @@ MULTI_YEAR_RESULTS_KEY = "multi_year_results"
 MULTI_YEAR_FINANCIAL_KEY = "multi_year_financial"
 PROJECT_FINANCE_KEY = "project_finance_result"
 OPTIMIZED_SIZES_KEY = "optimized_sizes"
+NEM_SELECTION_KEY = "nem_selection"
+CUSTOM_UPLOAD_KEY = "custom_upload"
 
 
 def get_scenario() -> "Scenario | None":
@@ -58,7 +60,10 @@ _SCENARIO_FORM_KEYS = [
     "sf_sim_years", "sf_first_sim_year", "sf_escalation",
     "sf_pv_deg", "sf_wind_deg", "sf_bess_deg",
     "sf_optimize_capacity", "sf_max_build_wind", "sf_max_build_pv", "sf_max_build_bess",
-    "sf_sizing_resolution",
+    "sf_sizing_resolution", "sf_load_profile",
+    "sf_data_source", "sf_nem_price_region", "sf_nem_year",
+    "sf_aer_region", "sf_aer_quarters",
+    "_sf_data_source_touched", "_sf_aer_applied", "_sf_aer_pending",
 ]
 
 
@@ -204,3 +209,46 @@ def set_project_finance(r: "object") -> None:
 
 def has_project_finance() -> bool:
     return PROJECT_FINANCE_KEY in st.session_state
+
+
+def get_nem_selection() -> "dict | None":
+    return st.session_state.get(NEM_SELECTION_KEY)
+
+
+def set_nem_selection(sel: dict) -> None:
+    st.session_state[NEM_SELECTION_KEY] = sel
+
+
+def clear_nem_selection() -> None:
+    st.session_state.pop(NEM_SELECTION_KEY, None)
+
+
+def clear_timeseries() -> None:
+    st.session_state.pop(TIMESERIES_KEY, None)
+
+
+def get_custom_upload() -> "dict | None":
+    return st.session_state.get(CUSTOM_UPLOAD_KEY)
+
+
+def set_custom_upload(payload: dict) -> None:
+    st.session_state[CUSTOM_UPLOAD_KEY] = payload
+
+
+def has_custom_upload() -> bool:
+    return CUSTOM_UPLOAD_KEY in st.session_state
+
+
+def clear_custom_upload() -> None:
+    st.session_state.pop(CUSTOM_UPLOAD_KEY, None)
+
+
+def clear_run_outputs() -> None:
+    """Invalidate every derived result -- factors out the repeated cache-invalidation
+    pattern already used in ui/tabs/case_study.py (clear_result + the three
+    session-state pops it repeats at every scenario-change site), plus the cached
+    timeseries (relevant once a NEM/custom-CSV selection changes the data source).
+    """
+    clear_result()
+    for key in (MULTI_YEAR_RESULTS_KEY, MULTI_YEAR_FINANCIAL_KEY, OPTIMIZED_SIZES_KEY, TIMESERIES_KEY):
+        st.session_state.pop(key, None)

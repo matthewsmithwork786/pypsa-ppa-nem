@@ -9,6 +9,10 @@ import pandas as pd
 
 from ppa.industrial_profiles import PROFILE_KEYS
 
+# "european" (legacy default), "nem_map" (NEM plants picked on the map),
+# "nem_default" (NEM prices/DUIDs without map interaction), "custom_csv" (Phase 3)
+DATA_SOURCES = ("european", "nem_map", "nem_default", "custom_csv")
+
 
 @dataclass
 class Scenario:
@@ -26,6 +30,15 @@ class Scenario:
     # Counterfactual sourcing
     cal_forward_price: float = 85.0
     cal_hedge_fraction: float = 0.80
+    # Provenance of cal_forward_price: "manual" (free user input, default) or
+    # "aer_indicative" (seeded from ppa.data.aer_futures' quarterly-average AER
+    # quote). cal_forward_note carries the disclaimer text to render whenever
+    # source != "manual". NOTE: this is provenance for the *forward price*
+    # only -- cal_hedge_fraction stays a pure user input describing how much of
+    # the offtaker's own load is hedged, which AER's published price series has
+    # no bearing on. Do not wire AER data into cal_hedge_fraction.
+    cal_forward_source: str = "manual"   # "manual" | "aer_indicative"
+    cal_forward_note: str = ""
 
     # Capacity co-optimization (ignores the fixed MW values below when enabled)
     optimize_capacity: bool = False
@@ -59,14 +72,14 @@ class Scenario:
     # Multi-year simulation
     simulation_years: int = 25
     first_sim_year: int = 2025
-    price_escalation_rate: float = 0.02  # annual escalation applied to base market prices
+    price_escalation_rate: float = 0.025  # annual escalation applied to base market prices
 
     # Technology degradation (compound per year, applied from year 1 onward)
     pv_degradation_rate: float = 0.005    # 0.5%/yr — industry standard for crystalline Si
     wind_degradation_rate: float = 0.002  # 0.2%/yr
     bess_degradation_rate: float = 0.020  # 2.0%/yr usable capacity fade
 
-    # European locations. lat/lon is the *offtaker* (consumer) location — it
+    # Asset / offtaker locations. lat/lon is the *offtaker* (consumer) location — it
     # determines the bidding zone whose day-ahead prices are used. PV and wind
     # assets may sit elsewhere; None means "same as the offtaker".
     lat: float = 51.5
@@ -78,17 +91,27 @@ class Scenario:
     # Explicit ENTSO-E bidding-zone code (e.g. "IT_NORD"); empty = derive from
     # the offtaker lat/lon via ppa.data.bidding_zones.bidding_zone_for.
     bidding_zone_override: str = ""
-    # Combined transmission / grid-use charge (€/MWh) on every MWh delivered to
+    # Combined transmission / grid-use charge (A$/MWh) on every MWh delivered to
     # the offtaker, covering all network levels between generation sites and
     # consumer — charged regardless of whether they share a bidding zone.
-    transmission_cost_eur_mwh: float = 0.0
+    transmission_cost_aud_mwh: float = 0.0
 
-    # Financial — European 2024 benchmarks
-    wind_capex_per_kw: float = 1200.0   # €/kW, EU onshore wind
-    pv_capex_per_kw: float = 750.0      # €/kW, EU utility-scale PV
-    bess_capex_per_kwh: float = 380.0   # €/kWh, EU BESS
+    # ── Data source ──────────────────────────────────────────────────────────
+    # "european" (legacy default), "nem_map" (NEM plants picked on the map),
+    # "nem_default" (NEM prices/DUIDs without map interaction), "custom_csv" (Phase 3)
+    data_source: str = "european"
+    nem_price_region: str = "NSW1"
+    nem_pv_duid: str = ""
+    nem_wind_duid: str = ""
+    nem_year: int = 2025
+
+    # Financial — Australian NEM benchmarks (AUD)
+    wind_capex_per_kw: float = 2900.0   # A$/kW, NEM onshore wind
+    pv_capex_per_kw: float = 1718.6     # A$/kW, NEM utility-scale PV
+    bess_capex_per_kwh: float = 276.5   # A$/kWh, NEM BESS
     opex_rate: float = 0.02
-    project_life_yrs: int = 25
+    devex_pct_of_capex: float = 0.10    # development cost as a share of build capex
+    project_life_yrs: int = 30
     discount_rate: float = 0.08
     target_irr: float = 0.10
 
@@ -115,6 +138,10 @@ class Scenario:
         from ppa.data.bidding_zones import bidding_zone_for
 
         return bidding_zone_for(self.lat, self.lon)
+
+    @property
+    def is_nem(self) -> bool:
+        return self.data_source in ("nem_map", "nem_default")
 
     @property
     def bess_max_hours(self) -> float:
@@ -177,14 +204,14 @@ CASE_STUDIES: list[CaseStudy] = [
         subtitle="Cement plant offtaker, wind-dominant, no storage",
         icon="⚓",
         storyline=(
-            "A first-mover IPP signs a 10-year PPA with a cement plant at €90/MWh. "
+            "A first-mover IPP signs a 10-year PPA with a cement plant at A$90/MWh. "
             "The portfolio is wind-dominant with no storage, and shortfalls cannot be covered from the "
             "market — a clean baseline to understand penalty exposure. The cement load (real measured "
             "sector data) runs steadily on weekdays but drops sharply over the weekend."
         ),
         question=(
             "Can a wind-dominant portfolio with no storage hit a 70% delivery obligation against this "
-            "weekday-heavy industrial demand in central Europe?"
+            "weekday-heavy industrial demand in the NEM?"
         ),
         overrides={
             "name": "The Foundation Deal",
@@ -270,7 +297,7 @@ CASE_STUDIES: list[CaseStudy] = [
         subtitle="Data-centre offtaker, premium price, near-zero market buy",
         icon="🏢",
         storyline=(
-            "A European corporation signs a 15-year PPA for its data-centre fleet at €105/MWh. "
+            "An Australian corporation signs a 15-year PPA for its data-centre fleet at A$105/MWh. "
             "The data-centre load is near-flat with a modest business-hours peak — a demanding obligation "
             "for an RE portfolio. Market supplementation is capped at 1% to preserve additionality claims. "
         ),
@@ -333,8 +360,26 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
         errors.append("At least one generation asset (wind or solar) must have capacity > 0.")
     if s.load_profile not in PROFILE_KEYS:
         errors.append(f"Unknown load profile '{s.load_profile}'. Valid options: {PROFILE_KEYS}")
-    if s.transmission_cost_eur_mwh < 0:
-        errors.append("Transmission cost must be ≥ 0 €/MWh.")
+    if s.transmission_cost_aud_mwh < 0:
+        errors.append("Transmission cost must be ≥ 0 A$/MWh.")
+    if s.devex_pct_of_capex < 0:
+        errors.append("Devex (% of CAPEX) must be ≥ 0.")
+    if s.data_source not in DATA_SOURCES:
+        errors.append(f"Unknown data source '{s.data_source}'. Valid options: {list(DATA_SOURCES)}")
+    if s.is_nem:
+        from ppa.data.nem_data import NEM_REGIONS
+
+        if s.nem_price_region not in NEM_REGIONS:
+            errors.append(f"Unknown NEM region '{s.nem_price_region}'. Valid options: {NEM_REGIONS}")
+        if not (2000 <= int(s.nem_year) <= 2100):
+            errors.append(f"NEM data year {s.nem_year} is out of range.")
+        if s.data_source in ("nem_map", "nem_default") and not (s.nem_pv_duid or s.nem_wind_duid):
+            errors.append(
+                "No NEM plant selected -- pick a wind and/or solar plant on the NEM Plant Map "
+                "tab, or switch the data source back to European. (This applies to 'nem_default' "
+                "too: without a DUID there is no NEM generation data to read and the simulation "
+                "would silently run with zero renewable output.)"
+            )
     if s.bidding_zone_override:
         from ppa.data.bidding_zones import SUPPORTED_ZONES
 
@@ -345,6 +390,28 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
     if available_days and s.chosen_day not in available_days:
         errors.append(f"chosen_day '{s.chosen_day}' is not present in the timeseries data.")
     return errors
+
+
+def default_data_source(current: str, nem_price_cache_present: bool, has_nem_duid: bool = False) -> str:
+    """'european' upgrades to 'nem_default' only when NEM prices are cached
+    AND the scenario already carries at least one non-empty NEM plant DUID
+    (nem_pv_duid/nem_wind_duid) -- i.e. only when there's actual evidence the
+    user wants NEM *generation* data, not merely that some NEM region's
+    *prices* happen to be cached. Cached prices alone are not enough: a
+    'nem_default' scenario with no DUIDs reads an all-zero capacity-factor
+    series for both wind and solar (see
+    ppa.data.nem_data._cf_dict_for_duid/get_cf_dicts), so auto-upgrading a
+    plain 'european' scenario into that state would silently zero out
+    renewable generation with no error at all. 'nem_map'/'custom_csv' are
+    never overridden by this helper (a plant-map selection or an active
+    custom upload is a deliberate user choice made on another tab and must
+    not be silently downgraded/upgraded here). A user who deliberately picks
+    'nem_default' via the UI radio bypasses this helper entirely -- it only
+    governs the initial/seeded value, never an explicit choice.
+    """
+    if current == "european" and nem_price_cache_present and has_nem_duid:
+        return "nem_default"
+    return current
 
 
 def scenario_from_excel(path: str | Path) -> Scenario:
@@ -386,13 +453,16 @@ def scenario_from_excel(path: str | Path) -> Scenario:
         required_delivery_share=_float("required_delivery_share", 0.75),
         market_buy_share=_float("market_buy_share", 0.05),
         market_spread=_float("market_spread", 0.10),
-        transmission_cost_eur_mwh=_float("transmission_cost_eur_mwh", 0.0),
+        transmission_cost_aud_mwh=_float(
+            "transmission_cost_aud_mwh",
+            _float("transmission_cost_eur_mwh", 0.0),
+        ),
         chosen_day=str(params.get("chosen_day", "2023-03-15")).strip(),
-        wind_capex_per_kw=_float("wind_capex_per_kw", 1800.0),
-        pv_capex_per_kw=_float("pv_capex_per_kw", 1000.0),
-        bess_capex_per_kwh=_float("bess_capex_per_kwh", 500.0),
+        wind_capex_per_kw=_float("wind_capex_per_kw", 2900.0),
+        pv_capex_per_kw=_float("pv_capex_per_kw", 1718.6),
+        bess_capex_per_kwh=_float("bess_capex_per_kwh", 276.5),
         opex_rate=_float("opex_rate", 0.02),
-        project_life_yrs=_int("project_life_yrs", 25),
+        project_life_yrs=_int("project_life_yrs", 30),
         discount_rate=_float("discount_rate", 0.08),
         target_irr=_float("target_irr", 0.10),
     )

@@ -52,10 +52,8 @@ def render() -> None:
             if _render_case_study_card(cs, is_active=(cs.id == active_id)):
                 state.set_scenario(load_case_study(cs))
                 state.set_active_case_study_id(cs.id)
-                state.clear_result()
-                st.session_state.pop(state.MULTI_YEAR_RESULTS_KEY, None)
-                st.session_state.pop(state.MULTI_YEAR_FINANCIAL_KEY, None)
-                st.session_state.pop(state.OPTIMIZED_SIZES_KEY, None)
+                state.clear_custom_upload()
+                state.clear_run_outputs()
                 st.rerun()
 
     # ── Customise parameters ──────────────────────────────────────────────────
@@ -74,17 +72,12 @@ def render() -> None:
         with cols[0]:
             if st.button("Apply changes", type="primary", width="stretch"):
                 state.set_scenario(updated)
-                state.clear_result()
-                st.session_state.pop(state.MULTI_YEAR_RESULTS_KEY, None)
-                st.session_state.pop(state.MULTI_YEAR_FINANCIAL_KEY, None)
-                st.session_state.pop(state.OPTIMIZED_SIZES_KEY, None)
+                state.clear_run_outputs()
                 st.success("Scenario updated. Head to Optimization to run.")
         with cols[1]:
             if st.button("Reset to base defaults", type="secondary", width="stretch"):
                 state.set_scenario(BASE_SCENARIO)
                 state.set_active_case_study_id("")
-                state.clear_result()
-                st.session_state.pop(state.MULTI_YEAR_RESULTS_KEY, None)
-                st.session_state.pop(state.MULTI_YEAR_FINANCIAL_KEY, None)
-                st.session_state.pop(state.OPTIMIZED_SIZES_KEY, None)
+                state.clear_custom_upload()
+                state.clear_run_outputs()
                 st.rerun()

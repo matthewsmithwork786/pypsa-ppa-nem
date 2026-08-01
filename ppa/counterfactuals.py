@@ -41,14 +41,20 @@ def compute_counterfactuals(
 ) -> CounterfactualResult:
     """Compare PPA offtaker cost against spot-only and CAL Y+1 forward procurement.
 
-    All strategies source the same flat load (scenario.ppaload_mw MW each hour).
+    All strategies source the same hourly load: `ts["ppaload_mw"]`, the actual
+    hourly load series (the uploaded hourly load on the custom-CSV path, or the
+    profile-synthesized hourly load on the European/NEM paths). This is a strict
+    improvement over the previous flat-`scenario.ppaload_mw`-scalar approach for
+    ALL data sources, since `scenario.ppaload_mw` is the uploaded/contracted PEAK
+    MW (needed for LP feasibility), not the actual average consumption -- using
+    it as a flat load for the whole period systematically overstates cost for
+    any non-flat load profile.
     Costs are for the modelled period only (not annualised).
     """
     spot_price = ts["ts_MktPrice"]
-    load_mw = scenario.ppaload_mw
-    n_hours = len(ts)
+    load_mw = ts["ppaload_mw"]  # actual hourly load series, not the flat peak scalar
     dt = 1.0  # hours per timestep (hourly data)
-    total_load_mwh = load_mw * n_hours * dt
+    total_load_mwh = float((load_mw * dt).sum())
 
     # --- Spot-only ---
     hourly_spot_cost = spot_price * load_mw * dt

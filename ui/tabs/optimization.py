@@ -19,7 +19,41 @@ def _cached_reference_ts(pv_lat: float, pv_lon: float, wind_lat: float, wind_lon
     )
 
 
+@st.cache_data
+def _cached_nem_reference_ts(pv_duid: str, wind_duid: str, region: str, year: int):
+    from ppa.data import nem_data
+
+    class _FakeScenario:
+        nem_pv_duid = pv_duid
+        nem_wind_duid = wind_duid
+        nem_price_region = region
+        nem_year = year
+
+    return nem_data.reference_month_ts(_FakeScenario())
+
+
 def _get_timeseries(scenario):
+    if scenario.data_source == "custom_csv":
+        upload = state.get_custom_upload()
+        if upload is None:
+            # Mirror the multi-year path's error handling (ppa.tabs.optimization
+            # ._run_simulation): don't silently fall through to the European
+            # reference-month cache below -- that would run the LP against the
+            # wrong data source with no indication anything is amiss.
+            raise RuntimeError(
+                "Data source is 'custom_csv' but no uploaded file is active. "
+                "Go to the Custom Data tab and apply one."
+            )
+        ts = upload["ts"]
+        state.set_timeseries(ts)
+        return ts
+    if scenario.is_nem:
+        ts = _cached_nem_reference_ts(
+            scenario.nem_pv_duid, scenario.nem_wind_duid,
+            scenario.nem_price_region, scenario.nem_year,
+        )
+        state.set_timeseries(ts)
+        return ts
     if state.has_timeseries():
         return state.get_timeseries()
     pv_lat, pv_lon = scenario.pv_location
@@ -65,10 +99,10 @@ def _render_scenario_summary(s) -> None:
         with cols[1]:
             st.markdown("**PPA contract**")
             st.markdown(f"- Offtake: **{s.ppaload_mw:.0f} MW** flat")
-            st.markdown(f"- Tariff: **€{s.ppa_price:.0f}/MWh**")
+            st.markdown(f"- Tariff: **A${s.ppa_price:.0f}/MWh**")
             st.markdown(f"- Required delivery: **{s.required_delivery_share:.0%}**")
             if s.enable_penalty:
-                st.markdown(f"- Penalty: **{s.pen_mult:.1f}×** = €{s.penalty_price:.0f}/MWh")
+                st.markdown(f"- Penalty: **{s.pen_mult:.1f}×** = A${s.penalty_price:.0f}/MWh")
             else:
                 st.markdown("- Penalty: *disabled*")
 
@@ -96,8 +130,8 @@ def _render_scenario_summary(s) -> None:
                 st.markdown(f"- PV site: **{s.pv_location[0]:.2f}°N, {s.pv_location[1]:.2f}°E**")
             if s.wind_location != (s.lat, s.lon):
                 st.markdown(f"- Wind site: **{s.wind_location[0]:.2f}°N, {s.wind_location[1]:.2f}°E**")
-            if s.transmission_cost_eur_mwh > 0:
-                st.markdown(f"- Transmission: **€{s.transmission_cost_eur_mwh:.1f}/MWh** delivered")
+            if s.transmission_cost_aud_mwh > 0:
+                st.markdown(f"- Transmission: **A${s.transmission_cost_aud_mwh:.1f}/MWh** delivered")
             if s.simulation_years == 1:
                 st.markdown(f"- Mode: **1-year** ({s.first_sim_year})")
             else:
@@ -115,7 +149,65 @@ def _render_scenario_summary(s) -> None:
 
 # ── data status (compact) ─────────────────────────────────────────────────────
 
+def _render_nem_data_status(s) -> tuple[bool, bool]:
+    from ppa.data import nem_data
+    from ui.nem_cache_status import cached_cache_status
+
+    status = cached_cache_status(s.nem_year)
+    cols = st.columns(2)
+    with cols[0]:
+        if status["n_simulation_ready"] > 0:
+            st.success(f"NEM SCADA: {status['n_simulation_ready']} simulation-ready plant(s) cached ✓")
+        else:
+            st.warning(
+                "No simulation-ready NEM SCADA cached — go to **NEM Plant Map** tab "
+                f"(`python scripts/fetch_nem_scada_prices.py --year {s.nem_year}`)."
+            )
+    prices_ok = s.nem_price_region in status["price_regions_cached"]
+    with cols[1]:
+        if prices_ok:
+            st.success(f"NEM prices ({s.nem_price_region}): cached ✓")
+        else:
+            st.warning(
+                f"No cached NEM price data for region {s.nem_price_region} — "
+                f"run `python scripts/fetch_nem_scada_prices.py --year {s.nem_year}`."
+            )
+
+    # Applies identically to "nem_map" and "nem_default": both silently drive
+    # zero renewable generation if the scenario's own DUIDs are empty/not
+    # ready, regardless of whether *some* plant elsewhere in the cache is
+    # simulation-ready.
+    cf_ok, problems = nem_data.nem_generation_ready(
+        s.data_source, s.nem_pv_duid, s.nem_wind_duid, year=s.nem_year
+    )
+    for problem in problems:
+        st.error(problem)
+    return prices_ok, cf_ok
+
+
+def _render_custom_data_status(s) -> tuple[bool, bool]:
+    upload = state.get_custom_upload()
+    if upload is None:
+        st.warning(
+            "Data source is **custom_csv** but no upload is active — go to the "
+            "**Custom Data** tab, download the template, fill it in, and click "
+            "**Use this data**."
+        )
+        return False, False
+    ts = upload["ts"]
+    st.success(
+        f"Custom upload active: **{upload['name']}** ({len(ts)} rows) — "
+        "drives both CF/price and the offtaker load."
+    )
+    return True, True
+
+
 def _render_data_status(s) -> tuple[bool, bool]:
+    if s.data_source == "custom_csv":
+        return _render_custom_data_status(s)
+    if s.is_nem:
+        return _render_nem_data_status(s)
+
     from ppa.data.entsoe_client import list_cached_years as list_cached_price_years, AVAILABLE_YEARS as PRICE_YEARS
     from ppa.data.renewables_ninja import list_cached_pv_years, list_cached_wind_years, AVAILABLE_YEARS
 
@@ -157,32 +249,53 @@ def _render_data_status(s) -> tuple[bool, bool]:
 # ── Simulation runner ────────────────────────────────────────────────
 
 def _run_simulation(scenario, max_workers: int) -> None:
-    from ppa.data import renewables_ninja as rn
-    from ppa.data.entsoe_client import fetch_day_ahead_prices, list_cached_years as list_cached_price_years
     from ppa.multi_year import run_multi_year
     from ppa.financials import run_multi_year_financial_analysis
 
-    pv_lat, pv_lon = scenario.pv_location
-    wind_lat, wind_lon = scenario.wind_location
-    cached_cf_years = sorted(
-        set(rn.list_cached_pv_years(lat=pv_lat, lon=pv_lon))
-        & set(rn.list_cached_wind_years(lat=wind_lat, lon=wind_lon))
-    )
-    pv_by_year: dict[int, pd.Series] = {}
-    wind_by_year: dict[int, pd.Series] = {}
-    for year in cached_cf_years:
-        pv_by_year[year] = rn.download_pv_cf(year, "", lat=pv_lat, lon=pv_lon)
-        wind_by_year[year] = rn.download_wind_cf(year, "", lat=wind_lat, lon=wind_lon)
+    if scenario.data_source == "custom_csv":
+        from ppa.data_loader import custom_timeseries_dicts
 
-    zone = scenario.bidding_zone
-    prices_by_year: dict[int, pd.Series] = {}
-    for year in list_cached_price_years(country_code=zone):
-        prices_by_year[year] = fetch_day_ahead_prices(year, "", country_code=zone)
+        upload = state.get_custom_upload()
+        if upload is None:
+            raise RuntimeError(
+                "Data source is 'custom_csv' but no uploaded file is active. "
+                "Go to the Custom Data tab and apply one."
+            )
+        pv_by_year, wind_by_year, prices_by_year, load_by_year = custom_timeseries_dicts(
+            upload["ts"], year=scenario.first_sim_year
+        )
+    elif scenario.is_nem:
+        from ppa.data import nem_data
 
-    # Fall back to any available price year if a CF year has no matching price year
-    # (prices_by_year is cycled the same way as CF in pick_weather_year)
-    if not prices_by_year:
-        raise RuntimeError(f"No ENTSO-E prices cached for zone {zone}. Go to **Get Data** tab first.")
+        pv_by_year, wind_by_year, prices_by_year = nem_data.get_timeseries_dicts(scenario)
+        load_by_year = None
+    else:
+        from ppa.data import renewables_ninja as rn
+        from ppa.data.entsoe_client import fetch_day_ahead_prices, list_cached_years as list_cached_price_years
+
+        pv_lat, pv_lon = scenario.pv_location
+        wind_lat, wind_lon = scenario.wind_location
+        cached_cf_years = sorted(
+            set(rn.list_cached_pv_years(lat=pv_lat, lon=pv_lon))
+            & set(rn.list_cached_wind_years(lat=wind_lat, lon=wind_lon))
+        )
+        pv_by_year: dict[int, pd.Series] = {}
+        wind_by_year: dict[int, pd.Series] = {}
+        for year in cached_cf_years:
+            pv_by_year[year] = rn.download_pv_cf(year, "", lat=pv_lat, lon=pv_lon)
+            wind_by_year[year] = rn.download_wind_cf(year, "", lat=wind_lat, lon=wind_lon)
+
+        zone = scenario.bidding_zone
+        prices_by_year: dict[int, pd.Series] = {}
+        for year in list_cached_price_years(country_code=zone):
+            prices_by_year[year] = fetch_day_ahead_prices(year, "", country_code=zone)
+
+        # Fall back to any available price year if a CF year has no matching price year
+        # (prices_by_year is cycled the same way as CF in pick_weather_year)
+        if not prices_by_year:
+            raise RuntimeError(f"No ENTSO-E prices cached for zone {zone}. Go to **Get Data** tab first.")
+
+        load_by_year = None
 
     progress_bar = st.progress(0, text="Starting optimization ...")
     status_text = st.empty()
@@ -217,7 +330,8 @@ def _run_simulation(scenario, max_workers: int) -> None:
             ),
         )
         sizing_ts = build_sizing_timeseries(
-            scenario, pv_by_year, wind_by_year, prices_by_year, n_sizing_years
+            scenario, pv_by_year, wind_by_year, prices_by_year, n_sizing_years,
+            load_mw_by_year=load_by_year,
         )
 
         _t0 = time.monotonic()
@@ -254,6 +368,7 @@ def _run_simulation(scenario, max_workers: int) -> None:
         pv_cf_by_year=pv_by_year,
         wind_cf_by_year=wind_by_year,
         prices_by_year=prices_by_year,
+        load_mw_by_year=load_by_year,
         first_sim_year=scenario.first_sim_year,
         max_workers=max_workers,
         progress_callback=_on_progress,
@@ -275,21 +390,21 @@ def _render_results(fin, n_years: int) -> None:
     with st.expander("Optimization results", expanded=True):
         cols = st.columns(5)
         irr_str = f"{fin.irr:.1%}" if fin.irr == fin.irr else "N/A"
-        lcoe_str = f"€{fin.lcoe:.1f}/MWh" if fin.lcoe == fin.lcoe else "N/A"
+        lcoe_str = f"A${fin.lcoe:.1f}/MWh" if fin.lcoe == fin.lcoe else "N/A"
         payback_str = f"{fin.simple_payback:.1f} yrs" if fin.simple_payback < 1e8 else "N/A"
-        cols[0].metric("NPV", f"€{fin.npv/1e6:.1f}M")
+        cols[0].metric("NPV", f"A${fin.npv/1e6:.1f}M")
         cols[1].metric("Project IRR", irr_str)
         cols[2].metric("LCOE", lcoe_str)
         cols[3].metric("Simple Payback", payback_str)
-        cols[4].metric("Lifetime Net Revenue", f"€{fin.total_lifetime_revenue/1e6:.1f}M")
+        cols[4].metric("Lifetime Net Revenue", f"A${fin.total_lifetime_revenue/1e6:.1f}M")
 
         if n_years == 1:
             y = fin.yearly[0]
             st.caption(
-                f"Year {y.year} — PPA revenue €{y.ppa_revenue/1e6:.2f}M | "
-                f"Merchant €{y.merch_revenue/1e6:.2f}M | "
+                f"Year {y.year} — PPA revenue A${y.ppa_revenue/1e6:.2f}M | "
+                f"Merchant A${y.merch_revenue/1e6:.2f}M | "
                 f"Delivery {y.fulfilled_share:.1%} | "
-                f"Net CF €{y.net_cashflow/1e6:.2f}M"
+                f"Net CF A${y.net_cashflow/1e6:.2f}M"
             )
             return
 
@@ -327,7 +442,7 @@ def _render_npv_chart(fin) -> None:
     fig.add_hline(y=0, line_dash="dash", line_color="gray")
     fig.update_layout(
         title="Cumulative NPV over Project Life",
-        xaxis_title="Year", yaxis_title="NPV (€M)", height=400,
+        xaxis_title="Year", yaxis_title="NPV (A$M)", height=400,
     )
     st.plotly_chart(fig, width="stretch")
 
@@ -343,7 +458,7 @@ def _render_revenue_chart(fin) -> None:
     fig.add_trace(go.Bar(x=years, y=[round(-y.opex / 1e6, 2) for y in fin.yearly], name="OPEX"))
     fig.update_layout(
         barmode="relative", title="Annual Revenue Breakdown",
-        xaxis_title="Year", yaxis_title="€M", height=400,
+        xaxis_title="Year", yaxis_title="A$M", height=400,
     )
     st.plotly_chart(fig, width="stretch")
 
@@ -368,13 +483,13 @@ def _render_yearly_table(fin) -> None:
     rows = [
         {
             "Year": y.year,
-            "PPA Revenue (€M)": round(y.ppa_revenue / 1e6, 2),
-            "Merchant Revenue (€M)": round(y.merch_revenue / 1e6, 2),
-            "Market Buy Cost (€M)": round(y.market_buy_cost / 1e6, 2),
-            "Penalty Cost (€M)": round(y.penalty_cost / 1e6, 2),
-            "Transmission Cost (€M)": round(y.transmission_cost / 1e6, 2),
-            "OPEX (€M)": round(y.opex / 1e6, 2),
-            "Net Cash Flow (€M)": round(y.net_cashflow / 1e6, 2),
+            "PPA Revenue (A$M)": round(y.ppa_revenue / 1e6, 2),
+            "Merchant Revenue (A$M)": round(y.merch_revenue / 1e6, 2),
+            "Market Buy Cost (A$M)": round(y.market_buy_cost / 1e6, 2),
+            "Penalty Cost (A$M)": round(y.penalty_cost / 1e6, 2),
+            "Transmission Cost (A$M)": round(y.transmission_cost / 1e6, 2),
+            "OPEX (A$M)": round(y.opex / 1e6, 2),
+            "Net Cash Flow (A$M)": round(y.net_cashflow / 1e6, 2),
             "Delivery Rate (%)": round(y.fulfilled_share * 100, 1),
             "Wind Gen (GWh)": round(y.wind_gen_mwh / 1e3, 1),
             "PV Gen (GWh)": round(y.pv_gen_mwh / 1e3, 1),
@@ -448,18 +563,44 @@ def render() -> None:
             )
         _render_results(state.get_multi_year_financial(), s.simulation_years)
 
-    # ── Single-day reference optimization (European reference month) ──────────
+    # ── Single-day reference optimization ──────────────────────────────────────
     # st.markdown("---")
-    with st.expander("Single-day reference optimization (European reference month)", expanded=False):
-        st.caption(
+    if s.data_source == "custom_csv":
+        _single_day_title = "Single-day reference optimization (custom CSV upload)"
+        _single_day_caption = (
+            "Runs the LP over the active **custom CSV upload** (prepared to hourly, "
+            "with the uploaded `ts_LoadMW` driving the offtake load directly). Pick "
+            "the day to inspect under **Reference day selection**. Results feed the "
+            "Results, and Analysis tabs."
+        )
+    elif s.is_nem:
+        _single_day_title = "Single-day reference optimization (NEM data)"
+        _single_day_caption = (
+            f"Runs the LP over the selected NEM plants/prices (region {s.nem_price_region}, "
+            f"{s.nem_year}). Pick the day to inspect under **Reference day selection**. "
+            "Results feed the Results, and Analysis tabs."
+        )
+    else:
+        _single_day_title = "Single-day reference optimization (European reference month)"
+        _single_day_caption = (
             f"Runs the LP over a representative European month ({s.bidding_zone} prices + "
             "renewables.ninja capacity factors, falling back to the German reference cache "
             "if location data is not downloaded yet). Pick the day to inspect under "
             "**Reference day selection**. Results feed the Results, and Analysis tabs."
         )
-        ts = _get_timeseries(s)
+
+    with st.expander(_single_day_title, expanded=False):
+        st.caption(_single_day_caption)
+        _ts_error_shown = False
+        try:
+            ts = _get_timeseries(s)
+        except (RuntimeError, FileNotFoundError, ValueError, KeyError) as exc:
+            st.error(str(exc))
+            ts = None
+            _ts_error_shown = True
         if ts is None:
-            st.error("Could not load the European reference timeseries from `data/cache/`.")
+            if s.data_source not in ("custom_csv",) and not s.is_nem and not _ts_error_shown:
+                st.error("Could not load the reference timeseries from `data/cache/`.")
         else:
             from ppa.data_loader import get_available_days
             errors = validate_scenario(s, available_days=get_available_days(ts))

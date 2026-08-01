@@ -87,7 +87,7 @@ def _write_inputs(wb: Workbook, p: ProjectFinanceInputs) -> dict[str, str]:
 
     ws["B1"] = "Financial Model — Inputs"
     ws["B1"].font = _TITLE
-    ws["B2"] = "Yellow cells are editable assumptions. Costs in €M/MW (€M/MWh for BESS)."
+    ws["B2"] = "Yellow cells are editable assumptions. Costs in A$M/MW (A$M/MWh for BESS)."
     ws["B2"].font = Font(italic=True, color="808080")
 
     cells: dict[str, str] = {}
@@ -116,32 +116,30 @@ def _write_inputs(wb: Workbook, p: ProjectFinanceInputs) -> dict[str, str]:
         row += 1
 
     section("Build cost")
-    field("Onshore wind build cost", "onsw_build_cost", p.onsw_build_cost, "€M/MW")
-    field("Solar PV build cost", "pv_build_cost", p.pv_build_cost, "€M/MW")
-    field("BESS build cost", "bess_build_cost", p.bess_build_cost, "€M/MWh")
+    field("Onshore wind build cost", "onsw_build_cost", p.onsw_build_cost, "A$M/MW")
+    field("Solar PV build cost", "pv_build_cost", p.pv_build_cost, "A$M/MW")
+    field("BESS build cost", "bess_build_cost", p.bess_build_cost, "A$M/MWh")
     row += 1
     section("Connection cost")
-    field("Onshore wind connection", "onsw_connection_cost", p.onsw_connection_cost, "€M/MW")
-    field("Solar PV connection", "pv_connection_cost", p.pv_connection_cost, "€M/MW")
-    field("BESS connection", "bess_connection_cost", p.bess_connection_cost, "€M/MWh")
+    field("Onshore wind connection", "onsw_connection_cost", p.onsw_connection_cost, "A$M/MW")
+    field("Solar PV connection", "pv_connection_cost", p.pv_connection_cost, "A$M/MW")
+    field("BESS connection", "bess_connection_cost", p.bess_connection_cost, "A$M/MWh")
     row += 1
     section("Project development cost (devex)")
-    field("Onshore wind devex", "onsw_devex", p.onsw_devex, "€M/MW")
-    field("Solar PV devex", "pv_devex", p.pv_devex, "€M/MW")
-    field("BESS devex", "bess_devex", p.bess_devex, "€M/MWh")
+    field("Onshore wind devex", "onsw_devex", p.onsw_devex, "A$M/MW")
+    field("Solar PV devex", "pv_devex", p.pv_devex, "A$M/MW")
+    field("BESS devex", "bess_devex", p.bess_devex, "A$M/MWh")
     row += 1
     section("Fixed O&M (p.a.)")
-    field("Onshore wind fixed O&M", "onsw_fixed_om", p.onsw_fixed_om, "€M/MW")
-    field("Solar PV fixed O&M", "pv_fixed_om", p.pv_fixed_om, "€M/MW")
-    field("BESS fixed O&M", "bess_fixed_om", p.bess_fixed_om, "€M/MWh")
+    field("Onshore wind fixed O&M", "onsw_fixed_om", p.onsw_fixed_om, "A$M/MW")
+    field("Solar PV fixed O&M", "pv_fixed_om", p.pv_fixed_om, "A$M/MW")
+    field("BESS fixed O&M", "bess_fixed_om", p.bess_fixed_om, "A$M/MWh")
     field("Ancillary services", "ancillary_pct", p.ancillary_pct, "% of revenue")
     row += 1
     section("Timing (years)")
     field("Model duration", "model_duration", p.model_duration, "years")
-    field("Development start period", "development_start", p.development_start, "period")
-    field("Onshore wind development", "onsw_dev_years", p.onsw_dev_years, "years")
-    field("Solar PV development", "pv_dev_years", p.pv_dev_years, "years")
-    field("BESS development", "bess_dev_years", p.bess_dev_years, "years")
+    field("Development start period", "development_start", p.development_start, "period",
+          "= FID; devex bullet and construction both start here")
     field("Onshore wind construction", "onsw_constr_years", p.onsw_constr_years, "years")
     field("Solar PV construction", "pv_constr_years", p.pv_constr_years, "years")
     field("BESS construction", "bess_constr_years", p.bess_constr_years, "years")
@@ -149,9 +147,9 @@ def _write_inputs(wb: Workbook, p: ProjectFinanceInputs) -> dict[str, str]:
     row += 1
     section("Revenue")
     field("PPA contract tenor", "ppa_tenor", p.ppa_tenor, "years")
-    field("PPA tariff (base)", "ppa_tariff", p.ppa_tariff, "€/MWh")
+    field("PPA tariff (base)", "ppa_tariff", p.ppa_tariff, "A$/MWh")
     field("Penalty multiple", "penalty_multiple", p.penalty_multiple, "×")
-    field("LGC / GO price", "lgc_price", p.lgc_price, "€/MWh")
+    field("LGC / GO price", "lgc_price", p.lgc_price, "A$/MWh")
     row += 1
     section("Indexation (% p.a.)")
     field("Indexation offset", "indexation_offset_years", p.indexation_offset_years, "years")
@@ -201,7 +199,7 @@ _HOURLY_DATA_START = 17
 _HOURLY_COLS = [
     "Timestamp", "Hour", "Wind (MWh)", "PV (MWh)", "BESS discharge (MWh)",
     "BESS charge (MWh)", "Total generation (MWh)", "Market buy (MWh)",
-    "Market sell (MWh)", "PPA delivered (MWh)", "Penalty (MWh)", "Price (€/MWh)",
+    "Market sell (MWh)", "PPA delivered (MWh)", "Penalty (MWh)", "Price (A$/MWh)",
 ]
 # Column letters for the formulas below
 _C_HOUR, _C_TOTAL, _C_BUY, _C_SELL, _C_PPA, _C_PEN, _C_PRICE = "B", "G", "H", "I", "J", "K", "L"
@@ -278,12 +276,12 @@ def _write_hourly_sheets(wb: Workbook, year_results: list) -> dict[str, list[str
         nonsolar_w = f'(({hour_rng}<9)+({hour_rng}>=17))'
         agg("sell_solar_price", "Merchant capture — solar hours",
             f"=IFERROR(SUMPRODUCT({solar_w}*{rng(_C_SELL)}*{rng(_C_PRICE)})"
-            f"/SUMPRODUCT({solar_w}*{rng(_C_SELL)}),0)", "€/MWh")
+            f"/SUMPRODUCT({solar_w}*{rng(_C_SELL)}),0)", "A$/MWh")
         agg("sell_nonsolar_price", "Merchant capture — non-solar hours",
             f"=IFERROR(SUMPRODUCT({nonsolar_w}*{rng(_C_SELL)}*{rng(_C_PRICE)})"
-            f"/SUMPRODUCT({nonsolar_w}*{rng(_C_SELL)}),0)", "€/MWh")
+            f"/SUMPRODUCT({nonsolar_w}*{rng(_C_SELL)}),0)", "A$/MWh")
         agg("purchase_price", "Market purchase price",
-            f"=IFERROR(SUMPRODUCT({rng(_C_BUY)}*{rng(_C_PRICE)})/SUM({rng(_C_BUY)}),0)", "€/MWh")
+            f"=IFERROR(SUMPRODUCT({rng(_C_BUY)}*{rng(_C_PRICE)})/SUM({rng(_C_BUY)}),0)", "A$/MWh")
         agg("marketbuy_gwh", "Market purchase volume", f"=SUM({rng(_C_BUY)})*{scale_cell}/1000", "GWh p.a.")
 
         # ── Hourly data ───────────────────────────────────────────────────────
@@ -366,9 +364,9 @@ def _write_energy(
     field("Total generation — solar hours", "total_solar_gwh", e.total_solar_gwh, "GWh p.a.")
     field("Total generation — non-solar hours", "total_nonsolar_gwh", e.total_nonsolar_gwh, "GWh p.a.")
     row += 1
-    field("Merchant capture — solar hours", "sell_solar_price", e.sell_solar_price, "€/MWh")
-    field("Merchant capture — non-solar hours", "sell_nonsolar_price", e.sell_nonsolar_price, "€/MWh")
-    field("Market purchase price", "purchase_price", e.purchase_price, "€/MWh")
+    field("Merchant capture — solar hours", "sell_solar_price", e.sell_solar_price, "A$/MWh")
+    field("Merchant capture — non-solar hours", "sell_nonsolar_price", e.sell_nonsolar_price, "A$/MWh")
+    field("Market purchase price", "purchase_price", e.purchase_price, "A$/MWh")
     field("Market purchase volume", "marketbuy_gwh", e.marketbuy_gwh, "GWh p.a.")
 
     return cells
@@ -486,19 +484,19 @@ def _write_model(
                 arr[pp - 1] = per
         return arr
 
-    onsw_dev_f = _fracs(*tl.tech_dev(p.onsw_dev_years))
-    pv_dev_f = _fracs(*tl.tech_dev(p.pv_dev_years))
-    bess_dev_f = _fracs(*tl.tech_dev(p.bess_dev_years))
     onsw_con_f = _fracs(*tl.tech_constr(p.onsw_constr_years))
     pv_con_f = _fracs(*tl.tech_constr(p.pv_constr_years))
     bess_con_f = _fracs(*tl.tech_constr(p.bess_constr_years))
 
     def _devex_fn(pr: int, cl: str) -> str:
+        # Devex is a single bullet at FID. The IF keys off the live
+        # `development_start` input, so editing it in Excel moves the bullet.
         return (
-            f"={cl}{R['cost_idx']}*("
-            f"{onsw_dev_f[pr-1]}*{I['onsw_devex']}*{E['onsw_mw']}"
-            f"+{pv_dev_f[pr-1]}*{I['pv_devex']}*{E['pv_mw']}"
-            f"+{bess_dev_f[pr-1]}*{I['bess_devex']}*{E['bess_mwh']})"
+            f"=IF({cl}${hdr}={I['development_start']},"
+            f"{cl}{R['cost_idx']}*("
+            f"{I['onsw_devex']}*{E['onsw_mw']}"
+            f"+{I['pv_devex']}*{E['pv_mw']}"
+            f"+{I['bess_devex']}*{E['bess_mwh']}),0)"
         )
 
     def _capex_fn(pr: int, cl: str) -> str:
@@ -509,21 +507,21 @@ def _write_model(
             f"+{bess_con_f[pr-1]}*({I['bess_build_cost']}+{I['bess_connection_cost']})*{E['bess_mwh']})"
         )
 
-    label_row("capital", "Capital spend", "€M", section=True)
-    label_row("devex", "Devex", "€M")
+    label_row("capital", "Capital spend", "A$M", section=True)
+    label_row("devex", "Devex", "A$M")
     put_formula("devex", _devex_fn)
-    label_row("capex", "Capex", "€M")
+    label_row("capex", "Capex", "A$M")
     put_formula("capex", _capex_fn)
-    label_row("capital_spend", "Total capital spend", "€M")
+    label_row("capital_spend", "Total capital spend", "A$M")
     put_formula("capital_spend", lambda pr, cl: f"={cl}{R['devex']}+{cl}{R['capex']}")
 
     # ── Revenue (formulas) ────────────────────────────────────────────────────
-    label_row("revenue", "Revenue", "€M", section=True)
-    label_row("ppa_rev", "PPA revenue", "€M")
+    label_row("revenue", "Revenue", "A$M", section=True)
+    label_row("ppa_rev", "PPA revenue", "A$M")
     put_formula("ppa_rev", lambda pr, cl: (
         f"={cl}{R['ppa_flag']}*{E['ppa_gwh']}*1000*({I['ppa_tariff']}*{cl}{R['ppa_idx']})/1000000"
     ))
-    label_row("penalty_cost", "Penalty cost", "€M")
+    label_row("penalty_cost", "Penalty cost", "A$M")
     put_formula("penalty_cost", lambda pr, cl: (
         f"={cl}{R['ppa_flag']}*{E['penalty_gwh']}*1000*({I['ppa_tariff']}*{I['penalty_multiple']}*{cl}{R['ppa_idx']})/1000000"
     ))
@@ -541,53 +539,53 @@ def _write_model(
         return (f"=({cl}{R['ppa_flag']}*{E['excess_nonsolar_gwh']}+{cl}{R['nonppa_flag']}*{E['total_nonsolar_gwh']})"
                 f"*1000*({E['sell_nonsolar_price']}{fac})/1000000")
 
-    label_row("merch_solar", "Merchant — solar hours", "€M")
+    label_row("merch_solar", "Merchant — solar hours", "A$M")
     put_formula("merch_solar", _merch_solar)
-    label_row("merch_nonsolar", "Merchant — non-solar hours", "€M")
+    label_row("merch_nonsolar", "Merchant — non-solar hours", "A$M")
     put_formula("merch_nonsolar", _merch_nonsolar)
-    label_row("lgc_rev", "LGC / GO revenue", "€M")
+    label_row("lgc_rev", "LGC / GO revenue", "A$M")
     put_formula("lgc_rev", lambda pr, cl: (
         f"=({cl}{R['ppa_flag']}*({E['excess_solar_gwh']}+{E['excess_nonsolar_gwh']})"
         f"+{cl}{R['nonppa_flag']}*({E['total_solar_gwh']}+{E['total_nonsolar_gwh']}))"
         f"*1000*({I['lgc_price']}*{cl}{R['ppa_idx']})/1000000"
     ))
-    label_row("net_contracted", "Net contracted revenue", "€M")
+    label_row("net_contracted", "Net contracted revenue", "A$M")
     put_formula("net_contracted", lambda pr, cl: f"={cl}{R['ppa_rev']}-{cl}{R['penalty_cost']}")
-    label_row("net_uncontracted", "Net uncontracted revenue", "€M")
+    label_row("net_uncontracted", "Net uncontracted revenue", "A$M")
     put_formula("net_uncontracted", lambda pr, cl: f"={cl}{R['merch_solar']}+{cl}{R['merch_nonsolar']}+{cl}{R['lgc_rev']}")
-    label_row("total_rev", "Total revenue", "€M")
+    label_row("total_rev", "Total revenue", "A$M")
     put_formula("total_rev", lambda pr, cl: f"={cl}{R['net_contracted']}+{cl}{R['net_uncontracted']}")
 
     # ── Opex / EBITDA (formulas) ──────────────────────────────────────────────
-    label_row("opex_sec", "Operating costs", "€M", section=True)
+    label_row("opex_sec", "Operating costs", "A$M", section=True)
     fixed_om_expr = (
         f"({I['onsw_fixed_om']}*{E['onsw_mw']}+{I['pv_fixed_om']}*{E['pv_mw']}+{I['bess_fixed_om']}*{E['bess_mwh']})"
     )
-    label_row("opex", "Total O&M expenses", "€M")
+    label_row("opex", "Total O&M expenses", "A$M")
     put_formula("opex", lambda pr, cl: f"={cl}{R['ops_flag']}*{fixed_om_expr}+{I['ancillary_pct']}*{cl}{R['total_rev']}")
-    label_row("ebitda", "EBITDA", "€M")
+    label_row("ebitda", "EBITDA", "A$M")
     put_formula("ebitda", lambda pr, cl: f"={cl}{R['total_rev']}-{cl}{R['opex']}")
 
     # ── Debt (toolkit values + interest formula reference) ────────────────────
-    label_row("debt", "Debt schedule", "€M", section=True)
-    label_row("debt_draw", "Debt drawdown", "€M")
+    label_row("debt", "Debt schedule", "A$M", section=True)
+    label_row("debt_draw", "Debt drawdown", "A$M")
     put_values("debt_draw", sc["debt_draw"])
-    label_row("idc", "Interest during construction", "€M")
+    label_row("idc", "Interest during construction", "A$M")
     put_values("idc", sc["idc"])
-    label_row("interest", "Term loan interest", "€M")
+    label_row("interest", "Term loan interest", "A$M")
     put_values("interest", sc["interest"])
-    label_row("loan_repay", "Loan repayment", "€M")
+    label_row("loan_repay", "Loan repayment", "A$M")
     put_values("loan_repay", sc["loan_repay"])
 
     # ── Depreciation (live, straight-line capped at the asset base) ───────────
     firstcol, lastcol = col(1), col(n)
-    label_row("dep", "Depreciation", "€M", section=True)
+    label_row("dep", "Depreciation", "A$M", section=True)
 
     # Asset bases (live): tax = capex only; book = devex + capex + capitalised IDC.
-    label_row("tax_base", "Tax asset base", "€M")
+    label_row("tax_base", "Tax asset base", "A$M")
     ws.cell(R["tax_base"], _pcol(1),
             f"=SUM({firstcol}{R['capex']}:{lastcol}{R['capex']})").number_format = "#,##0.0"
-    label_row("book_base", "Book asset base", "€M")
+    label_row("book_base", "Book asset base", "A$M")
     ws.cell(R["book_base"], _pcol(1), (
         f"=SUM({firstcol}{R['devex']}:{lastcol}{R['devex']})"
         f"+SUM({firstcol}{R['capex']}:{lastcol}{R['capex']})"
@@ -606,43 +604,43 @@ def _write_model(
             )
         return fn
 
-    label_row("tax_dep", "Tax depreciation", "€M")
+    label_row("tax_dep", "Tax depreciation", "A$M")
     put_formula("tax_dep", _dep_fn(R["tax_dep"], R["tax_base"], I["tax_depreciation_rate"]))
-    label_row("book_dep", "Book depreciation", "€M")
+    label_row("book_dep", "Book depreciation", "A$M")
     put_formula("book_dep", _dep_fn(R["book_dep"], R["book_base"], I["book_depreciation_rate"]))
 
     # ── P&L tax (live, with loss carry-forward) ───────────────────────────────
-    label_row("pl", "Profit & tax", "€M", section=True)
-    label_row("pbt", "Profit before tax", "€M")
+    label_row("pl", "Profit & tax", "A$M", section=True)
+    label_row("pbt", "Profit before tax", "A$M")
     put_formula("pbt", lambda pr, cl: f"={cl}{R['ebitda']}-{cl}{R['interest']}-{cl}{R['book_dep']}")
-    label_row("taxable", "Taxable income", "€M")
+    label_row("taxable", "Taxable income", "A$M")
     put_formula("taxable", lambda pr, cl: f"={cl}{R['ebitda']}-{cl}{R['interest']}-{cl}{R['tax_dep']}")
-    label_row("carry", "Carry-forward losses", "€M")
+    label_row("carry", "Carry-forward losses", "A$M")
     put_formula("carry", lambda pr, cl: (
         f"=MIN(0,{cl}{R['taxable']})" if pr == 1
         else f"=MIN(0,{cl}{R['taxable']}+{col(pr-1)}{R['carry']})"
     ))
-    label_row("tax", "Income tax", "€M")
+    label_row("tax", "Income tax", "A$M")
     put_formula("tax", lambda pr, cl: (
         f"=MAX(0,{cl}{R['taxable']})*{I['corp_tax_rate']}" if pr == 1
         else f"=MAX(0,{cl}{R['taxable']}+{col(pr-1)}{R['carry']})*{I['corp_tax_rate']}"
     ))
-    label_row("pat", "Profit after tax", "€M")
+    label_row("pat", "Profit after tax", "A$M")
     put_formula("pat", lambda pr, cl: f"={cl}{R['pbt']}-{cl}{R['tax']}")
 
     # ── Returns (formulas) ────────────────────────────────────────────────────
-    label_row("returns", "Returns", "€M", section=True)
-    label_row("fcff", "FCFF (project)", "€M")
+    label_row("returns", "Returns", "A$M", section=True)
+    label_row("fcff", "FCFF (project)", "A$M")
     put_formula("fcff", lambda pr, cl: (
         f"={cl}{R['ops_flag']}*({cl}{R['ebitda']}-{cl}{R['tax']})-{cl}{R['capital_spend']}"
     ))
-    label_row("equity_spend", "Equity investment", "€M")
+    label_row("equity_spend", "Equity investment", "A$M")
     put_formula("equity_spend", lambda pr, cl: f"={cl}{R['capital_spend']}-{cl}{R['debt_draw']}")
-    label_row("fcfe", "FCFE (equity)", "€M")
+    label_row("fcfe", "FCFE (equity)", "A$M")
     put_formula("fcfe", lambda pr, cl: (
         f"={cl}{R['ops_flag']}*({cl}{R['pat']}+{cl}{R['book_dep']}-{cl}{R['loan_repay']})-{cl}{R['equity_spend']}"
     ))
-    label_row("cfads", "CFADS", "€M")
+    label_row("cfads", "CFADS", "A$M")
     put_formula("cfads", lambda pr, cl: f"={cl}{R['ops_flag']}*({cl}{R['ebitda']}-{cl}{R['tax']})")
     label_row("dscr", "DSCR", "ratio")
     put_formula("dscr", lambda pr, cl: (
@@ -691,15 +689,15 @@ def _write_outputs(wb: Workbook, result: ProjectFinanceResult) -> None:
         f"=IFERROR(IRR({rng.get('fcff','')}),\"n/a\")" if rng.get("fcff") else None)
     kpi("Equity IRR (FCFE)", result.equity_irr, "0.0%",
         f"=IFERROR(IRR({rng.get('fcfe','')}),\"n/a\")" if rng.get("fcfe") else None)
-    kpi("NPV @ WACC (project)", result.npv_project, "#,##0.0 \"€M\"")
+    kpi("NPV @ WACC (project)", result.npv_project, "#,##0.0 \"A$M\"")
     kpi("Gearing", result.gearing, "0.0%")
-    kpi("Total funding (incl. IDC)", result.total_capex, "#,##0.0 \"€M\"")
-    kpi("Total debt", result.total_debt, "#,##0.0 \"€M\"")
-    kpi("Total equity", result.total_equity, "#,##0.0 \"€M\"")
+    kpi("Total funding (incl. IDC)", result.total_capex, "#,##0.0 \"A$M\"")
+    kpi("Total debt", result.total_debt, "#,##0.0 \"A$M\"")
+    kpi("Total equity", result.total_equity, "#,##0.0 \"A$M\"")
     kpi("Minimum DSCR", result.min_dscr, "0.00")
     kpi("Average DSCR", result.avg_dscr, "0.00")
     kpi("Equity payback", result.payback_years, "0.0 \"yrs\"")
-    kpi("LCOE", result.lcoe, "#,##0.0 \"€/MWh\"")
+    kpi("LCOE", result.lcoe, "#,##0.0 \"A$/MWh\"")
 
     ws.cell(row + 1, 2,
             "IRRs and the capex→depreciation→tax→cash-flow chain recompute live from the "
@@ -738,7 +736,10 @@ def _write_notes(wb: Workbook) -> None:
         "",
         "Simplifications (consistent with the source model):",
         "  • No working capital, no dividends, no terminal/decommissioning value.",
-        "  • Development cost is refinanced by debt at financial close.",
+        "  • Devex is a single bullet paid at FID (the `development_start` period),",
+        "    immediately before construction spend begins — not spread over a",
+        "    development phase. FID and financial close are the same period, so",
+        "    devex is refinanced by debt drawn from financial close.",
         "  • One representative operating year, escalated by indexation.",
         "  • Solar hours defined as 09:00–17:00.",
     ]

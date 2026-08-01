@@ -194,7 +194,7 @@ def make_price_series_chart(prices: "pd.Series | pd.DataFrame", title: str = "Ma
     fig.update_layout(
         title=title,
         xaxis_title="Time",
-        yaxis_title="€/MWh",
+        yaxis_title="A$/MWh",
         height=300,
         showlegend=False,
     )
@@ -231,15 +231,15 @@ def make_price_vs_ppa_chart(ts: "pd.DataFrame", ppa_price: float = 100.0) -> go.
         line_dash="dash",
         line_color="#1565C0",
         line_width=2,
-        annotation_text=f"PPA fixed price (€{ppa_price:.0f}/MWh)",
+        annotation_text=f"PPA fixed price (A${ppa_price:.0f}/MWh)",
         annotation_position="top left",
         annotation_font_color="#1565C0",
         annotation_font_size=11,
     )
     fig.update_layout(
-        title="European day-ahead spot price vs a fixed PPA tariff",
+        title="Wholesale spot price vs a fixed PPA tariff",
         xaxis_title="",
-        yaxis_title="€/MWh",
+        yaxis_title="A$/MWh",
         height=340,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         yaxis=dict(range=[ts["ts_MktPrice"].quantile(0.01) * 1.2, min(ts["ts_MktPrice"].max() * 1.05, 500)]),
@@ -325,7 +325,7 @@ def make_ppa_obligation_chart(
         )
     )
 
-    penalty_label = f"Beyond {allowed_shortfall_share:.0%}: penalty<br>{pen_mult:.1f}× tariff = €{ppa_price * pen_mult:.0f}/MWh"
+    penalty_label = f"Beyond {allowed_shortfall_share:.0%}: penalty<br>{pen_mult:.1f}× tariff = A${ppa_price * pen_mult:.0f}/MWh"
     fig.add_annotation(
         x=101, y="Delivery obligation",
         text=penalty_label,
@@ -351,7 +351,7 @@ def make_ppa_obligation_chart(
 
 
 def make_counterfactual_bar_chart(cf: CounterfactualResult, scenario: Scenario) -> go.Figure:
-    """Horizontal bar chart comparing effective €/MWh across procurement strategies."""
+    """Horizontal bar chart comparing effective A$/MWh across procurement strategies."""
     strategies = ["Spot-only", f"Blended\n({scenario.cal_hedge_fraction:.0%} CAL)", "CAL Y+1", "PPA\n(offtaker)"]
     prices = [cf.spot_avg_price, cf.blended_avg_price, cf.cal_avg_price, cf.ppa_effective_price]
     colors = ["#FF6F00", "#FFA726", "#546E7A", "#1565C0"]
@@ -363,7 +363,7 @@ def make_counterfactual_bar_chart(cf: CounterfactualResult, scenario: Scenario) 
             y=strategies,
             orientation="h",
             marker_color=colors,
-            text=[f"€{p:.2f}/MWh" for p in prices],
+            text=[f"A${p:.2f}/MWh" for p in prices],
             textposition="outside",
             textfont=dict(size=11),
             cliponaxis=False,
@@ -374,7 +374,7 @@ def make_counterfactual_bar_chart(cf: CounterfactualResult, scenario: Scenario) 
         line_dash="dash",
         line_color="#1565C0",
         line_width=1.5,
-        annotation_text=f"PPA tariff (€{scenario.ppa_price:.0f}/MWh)",
+        annotation_text=f"PPA tariff (A${scenario.ppa_price:.0f}/MWh)",
         annotation_position="top",
         annotation_font_color="#1565C0",
         annotation_font_size=10,
@@ -382,7 +382,7 @@ def make_counterfactual_bar_chart(cf: CounterfactualResult, scenario: Scenario) 
     x_max = max(prices) * 1.25
     fig.update_layout(
         title="Effective procurement cost by strategy",
-        xaxis=dict(title="Effective €/MWh", range=[0, x_max]),
+        xaxis=dict(title="Effective A$/MWh", range=[0, x_max]),
         yaxis=dict(autorange="reversed"),
         height=280,
         showlegend=False,
@@ -439,7 +439,7 @@ def make_multi_year_counterfactual_chart(
     cal_prices: list[float],
     blended_prices: list[float],
 ) -> go.Figure:
-    """Grouped bar chart: effective €/MWh per strategy per year."""
+    """Grouped bar chart: effective A$/MWh per strategy per year."""
     fig = go.Figure()
     x = [str(y) for y in years]
     fig.add_trace(go.Bar(x=x, y=ppa_prices, name="PPA (offtaker)", marker_color="#1565C0"))
@@ -450,7 +450,7 @@ def make_multi_year_counterfactual_chart(
         barmode="group",
         title="Effective procurement cost by year",
         xaxis_title="Year",
-        yaxis_title="Effective €/MWh",
+        yaxis_title="Effective A$/MWh",
         height=380,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
@@ -528,7 +528,7 @@ def make_portfolio_flow_chart(scenario: Scenario) -> go.Figure:
         _box(XR, 4.4, f"Allowed shortfall\n≤ {s.allowed_shortfall_share:.0%} of load", "#EF6C00", tc="#333")
 
     if s.enable_penalty:
-        _box(XR, 2.8, f"Penalty\n{s.pen_mult:.1f}× €{s.ppa_price:.0f} = €{s.penalty_price:.0f}/MWh", "#B71C1C")
+        _box(XR, 2.8, f"Penalty\n{s.pen_mult:.1f}× A${s.ppa_price:.0f} = A${s.penalty_price:.0f}/MWh", "#B71C1C")
 
     if s.enable_market_sell:
         _box(XR, 1.2, "Excess sold\nto market", "#37474F")
@@ -544,7 +544,7 @@ def make_portfolio_flow_chart(scenario: Scenario) -> go.Figure:
 
     # ── Arrows: aggregation → outcomes ────────────────────────────────────────
     _arrow(XM + BW / 2, 4.3, XR - BW / 2, 5.7,
-           label=f"€{s.ppa_price:.0f}/MWh tariff", lc="#BF360C")
+           label=f"A${s.ppa_price:.0f}/MWh tariff", lc="#BF360C")
 
     if s.enable_market_sell:
         _arrow(XM + BW / 2, 3.7, XR - BW / 2, 1.4,

@@ -101,7 +101,7 @@ PPAs have become a central instrument in the global energy transition:
         f"{s.ppaload_mw:.0f} MW load on average over the period. Up to "
         f"**{s.allowed_shortfall_share:.0%}** may go undelivered without penalty. "
         f"Any shortfall beyond that cap incurs a **{s.pen_mult:.1f}× tariff** penalty "
-        f"(€{s.ppa_price * s.pen_mult:.0f}/MWh)."
+        f"(A${s.ppa_price * s.pen_mult:.0f}/MWh)."
     )
 
     # st.markdown("---")
@@ -122,7 +122,7 @@ PPAs have become a central instrument in the global energy transition:
 | **ENTSO-E** | European Network of Transmission System Operators for Electricity — source of day-ahead wholesale prices |
 | **Spot price** | Real-time wholesale electricity price — can spike very high or go negative |
 | **Merchant revenue** | Revenue from selling into the spot market at prevailing prices |
-| **LCOE** | Levelised Cost of Energy — total lifetime costs ÷ total lifetime energy (€/MWh) |
+| **LCOE** | Levelised Cost of Energy — total lifetime costs ÷ total lifetime energy (A$/MWh) |
 | **Tariff** | The contracted price per MWh paid by the offtaker under the PPA, fixed at signing for the duration of the contract. The tariff is a revenue-side figure: it is what the project actually earns per MWh delivered. The LCOE is a cost-side figure: it is what the project needs to earn to recover its capital and operating costs over its lifetime. A project is commercially viable when its PPA tariff exceeds its LCOE, with the margin representing the return to investors. Unlike the spot price, the tariff does not fluctuate, which is what makes it valuable for project finance. |
 | **IRR** | Internal Rate of Return — the discount rate at which project NPV = 0 |
 | **WACC** | Weighted Average Cost of Capital — blended required return on debt and equity |

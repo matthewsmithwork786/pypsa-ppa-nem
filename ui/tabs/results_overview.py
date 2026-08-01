@@ -23,13 +23,13 @@ def _render_multi_year_overview(fin) -> None:
     )
     cols = st.columns(5)
     irr_str = f"{fin.irr:.1%}" if fin.irr == fin.irr else "N/A"
-    lcoe_str = f"€{fin.lcoe:.1f}/MWh" if fin.lcoe == fin.lcoe else "N/A"
+    lcoe_str = f"A${fin.lcoe:.1f}/MWh" if fin.lcoe == fin.lcoe else "N/A"
     payback_str = f"{fin.simple_payback:.1f} yrs" if fin.simple_payback < 1e8 else "N/A"
-    cols[0].metric("NPV", f"€{fin.npv / 1e6:.1f}M")
+    cols[0].metric("NPV", f"A${fin.npv / 1e6:.1f}M")
     cols[1].metric("Project IRR", irr_str)
     cols[2].metric("LCOE", lcoe_str)
     cols[3].metric("Simple Payback", payback_str)
-    cols[4].metric("Lifetime Net Revenue", f"€{fin.total_lifetime_revenue / 1e6:.1f}M")
+    cols[4].metric("Lifetime Net Revenue", f"A${fin.total_lifetime_revenue / 1e6:.1f}M")
 
     # ── CAPEX breakdown ───────────────────────────────────────────────────────
     # st.markdown("---")
@@ -37,11 +37,13 @@ def _render_multi_year_overview(fin) -> None:
     cols = st.columns(2)
     with cols[0]:
         capex_rows = [
-            ("Onshore wind", f"€{fin.capex.capex_wind / 1e6:.1f}M"),
-            ("Solar PV", f"€{fin.capex.capex_pv / 1e6:.1f}M"),
-            ("BESS", f"€{fin.capex.capex_bess / 1e6:.1f}M"),
-            ("Total CAPEX", f"€{fin.capex.capex_total / 1e6:.1f}M"),
-            ("Annual OPEX", f"€{fin.annual_opex / 1e6:.2f}M/yr"),
+            ("Onshore wind", f"A${fin.capex.capex_wind / 1e6:.1f}M"),
+            ("Solar PV", f"A${fin.capex.capex_pv / 1e6:.1f}M"),
+            ("BESS", f"A${fin.capex.capex_bess / 1e6:.1f}M"),
+            ("Devex", f"A${fin.capex.devex_total / 1e6:.1f}M"),
+            ("Total CAPEX", f"A${fin.capex.capex_total / 1e6:.1f}M"),
+            ("Total investment", f"A${fin.capex.total_investment / 1e6:.1f}M"),
+            ("Annual OPEX", f"A${fin.annual_opex / 1e6:.2f}M/yr"),
         ]
         st.dataframe(
             pd.DataFrame(capex_rows, columns=["Item", "Value"]),
@@ -79,7 +81,7 @@ def _render_multi_year_overview(fin) -> None:
     ))
     fig.add_hline(y=0, line_dash="dash", line_color="gray")
     fig.update_layout(
-        xaxis_title="Year", yaxis_title="NPV (€M)", height=400,
+        xaxis_title="Year", yaxis_title="NPV (A$M)", height=400,
         margin=dict(t=10, b=40),
     )
     st.plotly_chart(fig, width="stretch")
@@ -90,12 +92,12 @@ def _render_multi_year_overview(fin) -> None:
     rows = [
         {
             "Year": y.year,
-            "PPA Revenue (€M)": round(y.ppa_revenue / 1e6, 2),
-            "Merchant Revenue (€M)": round(y.merch_revenue / 1e6, 2),
-            "Market Buy Cost (€M)": round(y.market_buy_cost / 1e6, 2),
-            "Penalty Cost (€M)": round(y.penalty_cost / 1e6, 2),
-            "OPEX (€M)": round(y.opex / 1e6, 2),
-            "Net Cash Flow (€M)": round(y.net_cashflow / 1e6, 2),
+            "PPA Revenue (A$M)": round(y.ppa_revenue / 1e6, 2),
+            "Merchant Revenue (A$M)": round(y.merch_revenue / 1e6, 2),
+            "Market Buy Cost (A$M)": round(y.market_buy_cost / 1e6, 2),
+            "Penalty Cost (A$M)": round(y.penalty_cost / 1e6, 2),
+            "OPEX (A$M)": round(y.opex / 1e6, 2),
+            "Net Cash Flow (A$M)": round(y.net_cashflow / 1e6, 2),
             "Delivery Rate (%)": round(y.fulfilled_share * 100, 1),
             "Wind Gen (GWh)": round(y.wind_gen_mwh / 1e3, 1),
             "PV Gen (GWh)": round(y.pv_gen_mwh / 1e3, 1),
@@ -133,18 +135,18 @@ def _render_single_day_overview() -> None:
     )
     cols[1].metric(
         "Net Revenue",
-        f"€{revenue.net_revenue / 1e6:,.2f}M",
+        f"A${revenue.net_revenue / 1e6:,.2f}M",
         help="PPA revenue + merchant revenue − market purchases − penalty costs − transmission costs (period total)",
     )
     cols[2].metric(
         "Effective Capture Price",
-        f"€{revenue.effective_capture_price:.2f}/MWh",
+        f"A${revenue.effective_capture_price:.2f}/MWh",
         help="Net revenue ÷ total generation (MWh)",
     )
     if fin is not None:
         cols[3].metric(
             "LCOE",
-            f"€{fin.lcoe:.2f}/MWh",
+            f"A${fin.lcoe:.2f}/MWh",
             help=f"Levelised Cost of Energy at {s.discount_rate:.0%} WACC",
         )
     else:
@@ -165,32 +167,34 @@ def _render_single_day_overview() -> None:
         st.subheader("Offtaker procurement comparison")
         st.caption(
             "How much would the offtaker have paid under alternative sourcing strategies? "
-            "Effective €/MWh for the modelled period — covers shortfall hours at spot for the PPA column."
+            "Effective A$/MWh for the modelled period — covers shortfall hours at spot for the PPA column."
         )
+        if s.cal_forward_source == "aer_indicative":
+            st.caption(s.cal_forward_note)
         cols = st.columns(4)
         cols[0].metric(
             "PPA (offtaker)",
-            f"€{cf.ppa_effective_price:.2f}/MWh",
+            f"A${cf.ppa_effective_price:.2f}/MWh",
             help="PPA tariff for delivered MWh + spot price for any undelivered load.",
         )
         cols[1].metric(
             "Spot-only",
-            f"€{cf.spot_avg_price:.2f}/MWh",
-            delta=f"{cf.spot_avg_price - cf.ppa_effective_price:+.2f} €/MWh vs PPA",
+            f"A${cf.spot_avg_price:.2f}/MWh",
+            delta=f"{cf.spot_avg_price - cf.ppa_effective_price:+.2f} A$/MWh vs PPA",
             delta_color="normal",
             help="100% of load sourced at real-time spot each hour.",
         )
         cols[2].metric(
-            f"CAL Y+1 (€{s.cal_forward_price:.0f}/MWh)",
-            f"€{cf.cal_avg_price:.2f}/MWh",
-            delta=f"{cf.cal_avg_price - cf.ppa_effective_price:+.2f} €/MWh vs PPA",
+            f"CAL Y+1 (A${s.cal_forward_price:.0f}/MWh)",
+            f"A${cf.cal_avg_price:.2f}/MWh",
+            delta=f"{cf.cal_avg_price - cf.ppa_effective_price:+.2f} A$/MWh vs PPA",
             delta_color="normal",
             help="Flat baseload forward contract; zero spot exposure.",
         )
         cols[3].metric(
             f"Blended ({s.cal_hedge_fraction:.0%} CAL)",
-            f"€{cf.blended_avg_price:.2f}/MWh",
-            delta=f"{cf.blended_avg_price - cf.ppa_effective_price:+.2f} €/MWh vs PPA",
+            f"A${cf.blended_avg_price:.2f}/MWh",
+            delta=f"{cf.blended_avg_price - cf.ppa_effective_price:+.2f} A$/MWh vs PPA",
             delta_color="normal",
             help=f"{s.cal_hedge_fraction:.0%} of load at CAL Y+1 forward + remainder at spot.",
         )
@@ -247,9 +251,9 @@ def _render_single_day_overview() -> None:
             else "Market buy (negative-price benefit)"
         )
         mkt_buy_display = (
-            f"−€{revenue.market_purchase_cost:,.0f}"
+            f"−A${revenue.market_purchase_cost:,.0f}"
             if revenue.market_purchase_cost >= 0
-            else f"+€{-revenue.market_purchase_cost:,.0f}"
+            else f"+A${-revenue.market_purchase_cost:,.0f}"
         )
         rev_data = {
             "Item": [
@@ -260,13 +264,13 @@ def _render_single_day_overview() -> None:
                 "Transmission cost (combined)",
                 "Net revenue",
             ],
-            "€": [
-                f"€{revenue.ppa_revenue:,.0f}",
-                f"€{revenue.excess_revenue:,.0f}",
+            "A$": [
+                f"A${revenue.ppa_revenue:,.0f}",
+                f"A${revenue.excess_revenue:,.0f}",
                 mkt_buy_display,
-                f"−€{revenue.penalty_cost:,.0f}",
-                f"−€{revenue.transmission_cost:,.0f}",
-                f"€{revenue.net_revenue:,.0f}",
+                f"−A${revenue.penalty_cost:,.0f}",
+                f"−A${revenue.transmission_cost:,.0f}",
+                f"A${revenue.net_revenue:,.0f}",
             ],
         }
         st.dataframe(pd.DataFrame(rev_data), hide_index=True, width="stretch")

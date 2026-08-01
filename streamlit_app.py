@@ -12,13 +12,14 @@ from ui.tabs import (
     introduction,
     case_study,
     data_download,
+    nem_map,
+    custom_data,
     optimization,
     results_overview,
     results_deep_dive,
     sensitivity_analysis,
     scenario_analysis,
     financial_model,
-    excel_import,
 )
 
 st.markdown(
@@ -39,6 +40,8 @@ tabs = st.tabs([
     "| 👋 Welcome",
     "| 1. 🔬 Case Setup",
     "| 2.📡 Get Data",
+    "| 2b. 🗺️ NEM Plant Map",
+    "| 2c. 📤 Custom Data",
     "| 3. ⚙️ Optimization",
     "| 4. 🔍 Results",
     "| 5. 🏦 Financial Model",
@@ -63,6 +66,16 @@ i += 1
 if tabs[i].open:
     with tabs[i]:
         data_download.render()
+
+i += 1
+if tabs[i].open:
+    with tabs[i]:
+        nem_map.render()
+
+i += 1
+if tabs[i].open:
+    with tabs[i]:
+        custom_data.render()
 
 i += 1
 if tabs[i].open:
@@ -93,11 +106,6 @@ if tabs[i].open:
 #if tabs[i].open:
 #    with tabs[i]:
 #        scenario_analysis.render()
-
-#i += 1
-#if tabs[i].open:
-#    with tabs[i]:
-#        excel_import.render()
 
 #i += 1
 #if tabs[i].open:

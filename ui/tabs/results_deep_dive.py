@@ -20,7 +20,7 @@ from ui.charts import (
 
 
 def _fmt_m(v: float) -> str:
-    return f"€{v / 1e6:,.2f}M"
+    return f"A${v / 1e6:,.2f}M"
 
 
 def _render_dispatch_section(result, s, chosen_day: str) -> None:
@@ -86,6 +86,8 @@ def _render_multi_year_counterfactuals(results, fin, s) -> None:
         "Compares the offtaker's all-in cost under the PPA versus alternative sourcing strategies. "
         "CAL Y+1 price is escalated year-on-year at the same rate as market prices."
     )
+    if s.cal_forward_source == "aer_indicative":
+        st.caption(s.cal_forward_note)
 
     yearly_cfs = []
     for idx, (yf, res) in enumerate(zip(fin.yearly, results)):
@@ -95,7 +97,16 @@ def _render_multi_year_counterfactuals(results, fin, s) -> None:
         # Escalate CAL forward price same as market prices
         cal_price = s.cal_forward_price * (1 + s.price_escalation_rate) ** idx
         year_scenario = dataclasses.replace(res.scenario, cal_forward_price=cal_price)
-        ts_mock = pd.DataFrame({"ts_MktPrice": prices})
+        # Reconstruct the actual hourly load from the dispatch balance at
+        # Bus_PPAOfftake (ppa_delivery + allowed_shortfall + penalty_gen == load),
+        # since only market_prices (not the full input `ts`) is retained per
+        # multi-year result. This is the real hourly load, not the flat peak MW.
+        load_mw = (
+            res.dispatch.ppa_delivery
+            + res.dispatch.allowed_shortfall
+            + res.dispatch.penalty_gen
+        )
+        ts_mock = pd.DataFrame({"ts_MktPrice": prices, "ppaload_mw": load_mw})
         cf = compute_counterfactuals(ts_mock, year_scenario, res)
         yearly_cfs.append((yf.year, cf, cal_price))
 
@@ -122,16 +133,16 @@ def _render_multi_year_counterfactuals(results, fin, s) -> None:
     total_ppa = sum(cf.ppa_offtaker_cost for _, cf, _ in yearly_cfs)
 
     def _eff(cost): return cost / total_load if total_load > 0 else 0.0
-    def _em(cost): return f"€{cost / 1e6:.2f}M"
+    def _em(cost): return f"A${cost / 1e6:.2f}M"
 
     tbl = pd.DataFrame([
-        ("PPA (offtaker)", f"€{_eff(total_ppa):.2f}/MWh", _em(total_ppa), "—"),
-        ("Spot-only", f"€{_eff(total_spot):.2f}/MWh", _em(total_spot),
-         f"€{(total_spot - total_ppa) / 1e6:+.2f}M vs PPA"),
-        ("CAL Y+1 (escalated)", f"€{_eff(total_cal):.2f}/MWh", _em(total_cal),
-         f"€{(total_cal - total_ppa) / 1e6:+.2f}M vs PPA"),
-        ("Blended", f"€{_eff(total_blended):.2f}/MWh", _em(total_blended),
-         f"€{(total_blended - total_ppa) / 1e6:+.2f}M vs PPA"),
+        ("PPA (offtaker)", f"A${_eff(total_ppa):.2f}/MWh", _em(total_ppa), "—"),
+        ("Spot-only", f"A${_eff(total_spot):.2f}/MWh", _em(total_spot),
+         f"A${(total_spot - total_ppa) / 1e6:+.2f}M vs PPA"),
+        ("CAL Y+1 (escalated)", f"A${_eff(total_cal):.2f}/MWh", _em(total_cal),
+         f"A${(total_cal - total_ppa) / 1e6:+.2f}M vs PPA"),
+        ("Blended", f"A${_eff(total_blended):.2f}/MWh", _em(total_blended),
+         f"A${(total_blended - total_ppa) / 1e6:+.2f}M vs PPA"),
     ], columns=["Strategy", "Lifetime effective price", "Lifetime total cost", "vs PPA"])
     st.dataframe(tbl, hide_index=True, width="stretch")
 
@@ -150,10 +161,12 @@ def _render_multi_year_deep_dive() -> None:
             st.markdown("**CAPEX & OPEX**")
             capex_df = pd.DataFrame(
                 [
-                    ("Onshore wind", _fmt_m(fin.capex.capex_wind), f"{s.onsw_mw:.0f} MW × €{s.wind_capex_per_kw:,.0f}/kW"),
-                    ("Solar PV", _fmt_m(fin.capex.capex_pv), f"{s.pv_mw:.0f} MW × €{s.pv_capex_per_kw:,.0f}/kW"),
-                    ("BESS", _fmt_m(fin.capex.capex_bess), f"{s.effective_bess_mwh:.0f} MWh × €{s.bess_capex_per_kwh:,.0f}/kWh"),
+                    ("Onshore wind", _fmt_m(fin.capex.capex_wind), f"{s.onsw_mw:.0f} MW × A${s.wind_capex_per_kw:,.0f}/kW"),
+                    ("Solar PV", _fmt_m(fin.capex.capex_pv), f"{s.pv_mw:.0f} MW × A${s.pv_capex_per_kw:,.0f}/kW"),
+                    ("BESS", _fmt_m(fin.capex.capex_bess), f"{s.effective_bess_mwh:.0f} MWh × A${s.bess_capex_per_kwh:,.0f}/kWh"),
+                    ("Devex", _fmt_m(fin.capex.devex_total), f"{s.devex_pct_of_capex:.0%} of CAPEX"),
                     ("Total CAPEX", _fmt_m(fin.capex.capex_total), ""),
+                    ("Total investment", _fmt_m(fin.capex.total_investment), ""),
                     ("Annual OPEX", _fmt_m(fin.annual_opex), f"{s.opex_rate:.0%} of CAPEX"),
                 ],
                 columns=["Component", "Value", "Basis"],
@@ -162,7 +175,7 @@ def _render_multi_year_deep_dive() -> None:
         with cols[1]:
             st.markdown("**Project economics**")
             irr_str = f"{fin.irr:.1%}" if fin.irr == fin.irr else "n/a"
-            lcoe_str = f"€{fin.lcoe:.2f}/MWh" if fin.lcoe == fin.lcoe else "n/a"
+            lcoe_str = f"A${fin.lcoe:.2f}/MWh" if fin.lcoe == fin.lcoe else "n/a"
             payback_str = f"{fin.simple_payback:.1f} yrs" if fin.simple_payback < 1e8 else "n/a"
             econ_df = pd.DataFrame(
                 [
@@ -191,9 +204,9 @@ def _render_multi_year_deep_dive() -> None:
     with st.expander(f"Financial summary for {selected_year}", expanded=False):
         yf = fin.yearly[year_idx]
         cols = st.columns(5)
-        cols[0].metric("PPA Revenue", f"€{yf.ppa_revenue / 1e6:.2f}M")
-        cols[1].metric("Merchant Revenue", f"€{yf.merch_revenue / 1e6:.2f}M")
-        cols[2].metric("Net Cash Flow", f"€{yf.net_cashflow / 1e6:.2f}M")
+        cols[0].metric("PPA Revenue", f"A${yf.ppa_revenue / 1e6:.2f}M")
+        cols[1].metric("Merchant Revenue", f"A${yf.merch_revenue / 1e6:.2f}M")
+        cols[2].metric("Net Cash Flow", f"A${yf.net_cashflow / 1e6:.2f}M")
         cols[3].metric("Delivery Rate", f"{yf.fulfilled_share:.1%}")
         cols[4].metric("Wind+PV Gen", f"{(yf.wind_gen_mwh + yf.pv_gen_mwh) / 1e3:.0f} GWh")
 
@@ -241,10 +254,12 @@ def _render_single_day_deep_dive() -> None:
             st.markdown("**CAPEX & OPEX**")
             capex_df = pd.DataFrame(
                 [
-                    ("Onshore wind", _fmt_m(fin.capex.capex_wind), f"{s.onsw_mw:.0f} MW × €{s.wind_capex_per_kw:,.0f}/kW"),
-                    ("Solar PV", _fmt_m(fin.capex.capex_pv), f"{s.pv_mw:.0f} MW × €{s.pv_capex_per_kw:,.0f}/kW"),
-                    ("BESS", _fmt_m(fin.capex.capex_bess), f"{s.effective_bess_mwh:.0f} MWh × €{s.bess_capex_per_kwh:,.0f}/kWh"),
+                    ("Onshore wind", _fmt_m(fin.capex.capex_wind), f"{s.onsw_mw:.0f} MW × A${s.wind_capex_per_kw:,.0f}/kW"),
+                    ("Solar PV", _fmt_m(fin.capex.capex_pv), f"{s.pv_mw:.0f} MW × A${s.pv_capex_per_kw:,.0f}/kW"),
+                    ("BESS", _fmt_m(fin.capex.capex_bess), f"{s.effective_bess_mwh:.0f} MWh × A${s.bess_capex_per_kwh:,.0f}/kWh"),
+                    ("Devex", _fmt_m(fin.capex.devex_total), f"{s.devex_pct_of_capex:.0%} of CAPEX"),
                     ("Total CAPEX", _fmt_m(fin.capex.capex_total), ""),
+                    ("Total investment", _fmt_m(fin.capex.total_investment), ""),
                     ("Annual OPEX", _fmt_m(fin.capex.annual_opex), f"{s.opex_rate:.0%} of CAPEX"),
                 ],
                 columns=["Component", "Value", "Basis"],
@@ -254,15 +269,15 @@ def _render_single_day_deep_dive() -> None:
         with cols[1]:
             st.markdown("**Project economics**")
             irr_str = f"{fin.project_irr:.1%}" if not np.isnan(fin.project_irr) else "n/a"
-            lcoe_str = f"€{fin.lcoe:.2f}/MWh" if not np.isnan(fin.lcoe) else "n/a"
-            be_str = f"€{fin.breakeven_ppa_price:.2f}/MWh" if not np.isnan(fin.breakeven_ppa_price) else "n/a"
+            lcoe_str = f"A${fin.lcoe:.2f}/MWh" if not np.isnan(fin.lcoe) else "n/a"
+            be_str = f"A${fin.breakeven_ppa_price:.2f}/MWh" if not np.isnan(fin.breakeven_ppa_price) else "n/a"
             econ_df = pd.DataFrame(
                 [
                     ("Scale factor (period → annual)", f"×{fin.scale_factor:.2f}", ""),
                     ("Annual generation (indicative)", f"{fin.annual_gen_mwh:,.0f} MWh", ""),
-                    ("Annual PPA revenue", _fmt_m(fin.annual_ppa_rev), f"€{s.ppa_price:.0f}/MWh"),
-                    ("Annual merchant revenue", _fmt_m(fin.annual_merch_rev), f"avg €{fin.avg_merch_price:.2f}/MWh"),
-                    ("Annual market purchase cost", _fmt_m(fin.annual_buy_cost), f"avg €{fin.avg_buy_price:.2f}/MWh"),
+                    ("Annual PPA revenue", _fmt_m(fin.annual_ppa_rev), f"A${s.ppa_price:.0f}/MWh"),
+                    ("Annual merchant revenue", _fmt_m(fin.annual_merch_rev), f"avg A${fin.avg_merch_price:.2f}/MWh"),
+                    ("Annual market purchase cost", _fmt_m(fin.annual_buy_cost), f"avg A${fin.avg_buy_price:.2f}/MWh"),
                     ("Annual net revenue", _fmt_m(fin.annual_net_rev), ""),
                     ("Annual OPEX", _fmt_m(fin.annual_opex), ""),
                     ("Annual pre-tax cashflow", _fmt_m(fin.annual_cf), ""),
@@ -270,7 +285,7 @@ def _render_single_day_deep_dive() -> None:
                     ("Simple payback", f"{fin.simple_payback:.1f} yrs", ""),
                     ("Project IRR", irr_str, f"pre-tax, {s.project_life_yrs}-yr life"),
                     ("NPV at WACC", _fmt_m(fin.npv_at_wacc), f"at {s.discount_rate:.0%}"),
-                    (f"Breakeven PPA for {s.target_irr:.0%} IRR", be_str, f"vs €{s.ppa_price:.0f}/MWh contracted"),
+                    (f"Breakeven PPA for {s.target_irr:.0%} IRR", be_str, f"vs A${s.ppa_price:.0f}/MWh contracted"),
                 ],
                 columns=["Metric", "Value", "Note"],
             )
@@ -310,6 +325,8 @@ def _render_single_day_deep_dive() -> None:
             "How does the PPA cost compare to what the offtaker would have paid "
             "under alternative sourcing strategies? All figures are for the modelled period."
         )
+        if s.cal_forward_source == "aer_indicative":
+            st.caption(s.cal_forward_note)
 
         cols = st.columns([1, 2])
         with cols[0]:
@@ -321,16 +338,16 @@ def _render_single_day_deep_dive() -> None:
 
         cf_table = pd.DataFrame(
             [
-                ("Spot-only", f"€{cf.spot_avg_price:.2f}", f"€{cf.spot_cost / 1e6:.3f}M",
-                 f"€{cf.spot_cost - cf.ppa_offtaker_cost:+,.0f}"),
-                (f"CAL Y+1 (€{s.cal_forward_price:.0f}/MWh)", f"€{cf.cal_avg_price:.2f}",
-                 f"€{cf.cal_cost / 1e6:.3f}M", f"€{cf.cal_cost - cf.ppa_offtaker_cost:+,.0f}"),
-                (f"Blended ({s.cal_hedge_fraction:.0%} CAL)", f"€{cf.blended_avg_price:.2f}",
-                 f"€{cf.blended_cost / 1e6:.3f}M", f"€{cf.blended_cost - cf.ppa_offtaker_cost:+,.0f}"),
-                ("PPA (offtaker)", f"€{cf.ppa_effective_price:.2f}",
-                 f"€{cf.ppa_offtaker_cost / 1e6:.3f}M", "—"),
+                ("Spot-only", f"A${cf.spot_avg_price:.2f}", f"A${cf.spot_cost / 1e6:.3f}M",
+                 f"A${cf.spot_cost - cf.ppa_offtaker_cost:+,.0f}"),
+                (f"CAL Y+1 (A${s.cal_forward_price:.0f}/MWh)", f"A${cf.cal_avg_price:.2f}",
+                 f"A${cf.cal_cost / 1e6:.3f}M", f"A${cf.cal_cost - cf.ppa_offtaker_cost:+,.0f}"),
+                (f"Blended ({s.cal_hedge_fraction:.0%} CAL)", f"A${cf.blended_avg_price:.2f}",
+                 f"A${cf.blended_cost / 1e6:.3f}M", f"A${cf.blended_cost - cf.ppa_offtaker_cost:+,.0f}"),
+                ("PPA (offtaker)", f"A${cf.ppa_effective_price:.2f}",
+                 f"A${cf.ppa_offtaker_cost / 1e6:.3f}M", "—"),
             ],
-            columns=["Strategy", "Effective €/MWh", "Period total", "vs PPA (€, + = more expensive)"],
+            columns=["Strategy", "Effective A$/MWh", "Period total", "vs PPA (A$, + = more expensive)"],
         )
         st.dataframe(cf_table, hide_index=True, width="stretch")
 

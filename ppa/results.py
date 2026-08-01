@@ -152,7 +152,7 @@ def extract_results(
     excess_revenue = float((market_sell * ts["ts_MktPrice"]).sum())
     market_purchase_cost = float((market_buy * ts["ts_MktPrice"]).sum())
     penalty_cost = penalty_mwh * s.penalty_price
-    transmission_cost = ppa_delivered_mwh * s.transmission_cost_eur_mwh
+    transmission_cost = ppa_delivered_mwh * s.transmission_cost_aud_mwh
     net_revenue = (
         ppa_revenue + excess_revenue - market_purchase_cost - penalty_cost - transmission_cost
     )

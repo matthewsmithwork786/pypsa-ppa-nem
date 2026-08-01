@@ -9,7 +9,7 @@ from typing import Callable
 
 import pandas as pd
 
-from ppa.data.european_data import build_year_timeseries, pick_weather_year
+from ppa.data.timeseries_utils import build_year_timeseries, pick_weather_year
 from ppa.network import build_network
 from ppa.results import OptimizationResult, extract_results
 from ppa.scenario import Scenario
@@ -142,6 +142,7 @@ def run_multi_year(
     pv_cf_by_year: dict[int, pd.Series],
     wind_cf_by_year: dict[int, pd.Series],
     prices_by_year: dict[int, pd.Series],
+    load_mw_by_year: dict[int, pd.Series] | None = None,
     first_sim_year: int = 2025,
     max_workers: int = 4,
     progress_callback: Callable[[int, int, int], None] | None = None,
@@ -166,6 +167,7 @@ def run_multi_year(
     n_years = scenario.simulation_years
     available_weather_years = sorted(pv_cf_by_year.keys())
     available_price_years = sorted(prices_by_year.keys())
+    available_load_years = sorted(load_mw_by_year) if load_mw_by_year else []
 
     # Pre-build all timeseries and per-year scenarios on the main thread
     timeseries_by_idx: dict[int, pd.DataFrame] = {}
@@ -175,7 +177,12 @@ def run_multi_year(
         weather_year = pick_weather_year(idx, available_weather_years)
         # Cycle price years independently if they don't fully overlap with CF years
         price_year = pick_weather_year(idx, available_price_years)
+        # Load overrides (custom CSV) are not degraded -- only generation/BESS are.
         degraded = _degraded_scenario(scenario, idx)
+        load_kw = (
+            {weather_year: load_mw_by_year[pick_weather_year(idx, available_load_years)]}
+            if load_mw_by_year else None
+        )
         ts = build_year_timeseries(
             sim_year=sim_year,
             weather_year=weather_year,
@@ -185,6 +192,7 @@ def run_multi_year(
             prices_by_year={weather_year: prices_by_year[price_year]},
             price_escalation_rate=scenario.price_escalation_rate,
             load_profile=scenario.load_profile,
+            load_mw_by_year=load_kw,
         )
         timeseries_by_idx[idx] = ts
         scenario_by_idx[idx] = degraded

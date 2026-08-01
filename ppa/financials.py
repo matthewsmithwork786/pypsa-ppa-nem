@@ -17,6 +17,8 @@ class CapexBreakdown:
     capex_pv: float
     capex_bess: float
     capex_total: float
+    devex_total: float
+    total_investment: float
     annual_opex: float
 
 
@@ -54,6 +56,8 @@ def run_financial_analysis(
     capex_pv = s.pv_capex_per_kw * s.pv_mw * 1_000
     capex_bess = s.bess_capex_per_kwh * s.effective_bess_mwh * 1_000
     capex_total = capex_wind + capex_pv + capex_bess
+    devex_total = capex_total * s.devex_pct_of_capex
+    total_investment = capex_total + devex_total
     annual_opex = capex_total * s.opex_rate
 
     capex = CapexBreakdown(
@@ -61,6 +65,8 @@ def run_financial_analysis(
         capex_pv=capex_pv,
         capex_bess=capex_bess,
         capex_total=capex_total,
+        devex_total=devex_total,
+        total_investment=total_investment,
         annual_opex=annual_opex,
     )
 
@@ -86,16 +92,16 @@ def run_financial_analysis(
     annual_ppa_rev = annual_ppa_vol * s.ppa_price
     annual_merch_rev = annual_merch_mwh * avg_merch_price
     annual_buy_cost = annual_buy_mwh * avg_buy_price
-    annual_trans_cost = annual_ppa_vol * s.transmission_cost_eur_mwh
+    annual_trans_cost = annual_ppa_vol * s.transmission_cost_aud_mwh
     annual_net_rev = annual_ppa_rev + annual_merch_rev - annual_buy_cost - annual_trans_cost
 
     # ── LCOE ──────────────────────────────────────────────────────────────────
     annuity_wacc = (1 - (1 + s.discount_rate) ** -s.project_life_yrs) / s.discount_rate
-    lcoe = (capex_total / annuity_wacc + annual_opex) / annual_gen_mwh if annual_gen_mwh > 0 else float("nan")
+    lcoe = (total_investment / annuity_wacc + annual_opex) / annual_gen_mwh if annual_gen_mwh > 0 else float("nan")
 
     # ── NPV / IRR ──────────────────────────────────────────────────────────────
     annual_cf = annual_net_rev - annual_opex
-    cashflows = [-capex_total] + [annual_cf] * s.project_life_yrs
+    cashflows = [-total_investment] + [annual_cf] * s.project_life_yrs
 
     def _npv(rate: float) -> float:
         return sum(cf / (1 + rate) ** t for t, cf in enumerate(cashflows))
@@ -105,12 +111,12 @@ def run_financial_analysis(
     except ValueError:
         project_irr = float("nan")
 
-    simple_payback = capex_total / annual_cf if annual_cf > 0 else float("inf")
+    simple_payback = total_investment / annual_cf if annual_cf > 0 else float("inf")
     npv_at_wacc = _npv(s.discount_rate)
 
     # ── Breakeven PPA price for target IRR ────────────────────────────────────
     annuity_target = (1 - (1 + s.target_irr) ** -s.project_life_yrs) / s.target_irr
-    required_cf = capex_total / annuity_target
+    required_cf = total_investment / annuity_target
     required_rev = required_cf + annual_opex
     required_ppa_rev = required_rev - annual_merch_rev + annual_buy_cost + annual_trans_cost
     breakeven_ppa_price = required_ppa_rev / annual_ppa_vol if annual_ppa_vol > 0 else float("nan")
@@ -191,6 +197,8 @@ def run_multi_year_financial_analysis(
     capex_pv = s.pv_capex_per_kw * s.pv_mw * 1_000
     capex_bess = s.bess_capex_per_kwh * s.effective_bess_mwh * 1_000
     capex_total = capex_wind + capex_pv + capex_bess
+    devex_total = capex_total * s.devex_pct_of_capex
+    total_investment = capex_total + devex_total
     annual_opex = capex_total * s.opex_rate
 
     capex = CapexBreakdown(
@@ -198,11 +206,13 @@ def run_multi_year_financial_analysis(
         capex_pv=capex_pv,
         capex_bess=capex_bess,
         capex_total=capex_total,
+        devex_total=devex_total,
+        total_investment=total_investment,
         annual_opex=annual_opex,
     )
 
     yearly: list[YearlyFinancials] = []
-    cashflows: list[float] = [-capex_total]
+    cashflows: list[float] = [-total_investment]
     total_revenue = 0.0
     total_gen_mwh = 0.0
 
@@ -256,18 +266,18 @@ def run_multi_year_financial_analysis(
     annuity_wacc = (1 - (1 + s.discount_rate) ** -s.project_life_yrs) / s.discount_rate
     avg_annual_gen = total_gen_mwh / len(year_results) if year_results else 0.0
     lcoe = (
-        (capex_total / annuity_wacc + annual_opex) / avg_annual_gen
+        (total_investment / annuity_wacc + annual_opex) / avg_annual_gen
         if avg_annual_gen > 0
         else float("nan")
     )
 
     # ── Simple payback ────────────────────────────────────────────────────────
     avg_cf = sum(c for c in cashflows[1:]) / len(cashflows[1:]) if len(cashflows) > 1 else 0.0
-    simple_payback = capex_total / avg_cf if avg_cf > 0 else float("inf")
+    simple_payback = total_investment / avg_cf if avg_cf > 0 else float("inf")
 
     # ── Cumulative NPV series ─────────────────────────────────────────────────
     cumulative_npv: list[float] = []
-    running = -capex_total
+    running = -total_investment
     for t, cf in enumerate(cashflows[1:], start=1):
         running += cf / (1 + s.discount_rate) ** t
         cumulative_npv.append(running)

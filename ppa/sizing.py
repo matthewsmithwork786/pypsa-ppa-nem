@@ -19,7 +19,7 @@ from typing import Callable
 
 import pandas as pd
 
-from ppa.data.european_data import build_year_timeseries, pick_weather_year
+from ppa.data.timeseries_utils import build_year_timeseries, pick_weather_year
 from ppa.multi_year import _available_memory_mb, _PER_WORKER_MEM_MB
 from ppa.network import build_network
 from ppa.scenario import Scenario
@@ -103,6 +103,7 @@ def build_sizing_timeseries(
     wind_cf_by_year: dict[int, pd.Series],
     prices_by_year: dict[int, pd.Series],
     n_sizing_years: int,
+    load_mw_by_year: dict[int, pd.Series] | None = None,
 ) -> pd.DataFrame:
     """Concatenate per-year timeseries into one sizing-LP horizon.
 
@@ -114,12 +115,17 @@ def build_sizing_timeseries(
     """
     available_weather_years = sorted(pv_cf_by_year.keys())
     available_price_years = sorted(prices_by_year.keys())
+    available_load_years = sorted(load_mw_by_year) if load_mw_by_year else []
 
     frames: list[pd.DataFrame] = []
     for idx in range(n_sizing_years):
         sim_year = scenario.first_sim_year + idx
         weather_year = pick_weather_year(idx, available_weather_years)
         price_year = pick_weather_year(idx, available_price_years)
+        load_kw = (
+            {weather_year: load_mw_by_year[pick_weather_year(idx, available_load_years)]}
+            if load_mw_by_year else None
+        )
         ts = build_year_timeseries(
             sim_year=sim_year,
             weather_year=weather_year,
@@ -131,6 +137,7 @@ def build_sizing_timeseries(
             prices_by_year={weather_year: prices_by_year[price_year]},
             price_escalation_rate=scenario.price_escalation_rate,
             load_profile=scenario.load_profile,
+            load_mw_by_year=load_kw,
         )
         # Bake technology degradation into the capacity factors for this year
         ts["ts_PVGen"] = ts["ts_PVGen"] * (1.0 - scenario.pv_degradation_rate) ** idx
@@ -184,7 +191,7 @@ def optimize_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         # bess_max_hours reads bess_mwh/bess_mw, so encode via a 1 MW reference.
         bess_mw=1.0,
         bess_mwh=scenario.bess_max_hours * avg_bess_factor,
-        # The LP prices BESS capex as €/kWh × max_hours; compensate the de-rated
+        # The LP prices BESS capex as A$/kWh × max_hours; compensate the de-rated
         # hours so capex is still charged on the *nameplate* energy.
         bess_capex_per_kwh=scenario.bess_capex_per_kwh / avg_bess_factor,
     )

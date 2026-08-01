@@ -35,18 +35,18 @@ class SensParam:
 # Full catalogue — ordered by group then impact
 PARAMS: list[SensParam] = [
     # CAPEX
-    SensParam("Wind build cost (€m/MW)",  "onsw_build_cost",   "CAPEX"),
-    SensParam("Solar build cost (€m/MW)", "pv_build_cost",     "CAPEX"),
-    SensParam("BESS build cost (€m/MWh)", "bess_build_cost",   "CAPEX"),
+    SensParam("Wind build cost (A$m/MW)",  "onsw_build_cost",   "CAPEX"),
+    SensParam("Solar build cost (A$m/MW)", "pv_build_cost",     "CAPEX"),
+    SensParam("BESS build cost (A$m/MWh)", "bess_build_cost",   "CAPEX"),
     # OPEX
-    SensParam("Wind fixed O&M (€m/MW)",   "onsw_fixed_om",     "OPEX"),
-    SensParam("Solar fixed O&M (€m/MW)",  "pv_fixed_om",       "OPEX"),
-    SensParam("BESS fixed O&M (€m/MWh)",  "bess_fixed_om",     "OPEX"),
+    SensParam("Wind fixed O&M (A$m/MW)",   "onsw_fixed_om",     "OPEX"),
+    SensParam("Solar fixed O&M (A$m/MW)",  "pv_fixed_om",       "OPEX"),
+    SensParam("BESS fixed O&M (A$m/MWh)",  "bess_fixed_om",     "OPEX"),
     SensParam("Ancillary cost (% rev)",   "ancillary_pct",     "OPEX"),
     # Revenue
-    SensParam("PPA tariff (€/MWh)",       "ppa_tariff",        "Revenue"),
+    SensParam("PPA tariff (A$/MWh)",       "ppa_tariff",        "Revenue"),
     SensParam("Penalty multiple (×)",     "penalty_multiple",  "Revenue", pct=30),
-    SensParam("LGC / GO price (€/MWh)",   "lgc_price",         "Revenue", pct=50),
+    SensParam("LGC / GO price (A$/MWh)",   "lgc_price",         "Revenue", pct=50),
     # Indexation
     SensParam("PPA indexation (%/yr)",    "ppa_indexation",    "Indexation", pct=50),
     SensParam("Cost inflation (%/yr)",    "cost_inflation",    "Indexation", pct=50),

@@ -1,0 +1,9 @@
+# These are ONLY for running the one-time data-acquisition scripts in
+# scripts/ from a SEPARATE environment with real network access. Do NOT add
+# these to pixi.toml or the top-level requirements.txt -- the main Streamlit
+# app must stay network-free and never depend on nemosis/requests for its
+# own runtime behaviour.
+nemosis
+pandas
+pyarrow
+requests

@@ -33,7 +33,7 @@ def build_network(ts: pd.DataFrame, scenario: Scenario, resolution_h: float = 1.
         n.snapshot_weightings.loc[:, :] = float(resolution_h)
 
     sizing = s.optimize_capacity
-    # Annualized €/MW/yr (or €/MW-of-BESS/yr via fixed duration), scaled by the
+    # Annualized A$/MW/yr (or A$/MW-of-BESS/yr via fixed duration), scaled by the
     # fraction of a year the LP covers so capex and operational costs are summed
     # over the same horizon. crf annualizes overnight capex; opex_rate adds fixed O&M.
     horizon_years = len(ts) * resolution_h / 8760.0
@@ -136,7 +136,7 @@ def build_network(ts: pd.DataFrame, scenario: Scenario, resolution_h: float = 1.
 
     # ── Storage ───────────────────────────────────────────────────────────────
     # In sizing mode BESS power is optimized at fixed duration (max_hours);
-    # energy = optimized MW × max_hours, priced via bess_cc (€/kWh × hours).
+    # energy = optimized MW × max_hours, priced via bess_cc (A$/kWh × hours).
     n.add(
         "StorageUnit",
         "SU_BESS",
@@ -166,7 +166,7 @@ def build_network(ts: pd.DataFrame, scenario: Scenario, resolution_h: float = 1.
         ("IPPGen_to_SellToMarket",         "Bus_IPPGeneration", "Bus_SellToMarket",  s.maxsell_mw,                   0.0),
         # Delivery earns the PPA tariff but pays the combined transmission /
         # grid-use charge per MWh, whatever the source (RE, BESS or market buy).
-        ("IPPGen_to_PPAOfftake",           "Bus_IPPGeneration", "Bus_PPAOfftake",    s.ppaload_mw,                   s.transmission_cost_eur_mwh - s.ppa_price),
+        ("IPPGen_to_PPAOfftake",           "Bus_IPPGeneration", "Bus_PPAOfftake",    s.ppaload_mw,                   s.transmission_cost_aud_mwh - s.ppa_price),
     ]
 
     for name, bus0, bus1, p_nom, marginal_cost in link_defs:

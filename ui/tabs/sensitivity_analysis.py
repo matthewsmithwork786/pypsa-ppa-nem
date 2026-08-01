@@ -65,11 +65,11 @@ def _get_base() -> tuple[EnergyInputs | None, ProjectFinanceInputs | None]:
 METRIC_OPTIONS = {
     "project_irr": "Project IRR",
     "equity_irr": "Equity IRR",
-    "npv_project": "NPV (€m)",
+    "npv_project": "NPV (A$m)",
     "gearing": "Gearing",
-    "lcoe": "LCOE (€/MWh)",
-    "total_capex": "Total capex (€m)",
-    "total_debt": "Total debt (€m)",
+    "lcoe": "LCOE (A$/MWh)",
+    "total_capex": "Total capex (A$m)",
+    "total_debt": "Total debt (A$m)",
     "min_dscr": "Min DSCR",
 }
 PCT_METRICS = {"project_irr", "equity_irr", "gearing"}
@@ -119,11 +119,11 @@ def _what_if_panel(base_energy: EnergyInputs, base_finance: ProjectFinanceInputs
         cols = st.columns(4)
 
         with cols[0]:
-            st.markdown("**CAPEX (€m/MW or €m/MWh)**")
+            st.markdown("**CAPEX (A$m/MW or A$m/MWh)**")
             onsw_build = _num("Wind build", pf + "onsw_build", base_finance.onsw_build_cost, step=0.05, fmt="%.3f")
             pv_build   = _num("Solar build", pf + "pv_build",  base_finance.pv_build_cost,   step=0.05, fmt="%.3f")
             bess_build = _num("BESS build",  pf + "bess_build", base_finance.bess_build_cost, step=0.05, fmt="%.3f")
-            st.markdown("**OPEX (€m/MW or €m/MWh p.a.)**")
+            st.markdown("**OPEX (A$m/MW or A$m/MWh p.a.)**")
             onsw_om  = _num("Wind O&M",  pf + "onsw_om",  base_finance.onsw_fixed_om,  step=0.005, fmt="%.4f")
             pv_om    = _num("Solar O&M", pf + "pv_om",    base_finance.pv_fixed_om,    step=0.005, fmt="%.4f")
             bess_om  = _num("BESS O&M",  pf + "bess_om",  base_finance.bess_fixed_om,  step=0.005, fmt="%.4f")
@@ -131,9 +131,9 @@ def _what_if_panel(base_energy: EnergyInputs, base_finance: ProjectFinanceInputs
 
         with cols[1]:
             st.markdown("**Revenue**")
-            tariff  = _num("PPA tariff (€/MWh)",    pf + "tariff",  base_finance.ppa_tariff,      step=1.0)
+            tariff  = _num("PPA tariff (A$/MWh)",    pf + "tariff",  base_finance.ppa_tariff,      step=1.0)
             pen     = _num("Penalty multiple (×)",   pf + "pen",     base_finance.penalty_multiple, step=0.1, fmt="%.2f")
-            lgc     = _num("LGC / GO (€/MWh)",       pf + "lgc",     base_finance.lgc_price,        step=0.5)
+            lgc     = _num("LGC / GO (A$/MWh)",       pf + "lgc",     base_finance.lgc_price,        step=0.5)
             st.markdown("**Indexation (%/yr)**")
             ppa_idx      = _num("PPA indexation",     pf + "ppa_idx",      base_finance.ppa_indexation,          step=0.1, fmt="%.2f", pct=True)
             cost_infl    = _num("Cost inflation",     pf + "cost_infl",    base_finance.cost_inflation,           step=0.1, fmt="%.2f", pct=True)
@@ -184,8 +184,8 @@ def _what_if_panel(base_energy: EnergyInputs, base_finance: ProjectFinanceInputs
             ("Project IRR", "project_irr", True),
             ("Equity IRR",  "equity_irr",  True),
             ("Gearing",     "gearing",     True),
-            ("NPV (€m)",    "npv_project", False),
-            ("Total capex (€m)", "total_capex", False),
+            ("NPV (A$m)",    "npv_project", False),
+            ("Total capex (A$m)", "total_capex", False),
             ("Min DSCR",    "min_dscr",    False),
         ]
         for col, (label, attr, is_pct) in zip(cols, kpis):
