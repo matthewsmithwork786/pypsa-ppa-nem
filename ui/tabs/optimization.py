@@ -1,6 +1,8 @@
 """Optimization tab — run simulation or single-day reference optimization."""
 from __future__ import annotations
 
+import dataclasses
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -689,8 +691,29 @@ def render() -> None:
             if s.data_source not in ("custom_csv",) and not s.is_nem and not _ts_error_shown:
                 st.error("Could not load the reference timeseries from `data/cache/`.")
         else:
-            from ppa.data_loader import get_available_days
-            errors = validate_scenario(s, available_days=get_available_days(ts))
+            from ppa.data_loader import coerce_chosen_day, get_available_days
+
+            # Reconcile the sticky reference day with the period actually loaded,
+            # so day and period can never diverge: coerce (don't block) and
+            # surface the move as info rather than an error.
+            available_days = get_available_days(ts)
+            if available_days:
+                if s.chosen_day not in available_days:
+                    st.info(
+                        f"Reference day moved to **{coerce_chosen_day(ts, s.chosen_day)}** — "
+                        f"*{s.chosen_day}* is outside the selected period."
+                    )
+                reference_day = st.selectbox(
+                    "Reference day for daily charts", available_days,
+                    index=available_days.index(coerce_chosen_day(ts, s.chosen_day)),
+                    key="opt_reference_day",
+                )
+                s = dataclasses.replace(s, chosen_day=str(reference_day))
+
+            # The UI must not block on chosen_day (it is reconciled above); the
+            # check stays in validate_scenario for direct API callers.
+            errors = [e for e in validate_scenario(s, available_days=available_days)
+                      if "chosen_day" not in e]
             if errors:
                 for err in errors:
                     st.error(err)

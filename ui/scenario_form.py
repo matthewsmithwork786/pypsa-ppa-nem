@@ -5,7 +5,7 @@ import dataclasses
 import pandas as pd
 import streamlit as st
 
-from ppa.data_loader import get_available_days
+from ppa.data_loader import coerce_chosen_day
 from ppa.industrial_profiles import PROFILE_INFO, PROFILE_KEYS
 from ppa.scenario import Scenario
 from ui import state
@@ -592,18 +592,15 @@ def render_scenario_form(initial: Scenario) -> Scenario:
 
     with st.expander("Reference day selection", expanded=True):
         cols = st.columns(4)
-        # Chosen day selector (use available days from loaded timeseries)
+        # Read-only: the day is reconciled against the user-selected reference
+        # period on the Optimisation tab (coerce_chosen_day), so the two can
+        # never diverge. Display the coerced day here.
         ts = state.get_timeseries()
         if ts is not None:
-            available_days = get_available_days(ts)
-            chosen_day_idx = available_days.index(initial.chosen_day) if initial.chosen_day in available_days else 14
-            chosen_day = cols[0].selectbox(
-                "Reference day for daily charts", available_days,
-                index=chosen_day_idx, key="sf_chosen_day",
-            )
+            chosen_day = coerce_chosen_day(ts, initial.chosen_day)
         else:
             chosen_day = initial.chosen_day
-            cols[0].write(f"Day: {chosen_day}")
+        cols[0].write(f"Reference day for daily charts: **{chosen_day}**")
 
     return dataclasses.replace(
         initial,

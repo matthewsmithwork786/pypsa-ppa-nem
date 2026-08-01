@@ -296,10 +296,10 @@ def _render_single_day_deep_dive() -> None:
     st.subheader("Daily dispatch detail")
 
     if ts is not None:
-        from ppa.data_loader import prepare_timeseries, get_available_days
+        from ppa.data_loader import coerce_chosen_day, prepare_timeseries, get_available_days
         ts_prep = prepare_timeseries(ts, s)
         available_days = get_available_days(ts)
-        default_idx = available_days.index(s.chosen_day) if s.chosen_day in available_days else 14
+        default_idx = available_days.index(coerce_chosen_day(ts, s.chosen_day)) if available_days else 0
         chosen_day = st.selectbox("Select a day to inspect", available_days, index=default_idx, key="dd_chosen_day2")
 
         _render_dispatch_section(result, s, chosen_day)

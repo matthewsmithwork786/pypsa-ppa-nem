@@ -27,7 +27,6 @@ def test_scenario_default_chosen_day_is_2025():
 
 # ── W9: coercion returns an in-range day and is idempotent ───────────────────
 
-@pytest.mark.xfail(strict=True, reason="W9: coerce_chosen_day does not exist yet")
 def test_coerce_chosen_day_present_unchanged():
     from ppa.data_loader import coerce_chosen_day
 
@@ -35,7 +34,6 @@ def test_coerce_chosen_day_present_unchanged():
     assert coerce_chosen_day(ts, "2025-03-15") == "2025-03-15"
 
 
-@pytest.mark.xfail(strict=True, reason="W9: coerce_chosen_day does not exist yet")
 def test_coerce_chosen_day_out_of_range_returns_nearest_available_day():
     from ppa.data_loader import coerce_chosen_day
 
@@ -44,7 +42,6 @@ def test_coerce_chosen_day_out_of_range_returns_nearest_available_day():
     assert coerced in get_available_days(ts)
 
 
-@pytest.mark.xfail(strict=True, reason="W9: coerce_chosen_day does not exist yet")
 def test_coerce_chosen_day_is_idempotent():
     from ppa.data_loader import coerce_chosen_day
 
@@ -54,7 +51,6 @@ def test_coerce_chosen_day_is_idempotent():
     assert twice == once
 
 
-@pytest.mark.xfail(strict=True, reason="W9: coerce_chosen_day does not exist yet")
 def test_coerce_chosen_day_unparseable_falls_back_to_middle_day():
     from ppa.data_loader import coerce_chosen_day
 
@@ -63,7 +59,6 @@ def test_coerce_chosen_day_unparseable_falls_back_to_middle_day():
     assert coerced in get_available_days(ts)
 
 
-@pytest.mark.xfail(strict=True, reason="W9: coercion + validate_scenario not wired yet")
 def test_validate_scenario_clean_after_coercion():
     """The UI's flow (coerce then validate) must produce no `chosen_day` error."""
     from ppa.data_loader import coerce_chosen_day
@@ -79,7 +74,6 @@ def test_validate_scenario_clean_after_coercion():
 
 # ── W9: index=14 fallbacks must not crash on a <15-day period ────────────────
 
-@pytest.mark.xfail(strict=True, reason="W9: coerce_chosen_day does not exist yet")
 def test_fallback_index_survives_short_period():
     """The two `index = 14` fallbacks in the UI must be replaced by coercion;
     here we assert the coercion helper itself handles a period shorter than 15

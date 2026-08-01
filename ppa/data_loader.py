@@ -65,6 +65,26 @@ def get_available_days(ts: pd.DataFrame) -> list[str]:
     return sorted({str(d.date()) for d in ts.index})
 
 
+def coerce_chosen_day(ts: pd.DataFrame, chosen_day: str) -> str:
+    """Return *chosen_day* if it is one of the days in *ts*, otherwise the
+    nearest available day (or the middle day when *chosen_day* is unparseable).
+
+    Pure helper so the UI can reconcile a stale ``Scenario.chosen_day`` with the
+    user-selected reference period instead of hard-blocking the run with
+    "chosen_day … is not present in the timeseries data".
+    """
+    available = get_available_days(ts)
+    if chosen_day in available:
+        return chosen_day
+    if not available:
+        return chosen_day
+    try:
+        target = pd.Timestamp(chosen_day)
+    except (ValueError, TypeError):
+        return available[len(available) // 2]
+    return min(available, key=lambda d: abs((pd.Timestamp(d) - target).days))
+
+
 # ── Template generation ────────────────────────────────────────────────────────
 
 def build_upload_template(
