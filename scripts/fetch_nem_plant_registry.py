@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 One-time acquisition script: build a NEM wind/solar plant registry (DUID, name,
-region, fuel type, capacity, lat/lon) via the OpenNEM / Open Electricity API.
+region, fuel type, capacity, lat/lon, and an optional first-power date) via the
+OpenNEM / Open Electricity API.
 
 *** NOT PART OF THE STREAMLIT APP. NEVER IMPORTED BY `ppa/` OR `ui/`. ***
 
@@ -36,6 +37,12 @@ before relying on this script):
     "wind"/"solar_utility"; the live API's enum may differ, e.g.
     "wind_offshore" vs "wind_onshore" splits, or "solar_utility" vs
     "solar_rooftop").
+  - The optional `first_power_date` column: this script tries plausible
+    commencement/first-seen field names per unit (see `_first_present()`) and
+    normalises the result to YYYY-MM-DD. `ppa/data/nem_data.py` treats the
+    column as OPTIONAL (an old cached parquet without it keeps working); the
+    map tooltip falls back to a SCADA-derived "first 2025 output" date when the
+    registry lacks it.
   - Whether records are per-unit (multiple rows per DUID) or per-facility with
     a `units` sub-list: this script inspects the response at runtime and
     handles both a flat per-unit list and a nested `units` list per facility
@@ -269,6 +276,18 @@ def normalise_facilities(
                     "lat": pd.to_numeric(lat, errors="coerce"),
                     "lon": pd.to_numeric(lon, errors="coerce"),
                     "status": _first_present(unit, ["status_id", "status", "unit_status", "operating_status"]),
+                    "first_power_date": _first_present(
+                        unit,
+                        [
+                            "data_first_seen",
+                            "first_power_date",
+                            "commencement_date",
+                            "commissioned_date",
+                            "commissioning_date",
+                            "approved_date",
+                            "start_date",
+                        ],
+                    ),
                 }
             )
 
@@ -278,6 +297,13 @@ def normalise_facilities(
         return df
 
     df = df.drop_duplicates(subset=["duid"])
+
+    # Normalise first_power_date to a YYYY-MM-DD string (or NaN) so the parquet
+    # carries a stable, comparable value regardless of whether the API returns
+    # a date object, an ISO string, or a timestamp.
+    df["first_power_date"] = pd.to_datetime(
+        df["first_power_date"], errors="coerce", format="mixed"
+    ).dt.strftime("%Y-%m-%d")
 
     # Diagnostic logging BEFORE filtering, so a wrong guessed taxonomy string shows up
     # immediately in the log rather than silently producing an empty registry.
@@ -467,6 +493,7 @@ def main() -> int:
         "lat",
         "lon",
         "status",
+        "first_power_date",
     ]
     df = df[[c for c in expected_cols if c in df.columns]]
     df.to_parquet(out_file, index=False)

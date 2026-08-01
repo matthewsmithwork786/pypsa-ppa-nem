@@ -91,6 +91,16 @@ def load_plant_registry(cache_dir: Path = NEM_CACHE_DIR) -> pd.DataFrame:
     for col in ("capacity_registered_mw", "lat", "lon"):
         df[col] = df[col].astype(float)
 
+    # first_power_date is optional (older caches don't have it). Normalise to a
+    # YYYY-MM-DD string or None when present so downstream tooltips can rely on
+    # a single format. It is deliberately NOT in REGISTRY_COLUMNS.
+    if "first_power_date" in df.columns:
+        df["first_power_date"] = pd.to_datetime(
+            df["first_power_date"], errors="coerce", format="mixed"
+        ).dt.strftime("%Y-%m-%d")
+    else:
+        df["first_power_date"] = None
+
     df = df.drop_duplicates(subset="duid", keep="first")
     df = df.sort_values(["station_name", "duid"]).reset_index(drop=True)
     return df
@@ -314,6 +324,26 @@ def whole_year_check(
     )
 
 
+def _first_sustained_output_date(
+    cf: "pd.Series", min_intervals: int = 6, threshold: float = 0.01
+) -> "str | None":
+    """First timestamp where output stays above ``threshold`` × nameplate for
+    ``min_intervals`` consecutive 5-min intervals.
+
+    Returns a YYYY-MM-DD string, or None when the series never meets the bar.
+    This is the SCADA-derived fallback for the registry's ``first_power_date``:
+    it reflects when the plant first produced meaningfully, not just any
+    non-zero interval (which would catch a single noisy reading).
+    """
+    above = cf > threshold
+    count = 0
+    for idx, flag in above.items():
+        count = count + 1 if flag else 0
+        if count >= min_intervals:
+            return pd.Timestamp(idx).strftime("%Y-%m-%d")
+    return None
+
+
 @dataclass(frozen=True)
 class ScadaSummary:
     duid: str
@@ -322,6 +352,8 @@ class ScadaSummary:
     check: "WholeYearCheck | None"
     mean_cf: "float | None"
     reject_reasons: str
+    cuf: "float | None" = None
+    first_output_date: "str | None" = None
 
 
 def scada_summary(
@@ -340,7 +372,13 @@ def scada_summary(
         check = whole_year_check(scada, capacity_mw, year, duid=duid)
         status = "ready" if check.passed else "incomplete"
         mean_cf = float(cf.mean())
+        # CUF (capacity utilisation factor): energy ÷ (nameplate × hours in
+        # year) -- the stricter definition than the mean CF. scada is the raw
+        # 5-min MW series; each interval is 5 minutes = 5/60 h.
+        energy_mwh = float(scada.sum() * (INTERVAL_MINUTES / 60.0))
+        cuf = energy_mwh / (float(capacity_mw) * expected_hours(year)) if capacity_mw > 0 else None
         reasons = "; ".join(check.reject_reasons)
+        first_output_date = _first_sustained_output_date(cf, min_intervals=6)
     except Exception as exc:  # noqa: BLE001 - deliberately broad, surfaced to the UI
         return ScadaSummary(
             duid=duid, year=year, status="unreadable", check=None, mean_cf=None,
@@ -348,7 +386,7 @@ def scada_summary(
         )
     return ScadaSummary(
         duid=duid, year=year, status=status, check=check, mean_cf=mean_cf,
-        reject_reasons=reasons,
+        reject_reasons=reasons, cuf=cuf, first_output_date=first_output_date,
     )
 
 
@@ -455,6 +493,8 @@ def list_eligible_plants(
         reject_reasons_list = []
         coverage_list = []
         mean_cf_list = []
+        cuf_list = []
+        first_output_date_list = []
         for _, row in df.iterrows():
             duid = row["duid"]
             capacity_mw = float(row["capacity_registered_mw"])
@@ -467,12 +507,16 @@ def list_eligible_plants(
             reject_reasons_list.append(summary.reject_reasons)
             coverage_list.append(summary.check.coverage if summary.check is not None else np.nan)
             mean_cf_list.append(summary.mean_cf if summary.mean_cf is not None else np.nan)
+            cuf_list.append(summary.cuf if summary.cuf is not None else np.nan)
+            first_output_date_list.append(summary.first_output_date)
         df["has_scada"] = has_scada_list
         df["simulation_ready"] = sim_ready_list
         df["data_status"] = data_status_list
         df["reject_reasons"] = reject_reasons_list
         df["coverage"] = coverage_list
         df["mean_cf"] = mean_cf_list
+        df["cuf"] = cuf_list
+        df["first_output_date"] = first_output_date_list
     else:
         df["has_scada"] = False
         df["simulation_ready"] = False
@@ -480,6 +524,8 @@ def list_eligible_plants(
         df["reject_reasons"] = ""
         df["coverage"] = np.nan
         df["mean_cf"] = np.nan
+        df["cuf"] = np.nan
+        df["first_output_date"] = None
 
     if require_simulation_ready:
         df = df[df["simulation_ready"]]

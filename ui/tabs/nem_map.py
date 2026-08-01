@@ -40,16 +40,90 @@ def _marker_radius(capacity_mw: float) -> float:
     return 3.0 + 0.85 * math.sqrt(max(0.0, capacity_mw))
 
 
+CUF_FALLBACK = "—"
+
+
+def _format_cuf(value) -> str:
+    """Format a CUF fraction (e.g. 0.384) as a percentage string, or the
+    em-dash fallback when unknown."""
+    try:
+        cuf = float(value)
+    except (TypeError, ValueError):
+        return CUF_FALLBACK
+    if not math.isfinite(cuf):
+        return CUF_FALLBACK
+    return f"{cuf * 100:.1f}%"
+
+
+def _format_first_power(value) -> str:
+    """Format first-power date as YYYY-MM-DD, or the em-dash fallback when unknown."""
+    if value is None:
+        return CUF_FALLBACK
+    if isinstance(value, pd.Timestamp):
+        return value.strftime("%Y-%m-%d")
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "nat", "none", "na"}:
+        return CUF_FALLBACK
+    return text
+
+
 def _tooltip(row) -> str:
     """Unique tooltip string: station name + DUID (disambiguates duplicated
-    station names across multiple DUIDs) + capacity + region. HTML-escaped
-    since station names may contain special characters.
+    station names across multiple DUIDs) + capacity + region + CUF + first power.
+    HTML-escaped since station names may contain special characters.
+
+    CUF prefers the strict `cuf` field (energy ÷ nameplate × hours-in-year)
+    from `nem_data.scada_summary`, falling back to `mean_cf` (mean of the
+    clipped 5-min CF series). First power prefers the registry's
+    `first_power_date` (labelled "1st power"); a SCADA-derived date (2025-only
+    cache) is labelled "first 2025 output" per the plan. Either shows '—' when
+    unknown.
     """
     station = html.escape(str(row["station_name"]))
     duid = html.escape(str(row["duid"]))
     region = html.escape(str(row["region"]))
     capacity = float(row["capacity_registered_mw"])
-    return f"{station} [{duid}] · {capacity:.0f} MW · {region}"
+
+    cuf_val = row.get("cuf")
+    if not _finite_value(cuf_val):
+        cuf_val = row.get("mean_cf")
+    cuf = _format_cuf(cuf_val)
+
+    first_power_label, first_power = _first_power_parts(row)
+    return (
+        f"{station} [{duid}] · {capacity:.0f} MW · {region} · "
+        f"CUF {cuf} · {first_power_label} {first_power}"
+    )
+
+
+def _finite_value(value) -> bool:
+    """True when value is a usable float (not None / NaN / inf)."""
+    if value is None:
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _first_power_parts(row) -> "tuple[str, str]":
+    """Return (label, formatted-date) for the first-power portion of the tooltip.
+
+    The registry's `first_power_date` is true first power ("1st power"); the
+    SCADA-derived `first_output_date` is 2025-only and therefore labelled
+    "first 2025 output". Falls back to ('1st power', '—') when neither exists.
+    """
+    registry_date = row.get("first_power_date")
+    if _finite_value(registry_date) or (
+        registry_date is not None and str(registry_date).lower() not in {"nan", "nat", "none", "na", ""}
+    ):
+        return "1st power", _format_first_power(registry_date)
+    scada_date = row.get("first_output_date")
+    if _finite_value(scada_date) or (
+        scada_date is not None and str(scada_date).lower() not in {"nan", "nat", "none", "na", ""}
+    ):
+        return "first 2025 output", _format_first_power(scada_date)
+    return "1st power", CUF_FALLBACK
 
 
 def _duid_from_tooltip(tooltip: str, plants_df: "pd.DataFrame") -> "str | None":
@@ -253,6 +327,11 @@ def render() -> None:
         st.caption(
             "🟢 Wind · 🟡 Solar · solid = simulation-ready · dashed outline = incomplete/no SCADA. "
             "Click a marker or use the selectboxes above (selectboxes are authoritative)."
+        )
+        st.caption(
+            "Marker tooltip: CUF = energy ÷ (nameplate × hours-in-year, 2025 SCADA); "
+            "“1st power” = registry commissioning date, “first 2025 output” = first sustained "
+            "SCADA output, “—” = not available."
         )
 
     # ── Native 5-min CF inspection for the selected plants ──────────────────────

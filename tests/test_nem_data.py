@@ -107,6 +107,33 @@ def test_scada_summary_nodatawf1_is_no_scada(fixture_cache):
     summary = nem_data.scada_summary("NODATAWF1", 120.0, 2025, fixture_cache)
     assert summary.status == "no_scada"
     assert summary.check is None
+    assert summary.cuf is None
+    assert summary.first_output_date is None
+
+
+def test_scada_summary_fullwf1_exposes_cuf_and_first_output(fixture_cache):
+    summary = nem_data.scada_summary("FULLWF1", 100.0, 2025, fixture_cache)
+    assert summary.status == "ready"
+    # Strict CUF = energy ÷ (nameplate × hours-in-year). The fixture pattern
+    # has mean output ≈ 0.45 × nameplate with no missing intervals, so CUF
+    # and mean_cf coincide at ≈ 0.45 (not exactly, so just sanity-band it).
+    assert summary.cuf is not None
+    assert 0.4 <= summary.cuf <= 0.5
+    # FULLWF1 generates from the very first 5-min interval → 2025-01-01.
+    assert summary.first_output_date == "2025-01-01"
+
+
+def test_list_eligible_plants_exposes_cuf_and_first_output(fixture_cache):
+    df = nem_data.list_eligible_plants(year=2025, cache_dir=fixture_cache)
+    assert "cuf" in df.columns
+    assert "first_output_date" in df.columns
+    row = df[df["duid"] == "FULLWF1"].iloc[0]
+    assert 0.4 <= float(row["cuf"]) <= 0.5
+    assert row["first_output_date"] == "2025-01-01"
+    # NODATAWF1 has no SCADA → NaN CUF, no first-output date.
+    nodata = df[df["duid"] == "NODATAWF1"].iloc[0]
+    assert pd.isna(nodata["cuf"])
+    assert nodata["first_output_date"] is None
 
 
 # ── Two-tier eligibility ─────────────────────────────────────────────────────

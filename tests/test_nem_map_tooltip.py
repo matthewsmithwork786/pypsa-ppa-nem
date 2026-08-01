@@ -31,7 +31,6 @@ def _plants_df() -> pd.DataFrame:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="W7: tooltip lacks CUF % and first-power date")
 def test_tooltip_contains_cuf_percent_and_first_power():
     df = _plants_df()
     tip = nem_map._tooltip(df.iloc[0])
@@ -41,12 +40,22 @@ def test_tooltip_contains_cuf_percent_and_first_power():
     assert "2025 CUF" not in tip  # label is plain "CUF", year is implicit
 
 
-@pytest.mark.xfail(strict=True, reason="W7: tooltip lacks CUF/first-power fallback handling")
 def test_tooltip_fallback_for_missing_cuf_or_first_power():
     df = _plants_df()
     tip = nem_map._tooltip(df.iloc[2])  # mean_cf None, first_power None
     assert CUF_FALLBACK in tip  # documented fallback, not bare nan
     assert "nan" not in tip.lower()
+
+
+def test_tooltip_labels_scada_derived_date_as_first_2025_output():
+    # No registry first_power_date, but a SCADA-derived first-output date:
+    # must be labelled "first 2025 output", not "1st power".
+    df = _plants_df()
+    df.at[0, "first_power_date"] = None
+    df.at[0, "first_output_date"] = "2025-01-01"
+    tip = nem_map._tooltip(df.iloc[0])
+    assert "first 2025 output 2025-01-01" in tip
+    assert "1st power" not in tip
 
 
 def test_tooltip_unique_per_duid_and_deterministic():
