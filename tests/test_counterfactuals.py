@@ -143,3 +143,44 @@ def test_undelivered_load_uses_actual_hourly_load_not_flat_peak():
     # PPA cost = ppa_price * delivered + spot_price * undelivered
     expected_ppa_cost = (50.0 * 15.0 * n_hours) + (100.0 * 5.0 * n_hours)
     assert cf.ppa_offtaker_cost == pytest.approx(expected_ppa_cost)
+
+
+def test_dt_parameter_scales_sub_hourly_correctly():
+    """At dt=0.5 (30-min rows), summing MW samples must be scaled by dt to
+    reproduce the same MWh/$ totals as an equivalent hourly encoding of the
+    same real period -- regression coverage for the resolution-selection
+    feature (nem_data.period_ts + the new build_network/extract_results
+    resolution_h plumbing)."""
+    n_hours = 4
+    load_values = [20.0, 30.0, 40.0, 50.0]
+    price = 60.0
+    scenario = Scenario(ppaload_mw=100.0, ppa_price=70.0)
+
+    ts_hourly = _base_ts(n_hours, load_values, price=price)
+    result_hourly = _make_result(scenario, pd.Series(load_values, index=ts_hourly.index))
+    cf_hourly = compute_counterfactuals(ts_hourly, scenario, result_hourly, dt=1.0)
+
+    # Same real period at 30-min resolution: each hourly value split across two
+    # consecutive half-hour rows (same total energy, finer encoding).
+    idx_30min = pd.date_range("2025-01-01", periods=n_hours * 2, freq="30min")
+    load_30min = [v for v in load_values for _ in range(2)]
+    ts_30min = pd.DataFrame({"ts_MktPrice": price, "ppaload_mw": load_30min}, index=idx_30min)
+    result_30min = _make_result(scenario, pd.Series(load_30min, index=idx_30min))
+    cf_30min = compute_counterfactuals(ts_30min, scenario, result_30min, dt=0.5)
+
+    assert cf_30min.total_load_mwh == pytest.approx(cf_hourly.total_load_mwh)
+    assert cf_30min.spot_cost == pytest.approx(cf_hourly.spot_cost)
+    assert cf_30min.ppa_offtaker_cost == pytest.approx(cf_hourly.ppa_offtaker_cost)
+
+
+def test_dt_defaults_to_hourly_for_existing_callers():
+    """Omitting dt must still behave as dt=1.0 -- no change for any existing
+    hourly-only caller."""
+    n_hours = 4
+    ts = _base_ts(n_hours, [10.0] * n_hours, price=50.0)
+    scenario = Scenario(ppaload_mw=100.0, ppa_price=70.0)
+    result = _make_result(scenario, pd.Series([10.0] * n_hours, index=ts.index))
+
+    cf_default = compute_counterfactuals(ts, scenario, result)
+    cf_explicit = compute_counterfactuals(ts, scenario, result, dt=1.0)
+    assert cf_default.total_load_mwh == pytest.approx(cf_explicit.total_load_mwh)

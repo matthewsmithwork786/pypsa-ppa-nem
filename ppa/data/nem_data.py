@@ -653,6 +653,92 @@ def reference_month_ts(scenario, month: int = 3, cache_dir: Path = NEM_CACHE_DIR
     return ts
 
 
+def period_ts(
+    scenario,
+    start,
+    end,
+    resolution_minutes: int = 60,
+    cache_dir: Path = NEM_CACHE_DIR,
+) -> pd.DataFrame:
+    """Build a `ts_PVGen`/`ts_WindGen`/`ts_MktPrice` DataFrame for an arbitrary
+    `[start, end)` window at the requested resolution, from the scenario's NEM
+    DUIDs/region/year -- the general form of `reference_month_ts` (which stays
+    untouched, fixed at hourly/one-month, since it's covered by existing tests
+    and callers).
+
+    `resolution_minutes` must be a multiple of the native SCADA/price interval
+    (`INTERVAL_MINUTES` = 5): 5 reads the cache at native resolution, 30/60
+    block-average it. Values in `[start, end)` outside a series' own cached
+    span (e.g. a plant commissioned mid-year, or a window outside `year`)
+    produce gaps; small gaps are ffill/bfill'd consistent with `to_hourly`,
+    but a window with no cached data at all for a selected DUID/region raises
+    `RuntimeError` rather than silently returning an all-zero/NaN series.
+
+    Duck-typed scenario access only (getattr), consistent with
+    `get_timeseries_dicts` -- do not import `ppa.scenario` here.
+    """
+    if resolution_minutes % INTERVAL_MINUTES != 0:
+        raise ValueError(
+            f"resolution_minutes must be a multiple of {INTERVAL_MINUTES}, got {resolution_minutes}"
+        )
+
+    pv_duid = getattr(scenario, "nem_pv_duid", "")
+    wind_duid = getattr(scenario, "nem_wind_duid", "")
+    region = getattr(scenario, "nem_price_region", DEFAULT_REGION)
+    year = getattr(scenario, "nem_year", DEFAULT_YEAR)
+
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end)
+    if end_ts <= start_ts:
+        raise ValueError(f"end ({end_ts}) must be after start ({start_ts})")
+
+    freq = f"{resolution_minutes}min"
+    canonical_idx = pd.date_range(start_ts, end_ts, freq=freq, inclusive="left")
+    if len(canonical_idx) == 0:
+        raise ValueError(f"Window [{start_ts}, {end_ts}) at {resolution_minutes}min resolution has no snapshots.")
+
+    registry = load_plant_registry(cache_dir) if (pv_duid or wind_duid) else None
+
+    def _resampled(series: pd.Series, label: str) -> pd.Series:
+        windowed = series[(series.index >= start_ts) & (series.index < end_ts)]
+        resampled = windowed.resample(freq).mean().reindex(canonical_idx)
+        resampled = resampled.ffill().bfill()
+        if resampled.isna().any():
+            raise RuntimeError(
+                f"No cached {label} data at all within [{start_ts}, {end_ts}) -- "
+                "pick a different period, plant, or region."
+            )
+        return resampled
+
+    if pv_duid:
+        capacity_mw = plant_capacity_mw(pv_duid, registry=registry, cache_dir=cache_dir)
+        pv_native = capacity_factor_series(load_scada(pv_duid, year, cache_dir), capacity_mw)
+        pv_r = _resampled(pv_native, f"PV SCADA for {pv_duid}")
+    else:
+        pv_r = pd.Series(0.0, index=canonical_idx)
+
+    if wind_duid:
+        capacity_mw = plant_capacity_mw(wind_duid, registry=registry, cache_dir=cache_dir)
+        wind_native = capacity_factor_series(load_scada(wind_duid, year, cache_dir), capacity_mw)
+        wind_r = _resampled(wind_native, f"Wind SCADA for {wind_duid}")
+    else:
+        wind_r = pd.Series(0.0, index=canonical_idx)
+
+    price_native = load_regional_price(region, year, cache_dir)
+    price_r = _resampled(price_native, f"price for region {region}")
+
+    ts = pd.DataFrame(
+        {
+            "ts_PVGen": pv_r.to_numpy(),
+            "ts_WindGen": wind_r.to_numpy(),
+            "ts_MktPrice": price_r.to_numpy(),
+        },
+        index=canonical_idx,
+    )
+    ts.index.name = "snapshot"
+    return ts
+
+
 def get_timeseries_dicts(scenario, cache_dir=NEM_CACHE_DIR) -> tuple:
     """Convenience: reads scenario.nem_pv_duid, scenario.nem_wind_duid,
     scenario.nem_price_region, scenario.nem_year (duck-typed attribute access

@@ -20,7 +20,10 @@ def _cached_reference_ts(pv_lat: float, pv_lon: float, wind_lat: float, wind_lon
 
 
 @st.cache_data
-def _cached_nem_reference_ts(pv_duid: str, wind_duid: str, region: str, year: int):
+def _cached_nem_period_ts(
+    pv_duid: str, wind_duid: str, region: str, year: int,
+    start: str, end: str, resolution_minutes: int,
+):
     from ppa.data import nem_data
 
     class _FakeScenario:
@@ -29,7 +32,83 @@ def _cached_nem_reference_ts(pv_duid: str, wind_duid: str, region: str, year: in
         nem_price_region = region
         nem_year = year
 
-    return nem_data.reference_month_ts(_FakeScenario())
+    return nem_data.period_ts(_FakeScenario(), start, end, resolution_minutes=resolution_minutes)
+
+
+# ── NEM period + resolution controls (single-day/period reference path) ────────
+
+_NEM_MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+_NEM_RESOLUTION_MINUTES = {"1 hour": 60, "30 minutes": 30, "5 minutes": 5}
+
+
+def _render_snapshot_warning(n_snapshots: int) -> None:
+    if n_snapshots <= 2_000:
+        st.caption(f"≈{n_snapshots:,} snapshots — should solve in a few seconds.")
+    elif n_snapshots <= 10_000:
+        st.warning(
+            f"≈{n_snapshots:,} snapshots — may take tens of seconds and use noticeably more "
+            "memory. Close to the practical ceiling on memory-limited hosts (e.g. Streamlit "
+            "Community Cloud's free 1 GB tier)."
+        )
+    else:
+        st.error(
+            f"≈{n_snapshots:,} snapshots — this is a large LP. It may take minutes and risks "
+            "exceeding memory limits on constrained hosts (e.g. Streamlit Community Cloud's "
+            "free 1 GB tier). Consider a shorter period and/or coarser resolution."
+        )
+
+
+def _render_nem_period_controls(s) -> tuple[pd.Timestamp, pd.Timestamp, int]:
+    """Period (calendar month or custom range) + resolution picker for the NEM
+    single-day/period reference path. Returns (start, end [exclusive], resolution_minutes).
+    """
+    year = s.nem_year
+    year_start = pd.Timestamp(year=year, month=1, day=1).date()
+    year_end = pd.Timestamp(year=year, month=12, day=31).date()
+
+    cols = st.columns([1, 2, 1])
+    with cols[0]:
+        mode = st.radio(
+            "Period", ["Calendar month", "Custom range"], key="opt_nem_period_mode",
+        )
+    with cols[1]:
+        if mode == "Calendar month":
+            month = st.selectbox(
+                "Month", options=list(range(1, 13)), index=2,  # default March, matches prior behavior
+                format_func=lambda m: _NEM_MONTH_NAMES[m - 1], key="opt_nem_month",
+            )
+            start_ts = pd.Timestamp(year=year, month=month, day=1)
+            end_ts = start_ts + pd.DateOffset(months=1)
+        else:
+            default_range = (pd.Timestamp(year=year, month=3, day=1).date(),
+                              (pd.Timestamp(year=year, month=3, day=1) + pd.DateOffset(months=1)
+                               - pd.Timedelta(days=1)).date())
+            picked = st.date_input(
+                "Date range (inclusive)", value=default_range,
+                min_value=year_start, max_value=year_end, key="opt_nem_date_range",
+            )
+            if isinstance(picked, tuple) and len(picked) == 2:
+                start_ts = pd.Timestamp(picked[0])
+                end_ts = pd.Timestamp(picked[1]) + pd.Timedelta(days=1)
+            else:
+                # Only the start date picked so far (mid-selection) -- show a single day.
+                single = picked[0] if isinstance(picked, tuple) else picked
+                start_ts = pd.Timestamp(single)
+                end_ts = start_ts + pd.Timedelta(days=1)
+    with cols[2]:
+        resolution_label = st.selectbox(
+            "Resolution", options=list(_NEM_RESOLUTION_MINUTES.keys()), index=0,
+            key="opt_nem_resolution",
+        )
+        resolution_minutes = _NEM_RESOLUTION_MINUTES[resolution_label]
+
+    n_snapshots = int((end_ts - start_ts) / pd.Timedelta(minutes=resolution_minutes))
+    _render_snapshot_warning(n_snapshots)
+
+    return start_ts, end_ts, resolution_minutes
 
 
 def _get_timeseries(scenario):
@@ -47,13 +126,9 @@ def _get_timeseries(scenario):
         ts = upload["ts"]
         state.set_timeseries(ts)
         return ts
-    if scenario.is_nem:
-        ts = _cached_nem_reference_ts(
-            scenario.nem_pv_duid, scenario.nem_wind_duid,
-            scenario.nem_price_region, scenario.nem_year,
-        )
-        state.set_timeseries(ts)
-        return ts
+    # NEM (scenario.is_nem) is handled separately in render() -- it needs the
+    # user-selected period/resolution, which this scenario-only signature has
+    # no way to receive; see _cached_nem_period_ts / _render_nem_period_controls.
     if state.has_timeseries():
         return state.get_timeseries()
     pv_lat, pv_lon = scenario.pv_location
@@ -574,11 +649,12 @@ def render() -> None:
             "Results, and Analysis tabs."
         )
     elif s.is_nem:
-        _single_day_title = "Single-day reference optimization (NEM data)"
+        _single_day_title = "Period reference optimization (NEM data)"
         _single_day_caption = (
             f"Runs the LP over the selected NEM plants/prices (region {s.nem_price_region}, "
-            f"{s.nem_year}). Pick the day to inspect under **Reference day selection**. "
-            "Results feed the Results, and Analysis tabs."
+            f"{s.nem_year}) for any month or custom date range you pick below, at hourly, "
+            "30-minute, or native 5-minute resolution. Pick the day to inspect under "
+            "**Reference day selection**. Results feed the Results, and Analysis tabs."
         )
     else:
         _single_day_title = "Single-day reference optimization (European reference month)"
@@ -591,9 +667,20 @@ def render() -> None:
 
     with st.expander(_single_day_title, expanded=False):
         st.caption(_single_day_caption)
+
+        resolution_h = 1.0
         _ts_error_shown = False
         try:
-            ts = _get_timeseries(s)
+            if s.is_nem:
+                period_start, period_end, resolution_minutes = _render_nem_period_controls(s)
+                resolution_h = resolution_minutes / 60.0
+                ts = _cached_nem_period_ts(
+                    s.nem_pv_duid, s.nem_wind_duid, s.nem_price_region, s.nem_year,
+                    period_start.isoformat(), period_end.isoformat(), resolution_minutes,
+                )
+                state.set_timeseries(ts)
+            else:
+                ts = _get_timeseries(s)
         except (RuntimeError, FileNotFoundError, ValueError, KeyError) as exc:
             st.error(str(exc))
             ts = None
@@ -629,7 +716,10 @@ def render() -> None:
 
                             ts_prep = prepare_timeseries(ts, s)
 
-                            # Capacity co-optimization pre-step (reference month → fast)
+                            # Capacity co-optimization pre-step (reference period → fast;
+                            # optimize_capacities coarsens internally via
+                            # scenario.sizing_resolution_h regardless of ts_prep's own
+                            # resolution, so it needs no resolution_h argument here).
                             if s.optimize_capacity:
                                 from ppa.sizing import apply_sizing, optimize_capacities
 
@@ -643,19 +733,19 @@ def render() -> None:
                                 st.info(
                                     f"Optimized portfolio — Wind {sized.onsw_mw:.0f} MW · "
                                     f"Solar {sized.pv_mw:.0f} MW · BESS {sized.bess_mw:.0f} MW / "
-                                    f"{sized.bess_mwh:.0f} MWh (sized on the reference month)"
+                                    f"{sized.bess_mwh:.0f} MWh (sized on the reference period)"
                                 )
 
-                            n = build_network(ts_prep, s)
+                            n = build_network(ts_prep, s, resolution_h=resolution_h)
                             status, condition = solve(n, s, ts_prep)
-                            result = extract_results(n, s, ts_prep, status, condition)
+                            result = extract_results(n, s, ts_prep, status, condition, resolution_h=resolution_h)
                             state.set_result(result)
 
                             if s.run_financial_analysis:
                                 fin = run_financial_analysis(s, result.summary, result.revenue, result.n_period_hours)
                                 state.set_financial(fin)
                             if s.enable_counterfactual:
-                                cf = compute_counterfactuals(ts_prep, s, result)
+                                cf = compute_counterfactuals(ts_prep, s, result, dt=resolution_h)
                                 state.set_counterfactual(cf)
                         except Exception as exc:
                             st.error(f"Optimization failed: {exc}")

@@ -248,3 +248,88 @@ def test_reference_month_ts_matches_expected_hours_in_march(fixture_cache):
 
     ts = nem_data.reference_month_ts(FakeScenario(), month=3, cache_dir=fixture_cache)
     assert len(ts) == 31 * 24
+
+
+# ── period_ts (arbitrary period + resolution) ────────────────────────────────
+
+class _FakeScenario:
+    nem_pv_duid = "GAPSF1"
+    nem_wind_duid = "FULLWF1"
+    nem_price_region = "NSW1"
+    nem_year = 2025
+
+
+def test_period_ts_hourly_matches_reference_month(fixture_cache):
+    """At 60-min resolution over the same calendar month, period_ts must agree
+    with the existing (untouched) reference_month_ts."""
+    via_reference = nem_data.reference_month_ts(_FakeScenario(), month=3, cache_dir=fixture_cache)
+    via_period = nem_data.period_ts(
+        _FakeScenario(), "2025-03-01", "2025-04-01", resolution_minutes=60, cache_dir=fixture_cache
+    )
+    assert list(via_period.columns) == list(via_reference.columns)
+    pd.testing.assert_frame_equal(
+        via_period.astype(float), via_reference.loc[via_period.index].astype(float), check_freq=False
+    )
+
+
+def test_period_ts_native_5min_resolution(fixture_cache):
+    ts = nem_data.period_ts(
+        _FakeScenario(), "2025-03-01", "2025-03-02", resolution_minutes=5, cache_dir=fixture_cache
+    )
+    assert len(ts) == 288  # one day at 5-min native resolution
+    deltas = ts.index.to_series().diff().dropna().unique()
+    assert list(deltas) == [pd.Timedelta(minutes=5)]
+    assert not ts.isna().any().any()
+
+
+def test_period_ts_30min_block_average_matches_manual_resample(fixture_cache):
+    ts = nem_data.period_ts(
+        _FakeScenario(), "2025-03-01", "2025-03-02", resolution_minutes=30, cache_dir=fixture_cache
+    )
+    assert len(ts) == 48  # one day at 30-min resolution
+
+    capacity_mw = nem_data.plant_capacity_mw("FULLWF1", cache_dir=fixture_cache)
+    native = nem_data.capacity_factor_series(
+        nem_data.load_scada("FULLWF1", 2025, fixture_cache), capacity_mw
+    )
+    manual = native[(native.index >= "2025-03-01") & (native.index < "2025-03-02")].resample("30min").mean()
+    pd.testing.assert_series_equal(
+        ts["ts_WindGen"].astype(float), manual.astype(float), check_names=False, check_freq=False
+    )
+
+
+def test_period_ts_empty_duid_gives_zero_series(fixture_cache):
+    class NoWindScenario(_FakeScenario):
+        nem_wind_duid = ""
+
+    ts = nem_data.period_ts(
+        NoWindScenario(), "2025-03-01", "2025-03-02", resolution_minutes=60, cache_dir=fixture_cache
+    )
+    assert (ts["ts_WindGen"] == 0.0).all()
+
+
+def test_period_ts_invalid_resolution_raises(fixture_cache):
+    with pytest.raises(ValueError):
+        nem_data.period_ts(
+            _FakeScenario(), "2025-03-01", "2025-03-02", resolution_minutes=7, cache_dir=fixture_cache
+        )
+
+
+def test_period_ts_end_before_start_raises(fixture_cache):
+    with pytest.raises(ValueError):
+        nem_data.period_ts(
+            _FakeScenario(), "2025-03-02", "2025-03-01", resolution_minutes=60, cache_dir=fixture_cache
+        )
+
+
+def test_period_ts_window_outside_duid_coverage_raises(fixture_cache):
+    """LATECOMSF1 has no data before July 1 -- a January window must raise a
+    clear error, not silently return zeros/NaN."""
+    class LatecomerScenario(_FakeScenario):
+        nem_pv_duid = "LATECOMSF1"
+        nem_wind_duid = ""
+
+    with pytest.raises(RuntimeError):
+        nem_data.period_ts(
+            LatecomerScenario(), "2025-01-01", "2025-01-08", resolution_minutes=60, cache_dir=fixture_cache
+        )

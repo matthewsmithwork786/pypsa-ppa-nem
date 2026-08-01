@@ -46,7 +46,7 @@ def run_financial_analysis(
     scenario: Scenario,
     summary: SummaryVolumes,
     revenue: RevenueBreakdown,
-    n_period_hours: int,
+    n_period_hours: float,
 ) -> FinancialResult:
     s = scenario
     scale = HOURS_PER_YEAR / n_period_hours

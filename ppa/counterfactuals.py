@@ -38,6 +38,7 @@ def compute_counterfactuals(
     ts: pd.DataFrame,
     scenario: Scenario,
     result: OptimizationResult,
+    dt: float = 1.0,
 ) -> CounterfactualResult:
     """Compare PPA offtaker cost against spot-only and CAL Y+1 forward procurement.
 
@@ -52,8 +53,9 @@ def compute_counterfactuals(
     Costs are for the modelled period only (not annualised).
     """
     spot_price = ts["ts_MktPrice"]
-    load_mw = ts["ppaload_mw"]  # actual hourly load series, not the flat peak scalar
-    dt = 1.0  # hours per timestep (hourly data)
+    load_mw = ts["ppaload_mw"]  # actual load series, not the flat peak scalar
+    # dt = hours per row of ts; must match whatever build_network(resolution_h=)
+    # used for this same ts, or every $/MWh figure below is scaled wrong.
     total_load_mwh = float((load_mw * dt).sum())
 
     # --- Spot-only ---

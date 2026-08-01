@@ -68,7 +68,7 @@ class OptimizationResult:
     revenue: RevenueBreakdown
     solver_status: str
     solver_condition: str
-    n_period_hours: int
+    n_period_hours: float
     market_prices: pd.Series = None  # type: ignore[assignment]
 
 
@@ -78,7 +78,14 @@ def extract_results(
     ts: pd.DataFrame,
     solver_status: str,
     solver_condition: str,
+    resolution_h: float = 1.0,
 ) -> OptimizationResult:
+    """`resolution_h` is the hours each row of `ts`/`n`'s snapshots represents
+    (must match what was passed to `build_network`). All `.sum()`-based MW ->
+    MWh/`$` conversions below need it: summing MW samples only equals MWh when
+    each sample is exactly 1 hour, so at 30-/5-min resolution every volume and
+    $-flow figure would be overstated by 2x/12x without this factor.
+    """
     s = scenario
 
     # ── Dispatch series ───────────────────────────────────────────────────────
@@ -110,17 +117,17 @@ def extract_results(
     )
 
     # ── Volumes ───────────────────────────────────────────────────────────────
-    total_load_mwh = float(ts["ppaload_mw"].sum())
-    ppa_delivered_mwh = float(ppa_delivery.sum())
-    market_buy_to_ppa_mwh = float(market_buy.sum())
-    renewable_and_storage_to_ppa_mwh = float((ppa_delivery - market_buy).clip(lower=0).sum())
-    allowed_shortfall_mwh = float(allowed_shortfall.sum())
-    penalty_mwh = float(penalty_gen.sum())
-    sold_to_market_mwh = float(market_sell.sum())
-    wind_generation_mwh = float(wind_gen.sum())
-    pv_generation_mwh = float(pv_gen.sum())
-    bess_dispatch_mwh = float(bess_dispatch.sum())
-    bess_charge_mwh = float(bess_store.sum())
+    total_load_mwh = float(ts["ppaload_mw"].sum()) * resolution_h
+    ppa_delivered_mwh = float(ppa_delivery.sum()) * resolution_h
+    market_buy_to_ppa_mwh = float(market_buy.sum()) * resolution_h
+    renewable_and_storage_to_ppa_mwh = float((ppa_delivery - market_buy).clip(lower=0).sum()) * resolution_h
+    allowed_shortfall_mwh = float(allowed_shortfall.sum()) * resolution_h
+    penalty_mwh = float(penalty_gen.sum()) * resolution_h
+    sold_to_market_mwh = float(market_sell.sum()) * resolution_h
+    wind_generation_mwh = float(wind_gen.sum()) * resolution_h
+    pv_generation_mwh = float(pv_gen.sum()) * resolution_h
+    bess_dispatch_mwh = float(bess_dispatch.sum()) * resolution_h
+    bess_charge_mwh = float(bess_store.sum()) * resolution_h
 
     fulfilled_share = ppa_delivered_mwh / total_load_mwh if total_load_mwh > 0 else 0.0
     allowed_shortfall_share_actual = allowed_shortfall_mwh / total_load_mwh if total_load_mwh > 0 else 0.0
@@ -149,8 +156,8 @@ def extract_results(
 
     # ── Revenue ───────────────────────────────────────────────────────────────
     ppa_revenue = ppa_delivered_mwh * s.ppa_price
-    excess_revenue = float((market_sell * ts["ts_MktPrice"]).sum())
-    market_purchase_cost = float((market_buy * ts["ts_MktPrice"]).sum())
+    excess_revenue = float((market_sell * ts["ts_MktPrice"]).sum()) * resolution_h
+    market_purchase_cost = float((market_buy * ts["ts_MktPrice"]).sum()) * resolution_h
     penalty_cost = penalty_mwh * s.penalty_price
     transmission_cost = ppa_delivered_mwh * s.transmission_cost_aud_mwh
     net_revenue = (
@@ -177,7 +184,7 @@ def extract_results(
         revenue=revenue,
         solver_status=solver_status,
         solver_condition=solver_condition,
-        n_period_hours=len(ts),
+        n_period_hours=len(ts) * resolution_h,
         market_prices=ts["ts_MktPrice"],
     )
 
