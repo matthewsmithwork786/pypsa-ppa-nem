@@ -43,6 +43,20 @@ def _pcol(period: int) -> int:
     return 3 + period
 
 
+def _text(cell, value):
+    """Write *value* into *cell* as literal text, never as a formula.
+
+    openpyxl infers a formula from any string beginning with ``=`` (and would
+    emit an unparseable ``<f>`` element that Excel refuses to open). Forcing
+    ``data_type="s"`` stores the text verbatim, so a label/note/unit can never
+    corrupt the workbook. Returns the cell for chaining.
+    """
+    cell.value = value
+    if isinstance(value, str) and value[:1] in "=+-@":
+        cell.data_type = "s"
+    return cell
+
+
 def export_financial_model(
     p: ProjectFinanceInputs,
     e: EnergyInputs,
@@ -85,9 +99,9 @@ def _write_inputs(wb: Workbook, p: ProjectFinanceInputs) -> dict[str, str]:
     ws.column_dimensions["D"].width = 10
     ws.column_dimensions["E"].width = 60
 
-    ws["B1"] = "Financial Model — Inputs"
+    _text(ws["B1"], "Financial Model — Inputs")
     ws["B1"].font = _TITLE
-    ws["B2"] = "Yellow cells are editable assumptions. Costs in A$M/MW (A$M/MWh for BESS)."
+    _text(ws["B2"], "Yellow cells are editable assumptions. Costs in A$M/MW (A$M/MWh for BESS).")
     ws["B2"].font = Font(italic=True, color="808080")
 
     cells: dict[str, str] = {}
@@ -95,23 +109,23 @@ def _write_inputs(wb: Workbook, p: ProjectFinanceInputs) -> dict[str, str]:
 
     def section(title: str) -> None:
         nonlocal row
-        ws.cell(row, 2, title).font = _SECTION
+        _text(ws.cell(row, 2), title).font = _SECTION
         for c in range(2, 6):
             ws.cell(row, c).fill = _SECTION_FILL
         row += 1
 
     def field(label: str, key: str, value, unit: str = "", note: str = "") -> None:
         nonlocal row
-        ws.cell(row, 2, label)
+        _text(ws.cell(row, 2), label)
         vc = ws.cell(row, 3, value)
         vc.fill = _INPUT_FILL
         vc.font = _INPUT_FONT
         vc.border = _BORDER
         if isinstance(value, float):
             vc.number_format = "#,##0.0000" if abs(value) < 10 else "#,##0.00"
-        ws.cell(row, 4, unit).font = Font(color="808080")
+        _text(ws.cell(row, 4), unit).font = Font(color="808080")
         if note:
-            ws.cell(row, 5, note).font = Font(italic=True, color="A0A0A0")
+            _text(ws.cell(row, 5), note).font = Font(italic=True, color="A0A0A0")
         cells[key] = f"Inputs!$C${row}"
         row += 1
 
@@ -139,7 +153,7 @@ def _write_inputs(wb: Workbook, p: ProjectFinanceInputs) -> dict[str, str]:
     section("Timing (years)")
     field("Model duration", "model_duration", p.model_duration, "years")
     field("Development start period", "development_start", p.development_start, "period",
-          "= FID; devex bullet and construction both start here")
+          "FID — devex bullet and construction both start here")
     field("Onshore wind construction", "onsw_constr_years", p.onsw_constr_years, "years")
     field("Solar PV construction", "pv_constr_years", p.pv_constr_years, "years")
     field("BESS construction", "bess_constr_years", p.bess_constr_years, "years")
@@ -322,13 +336,12 @@ def _write_energy(
     ws.column_dimensions["C"].width = 16
     ws.column_dimensions["D"].width = 10
 
-    ws["B1"] = "PyPSA Energy Model Results"
+    _text(ws["B1"], "PyPSA Energy Model Results")
     ws["B1"].font = _TITLE
-    ws["B2"] = (
-        f"Scenario: {e.name}. "
-        + ("Annual totals are the average of the per-year sums on the Hourly sheets."
-           if hourly_refs else "Pre-filled from the energy model.")
-    )
+    _text(ws["B2"],
+          f"Scenario: {e.name}. "
+          + ("Annual totals are the average of the per-year sums on the Hourly sheets."
+             if hourly_refs else "Pre-filled from the energy model."))
     ws["B2"].font = Font(italic=True, color="808080")
 
     cells: dict[str, str] = {}
@@ -336,7 +349,7 @@ def _write_energy(
 
     def field(label: str, key: str, value, unit: str = "") -> None:
         nonlocal row
-        ws.cell(row, 2, label)
+        _text(ws.cell(row, 2), label)
         # Summable metrics roll up from the hourly sheets when available.
         if hourly_refs and key in hourly_refs:
             vc = ws.cell(row, 3, f"=AVERAGE({','.join(hourly_refs[key])})")
@@ -346,7 +359,7 @@ def _write_energy(
         vc.border = _BORDER
         if isinstance(value, float):
             vc.number_format = "#,##0.00"
-        ws.cell(row, 4, unit).font = Font(color="808080")
+        _text(ws.cell(row, 4), unit).font = Font(color="808080")
         cells[key] = f"Energy!$C${row}"
         row += 1
 
@@ -392,19 +405,18 @@ def _write_model(
     ws.column_dimensions["B"].width = 34
     ws.column_dimensions["C"].width = 8
 
-    ws["B1"] = "Annual Project-Finance Model"
+    _text(ws["B1"], "Annual Project-Finance Model")
     ws["B1"].font = _TITLE
-    ws["B2"] = (
-        "Revenue, opex, depreciation, tax and cash flows are live formulas. "
-        "Debt drawdown/IDC and tranche split are toolkit-sized values (green)."
-    )
+    _text(ws["B2"],
+          "Revenue, opex, depreciation, tax and cash flows are live formulas. "
+          "Debt drawdown/IDC and tranche split are toolkit-sized values (green).")
     ws["B2"].font = Font(italic=True, color="808080")
 
     # Period header
     hdr = 4
-    ws.cell(hdr, 2, "Period").font = _HEADER
+    _text(ws.cell(hdr, 2), "Period").font = _HEADER
     ws.cell(hdr, 2).fill = _HEADER_FILL
-    ws.cell(hdr, 3, "Unit").font = _HEADER
+    _text(ws.cell(hdr, 3), "Unit").font = _HEADER
     ws.cell(hdr, 3).fill = _HEADER_FILL
     for period in range(1, n + 1):
         c = ws.cell(hdr, _pcol(period), period)
@@ -421,12 +433,12 @@ def _write_model(
     def label_row(name: str, label: str, unit: str = "", section: bool = False) -> int:
         nonlocal row
         r = row
-        cell = ws.cell(r, 2, label)
+        cell = _text(ws.cell(r, 2), label)
         if section:
             cell.font = _SECTION
             for cc in range(2, _pcol(n) + 1):
                 ws.cell(r, cc).fill = _SECTION_FILL
-        ws.cell(r, 3, unit).font = Font(color="808080", size=9)
+        _text(ws.cell(r, 3), unit).font = Font(color="808080", size=9)
         R[name] = r
         row += 1
         return r
@@ -668,16 +680,16 @@ def _write_outputs(wb: Workbook, result: ProjectFinanceResult) -> None:
     ws.column_dimensions["C"].width = 16
     rng = getattr(wb, "_fm_ranges", {})
 
-    ws["B1"] = "Financial Model — Key Outputs"
+    _text(ws["B1"], "Financial Model — Key Outputs")
     ws["B1"].font = _TITLE
-    ws["B2"] = f"Scenario: {result.energy.name}"
+    _text(ws["B2"], f"Scenario: {result.energy.name}")
     ws["B2"].font = Font(italic=True, color="808080")
 
     row = 4
 
     def kpi(label: str, value, fmt: str, formula: str | None = None) -> None:
         nonlocal row
-        ws.cell(row, 2, label).font = Font(bold=True)
+        _text(ws.cell(row, 2), label).font = Font(bold=True)
         c = ws.cell(row, 3)
         c.value = formula if formula is not None else value
         c.number_format = fmt
@@ -699,10 +711,10 @@ def _write_outputs(wb: Workbook, result: ProjectFinanceResult) -> None:
     kpi("Equity payback", result.payback_years, "0.0 \"yrs\"")
     kpi("LCOE", result.lcoe, "#,##0.0 \"A$/MWh\"")
 
-    ws.cell(row + 1, 2,
-            "IRRs and the capex→depreciation→tax→cash-flow chain recompute live from the "
-            "Model sheet. Debt sizing/IDC are pre-solved (circular); re-run the toolkit to "
-            "re-size debt after large cost changes.").font = (
+    _text(ws.cell(row + 1, 2),
+          "IRRs and the capex→depreciation→tax→cash-flow chain recompute live from the "
+          "Model sheet. Debt sizing/IDC are pre-solved (circular); re-run the toolkit to "
+          "re-size debt after large cost changes.").font = (
         Font(italic=True, color="A0A0A0", size=9))
 
 
@@ -712,7 +724,7 @@ def _write_outputs(wb: Workbook, result: ProjectFinanceResult) -> None:
 def _write_notes(wb: Workbook) -> None:
     ws = wb.create_sheet("Notes")
     ws.column_dimensions["B"].width = 100
-    ws["B1"] = "Model notes & simplifications"
+    _text(ws["B1"], "Model notes & simplifications")
     ws["B1"].font = _TITLE
     notes = [
         "This workbook is a streamlined export of the PyPSA-PPA toolkit's project-finance model.",
@@ -744,4 +756,4 @@ def _write_notes(wb: Workbook) -> None:
         "  • Solar hours defined as 09:00–17:00.",
     ]
     for i, line in enumerate(notes):
-        ws.cell(2 + i, 2, line)
+        _text(ws.cell(2 + i, 2), line)

@@ -90,7 +90,6 @@ def _sheet_xml_files(xlsx_bytes: bytes) -> dict[str, str]:
 
 # ── Raw-XML regression: the Inputs sheet must contain zero <f> elements ──────
 
-@pytest.mark.xfail(strict=True, reason="W11: note still written with a leading '='")
 def test_inputs_sheet_contains_no_formula_elements():
     """The Inputs sheet has no real formulas, so any `<f>` element in its XML is
     a note/label accidentally stored as a formula. W11 must leave it empty."""
@@ -118,7 +117,6 @@ def test_every_formula_element_is_plausible():
 
 # ── openpyxl-level regression on the exact bug ───────────────────────────────
 
-@pytest.mark.xfail(strict=True, reason="W11: development_start note is written as a formula")
 def test_development_start_note_is_literal_text():
     """The 'Development start period' note must be a plain string cell
     (data_type 's'), never a formula, and its text must not start with '='."""
