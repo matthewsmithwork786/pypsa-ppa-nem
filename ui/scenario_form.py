@@ -90,6 +90,35 @@ def _apply_pending_aer(session_state) -> bool:
     return True
 
 
+def _default_aer_seed_for_scenario(scenario, cache_dir=None):
+    """Return ``(cal_forward_price, cal_forward_source, cal_forward_note)``
+    seeded from the AER base-futures cache for ``scenario``'s region/year, or
+    ``None`` when no usable cache exists.
+
+    AER data becomes the *default* forward-price seed (W4): when a futures
+    cache is present for ``nem_year`` and the user has not yet made a manual
+    choice, the forward price is pre-filled from the full-year quarterly
+    average with ``cal_forward_source = "aer_indicative"`` so the disclaimer
+    and provenance are carried through -- the manual-opt-in click becomes
+    unnecessary in the common case. ``None`` keeps the previous "manual"
+    default for region/year combinations without cached data.
+
+    Duck-typed ``scenario`` access only (``getattr``), matching
+    ``ppa.data.aer_futures.forward_price_for_scenario``.
+    """
+    from ppa.data import aer_futures
+
+    year = getattr(scenario, "nem_year", aer_futures.DEFAULT_YEAR) or aer_futures.DEFAULT_YEAR
+    cache_dir = cache_dir if cache_dir is not None else aer_futures.NEM_CACHE_DIR
+    if not aer_futures.has_futures_cache(year, cache_dir=cache_dir):
+        return None
+    try:
+        quote = aer_futures.forward_price_for_scenario(scenario, cache_dir=cache_dir)
+    except (FileNotFoundError, ValueError, KeyError):
+        return None
+    return (quote.price_aud_mwh, aer_futures.SOURCE_AER, quote.disclaimer)
+
+
 def render_scenario_form(initial: Scenario) -> Scenario:
     """Render all scenario controls and return a new Scenario from widget values."""
     st.subheader("Feature toggles")
@@ -278,7 +307,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             "Price escalation (%/yr)", 0.0, 10.0,
             float(initial.price_escalation_rate * 100), 0.1, format="%.1f",
             key="sf_escalation",
-            help="Annual compound escalation applied to 2024 ENTSO-E base prices.",
+            help="Annual compound escalation applied to base market prices.",
         ) / 100.0
 
         st.caption("Technology degradation (compound annual, applied from year 2 onward)")
@@ -330,19 +359,33 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             "Compare to counterfactual strategies",
             value=initial.enable_counterfactual,
             key="sf_enable_counterfactual",
-            help="Compute spot-only and CAL Y+1 forward costs for the offtaker after each run.",
+            help="Compute spot-only and base-futures hedge costs for the offtaker after each run.",
         )
         _seed_aer_applied_from_scenario(
             st.session_state, initial.cal_forward_source, initial.cal_forward_price, initial.cal_forward_note,
         )
+        # AER as the *default* seed (W4): when a futures cache exists for the
+        # scenario's year and the user has not yet made a manual choice
+        # (sf_cal_forward_price unset), pre-fill the forward price from the
+        # full-year quarterly average with aer_indicative provenance so the
+        # disclaimer carries through. A pending manual quote (Apply button)
+        # always wins afterwards.
+        if "sf_cal_forward_price" not in st.session_state:
+            _aer_seed = _default_aer_seed_for_scenario(initial)
+            if _aer_seed is not None:
+                _seed_price, _seed_source, _seed_note = _aer_seed
+                st.session_state["sf_cal_forward_price"] = float(_seed_price)
+                st.session_state["_sf_aer_applied"] = {
+                    "price_aud_mwh": float(_seed_price), "disclaimer": _seed_note,
+                }
         st.session_state.setdefault("sf_cal_forward_price", float(initial.cal_forward_price))
         _apply_pending_aer(st.session_state)
         cal_forward_price = cols[1].number_input(
-            "CAL Y+1 forward price (A$/MWh)",
+            "Base futures — calendar year (A$/MWh)",
             min_value=0.0, max_value=500.0,
             step=5.0,
             key="sf_cal_forward_price",
-            help="Indicative baseload forward price for the next calendar year — use the "
+            help="Indicative baseload base-futures price for the next calendar year — use the "
                  "AER quote below or enter your own estimate.",
         )
         cal_hedge_fraction = cols[2].slider(
@@ -350,7 +393,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             int(initial.cal_hedge_fraction * 100),
             step=5, format="%d%%",
             key="sf_cal_hedge_fraction",
-            help="Share of load hedged at CAL Y+1; remainder sourced at spot.",
+            help="Share of load hedged at the base-futures price; remainder sourced at spot.",
         ) / 100.0
 
         st.markdown("**AER indicative hedge price**")

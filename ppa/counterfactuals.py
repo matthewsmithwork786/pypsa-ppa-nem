@@ -40,7 +40,7 @@ def compute_counterfactuals(
     result: OptimizationResult,
     dt: float = 1.0,
 ) -> CounterfactualResult:
-    """Compare PPA offtaker cost against spot-only and CAL Y+1 forward procurement.
+    """Compare PPA offtaker cost against spot-only and calendar-year base-futures procurement.
 
     All strategies source the same hourly load: `ts["ppaload_mw"]`, the actual
     hourly load series (the uploaded hourly load on the custom-CSV path, or the
@@ -62,11 +62,11 @@ def compute_counterfactuals(
     hourly_spot_cost = spot_price * load_mw * dt
     spot_cost = float(hourly_spot_cost.sum())
 
-    # --- CAL Y+1 fully hedged ---
+    # --- Base-futures fully hedged ---
     cal_cost = scenario.cal_forward_price * total_load_mwh
 
-    # --- Blended (hedge_fraction at CAL Y+1, remainder at spot) ---
-    # cal_hedge_fraction = 0 → pure spot; = 1 → fully CAL hedged
+    # --- Blended (hedge_fraction at the base-futures price, remainder at spot) ---
+    # cal_hedge_fraction = 0 → pure spot; = 1 → fully hedged at base futures
     blended_cost = (
         scenario.cal_hedge_fraction * cal_cost
         + (1.0 - scenario.cal_hedge_fraction) * spot_cost

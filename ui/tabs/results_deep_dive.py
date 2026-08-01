@@ -84,7 +84,7 @@ def _render_multi_year_counterfactuals(results, fin, s) -> None:
 
     st.caption(
         "Compares the offtaker's all-in cost under the PPA versus alternative sourcing strategies. "
-        "CAL Y+1 price is escalated year-on-year at the same rate as market prices."
+        "The base-futures price is escalated year-on-year at the same rate as market prices."
     )
     if s.cal_forward_source == "aer_indicative":
         st.caption(s.cal_forward_note)
@@ -139,7 +139,7 @@ def _render_multi_year_counterfactuals(results, fin, s) -> None:
         ("PPA (offtaker)", f"A${_eff(total_ppa):.2f}/MWh", _em(total_ppa), "—"),
         ("Spot-only", f"A${_eff(total_spot):.2f}/MWh", _em(total_spot),
          f"A${(total_spot - total_ppa) / 1e6:+.2f}M vs PPA"),
-        ("CAL Y+1 (escalated)", f"A${_eff(total_cal):.2f}/MWh", _em(total_cal),
+        ("Base futures (escalated)", f"A${_eff(total_cal):.2f}/MWh", _em(total_cal),
          f"A${(total_cal - total_ppa) / 1e6:+.2f}M vs PPA"),
         ("Blended", f"A${_eff(total_blended):.2f}/MWh", _em(total_blended),
          f"A${(total_blended - total_ppa) / 1e6:+.2f}M vs PPA"),
@@ -340,9 +340,9 @@ def _render_single_day_deep_dive() -> None:
             [
                 ("Spot-only", f"A${cf.spot_avg_price:.2f}", f"A${cf.spot_cost / 1e6:.3f}M",
                  f"A${cf.spot_cost - cf.ppa_offtaker_cost:+,.0f}"),
-                (f"CAL Y+1 (A${s.cal_forward_price:.0f}/MWh)", f"A${cf.cal_avg_price:.2f}",
+                (f"Base futures (A${s.cal_forward_price:.0f}/MWh)", f"A${cf.cal_avg_price:.2f}",
                  f"A${cf.cal_cost / 1e6:.3f}M", f"A${cf.cal_cost - cf.ppa_offtaker_cost:+,.0f}"),
-                (f"Blended ({s.cal_hedge_fraction:.0%} CAL)", f"A${cf.blended_avg_price:.2f}",
+                (f"Blended ({s.cal_hedge_fraction:.0%} hedged)", f"A${cf.blended_avg_price:.2f}",
                  f"A${cf.blended_cost / 1e6:.3f}M", f"A${cf.blended_cost - cf.ppa_offtaker_cost:+,.0f}"),
                 ("PPA (offtaker)", f"A${cf.ppa_effective_price:.2f}",
                  f"A${cf.ppa_offtaker_cost / 1e6:.3f}M", "—"),

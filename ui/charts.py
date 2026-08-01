@@ -352,7 +352,7 @@ def make_ppa_obligation_chart(
 
 def make_counterfactual_bar_chart(cf: CounterfactualResult, scenario: Scenario) -> go.Figure:
     """Horizontal bar chart comparing effective A$/MWh across procurement strategies."""
-    strategies = ["Spot-only", f"Blended\n({scenario.cal_hedge_fraction:.0%} CAL)", "CAL Y+1", "PPA\n(offtaker)"]
+    strategies = ["Spot-only", f"Blended\n({scenario.cal_hedge_fraction:.0%} hedged)", "Base futures hedge", "PPA\n(offtaker)"]
     prices = [cf.spot_avg_price, cf.blended_avg_price, cf.cal_avg_price, cf.ppa_effective_price]
     colors = ["#FF6F00", "#FFA726", "#546E7A", "#1565C0"]
 
@@ -409,7 +409,7 @@ def make_cumulative_cost_chart(cf: CounterfactualResult) -> go.Figure:
             x=cf.cumulative_cal.index,
             y=cf.cumulative_cal.values / 1e6,
             mode="lines",
-            name="CAL Y+1",
+            name="Base futures hedge",
             line=dict(color="#546E7A", width=1.5, dash="dot"),
         )
     )
@@ -444,7 +444,7 @@ def make_multi_year_counterfactual_chart(
     x = [str(y) for y in years]
     fig.add_trace(go.Bar(x=x, y=ppa_prices, name="PPA (offtaker)", marker_color="#1565C0"))
     fig.add_trace(go.Bar(x=x, y=spot_prices, name="Spot-only", marker_color="#FF6F00"))
-    fig.add_trace(go.Bar(x=x, y=cal_prices, name="CAL Y+1", marker_color="#546E7A"))
+    fig.add_trace(go.Bar(x=x, y=cal_prices, name="Base futures hedge", marker_color="#546E7A"))
     fig.add_trace(go.Bar(x=x, y=blended_prices, name="Blended", marker_color="#FFA726"))
     fig.update_layout(
         barmode="group",

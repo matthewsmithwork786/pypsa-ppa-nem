@@ -185,18 +185,18 @@ def _render_single_day_overview() -> None:
             help="100% of load sourced at real-time spot each hour.",
         )
         cols[2].metric(
-            f"CAL Y+1 (A${s.cal_forward_price:.0f}/MWh)",
+            f"Base futures (A${s.cal_forward_price:.0f}/MWh)",
             f"A${cf.cal_avg_price:.2f}/MWh",
             delta=f"{cf.cal_avg_price - cf.ppa_effective_price:+.2f} A$/MWh vs PPA",
             delta_color="normal",
-            help="Flat baseload forward contract; zero spot exposure.",
+            help="Flat baseload base-futures contract; zero spot exposure.",
         )
         cols[3].metric(
-            f"Blended ({s.cal_hedge_fraction:.0%} CAL)",
+            f"Blended ({s.cal_hedge_fraction:.0%} hedged)",
             f"A${cf.blended_avg_price:.2f}/MWh",
             delta=f"{cf.blended_avg_price - cf.ppa_effective_price:+.2f} A$/MWh vs PPA",
             delta_color="normal",
-            help=f"{s.cal_hedge_fraction:.0%} of load at CAL Y+1 forward + remainder at spot.",
+            help=f"{s.cal_hedge_fraction:.0%} of load at the base-futures price + remainder at spot.",
         )
 
     # st.markdown("---")

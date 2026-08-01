@@ -34,7 +34,6 @@ def test_forward_price_matches_quarterly_average_from_fixture(tmp_path):
     assert "Indicative only" in quote.disclaimer
 
 
-@pytest.mark.xfail(strict=True, reason="W4: AER-default seeding helper does not exist yet")
 def test_default_seed_sets_aer_indicative_source_when_cache_exists(tmp_path):
     from ui.scenario_form import _default_aer_seed_for_scenario
 
@@ -48,7 +47,6 @@ def test_default_seed_sets_aer_indicative_source_when_cache_exists(tmp_path):
     assert note  # the disclaimer
 
 
-@pytest.mark.xfail(strict=True, reason="W4: AER-default seeding helper does not exist yet")
 def test_default_seed_none_when_no_cache(tmp_path):
     from ui.scenario_form import _default_aer_seed_for_scenario
 
@@ -56,7 +54,6 @@ def test_default_seed_none_when_no_cache(tmp_path):
     assert _default_aer_seed_for_scenario(scenario, cache_dir=tmp_path) is None
 
 
-@pytest.mark.xfail(strict=True, reason="W4: counterfactual copy still uses EUR/ENTSO/CAL Y+1 wording")
 def test_no_european_language_in_counterfactual_paths():
     """No string in the counterfactual code paths may mention EUR/€/ENTSO/
     "CAL Y+1" — the strategy is "Base futures hedge" at "Base futures — calendar

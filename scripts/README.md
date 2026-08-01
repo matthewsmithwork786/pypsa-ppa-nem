@@ -164,6 +164,25 @@ The Streamlit app reads these files read-only via `ppa/data/nem_data.py` and
   several plausible header names and a substring-on-year filter; confirm
   against the real downloaded file.
 
+## If AER is unavailable
+
+`aer.gov.au` is often network-blocked from CI/sandboxed environments. If the
+AER fetch cannot be run, any of these equivalent sources can be normalised to
+the same `data/cache/nem/hedge/aer_base_futures_{year}.parquet` schema
+(`region, quarter_label, product, price_aud_mwh, as_at_date`), so
+`ppa/data/aer_futures.py` needs no change:
+
+- **ASX Energy 24 electricity futures** — the actual traded instrument AER's
+  "base futures" series is derived from; published quarterly and
+  calendar-year settlement prices per region.
+- **AEMO Quarterly Energy Dynamics** — published quarterly average spot
+  prices, good for cross-checking the forward series.
+- **OpenElectricity API** (already used for the plant registry) — spot and
+  derived futures series.
+
+Keep the quarter labels parseable by `ppa.data.aer_futures.parse_quarter_label`
+(e.g. `Q1-2025` or `2025 Q1`).
+
 None of these could be confirmed from the sandboxed planning/dev session
 (the domains are network-blocked there) — verify them the first time you run
 each script in the networked environment, and adjust the small
