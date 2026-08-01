@@ -241,10 +241,8 @@ def test_run_financial_analysis_cashflow_includes_devex():
 # ── 8. No stray € characters outside the explicitly EUR-denominated files ─
 
 
-# AUD-model files only. The genuinely-European-data files
-# (ppa/data/entsoe_client.py, ppa/data/european_data.py, ppa/data/bidding_zones.py)
-# are intentionally out of scope here, not allowlisted exceptions, so they are
-# simply not included below.
+# AUD-model files only. The deleted European-data files are intentionally out
+# of scope (they no longer exist).
 #
 # Note: ui/tabs/optimization.py is deliberately excluded from this list — it is
 # under concurrent active development elsewhere and out of scope for this check.
@@ -262,7 +260,6 @@ CHECKED_FILES = [
     os.path.join(REPO_ROOT, "ui", "tabs", "sensitivity_analysis.py"),
     os.path.join(REPO_ROOT, "ui", "scenario_form.py"),
     os.path.join(REPO_ROOT, "ui", "charts.py"),
-    os.path.join(REPO_ROOT, "ui", "tabs", "data_download.py"),
     os.path.join(REPO_ROOT, "ui", "tabs", "welcome.py"),
 ]
 

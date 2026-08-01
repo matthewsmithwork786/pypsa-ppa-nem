@@ -1,6 +1,6 @@
 """Source-agnostic timeseries helpers shared by all data adapters.
 
-Nothing here is specific to ENTSO-E, renewables.ninja or any market: these
+Nothing here is specific to any particular market or data provider: these
 functions take plain CF/price ``pd.Series`` plus a load-profile name and build
 the hourly ``ts`` DataFrame the dispatch/sizing LPs consume.
 """
@@ -146,7 +146,7 @@ def _align_to_index(series: pd.Series, target_index: pd.DatetimeIndex, fill_valu
     reached. This matters most for short custom uploads: a 48-hour upload becomes
     ~182.5 repetitions of that 48-hour pattern rather than 365 repetitions of just
     its last 24 hours, which is a far more honest reflection of "the user only
-    gave us 2 days of data". For the European/NEM paths this code path is only
+    gave us 2 days of data". For the NEM path this code path is only
     ever reached by the (harmless) leap-year 8760→8784 gap, where tiling the whole
     source is equivalent-in-spirit to tiling the last day (both replay real
     historical hours) but strictly more correct in the general case.

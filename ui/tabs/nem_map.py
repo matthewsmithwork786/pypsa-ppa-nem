@@ -1,9 +1,9 @@
-"""NEM Plant Map — pick a real wind/solar plant to drive the optimizer.
+"""Get Data (NEM Plant Map) — pick a real wind/solar plant to drive the optimizer.
 
 Pure helper functions (no Streamlit calls) live at module level so they're
 independently unit-testable; `render()` wires them into the Streamlit UI,
 mirroring the click-to-place idiom in `ui/scenario_form.py` and the
-cache-status expander layout in `ui/tabs/data_download.py`.
+cache-status expander layout used across the tabs.
 """
 from __future__ import annotations
 
@@ -113,10 +113,10 @@ def _label_for_duid(duid: str, plants_df: "pd.DataFrame") -> str:
 
 
 def render() -> None:
-    st.title("🗺️ NEM Plant Map")
+    st.title("📡 Get Data")
     st.markdown(
         "Pick real Australian wind and/or solar plants (2025 5-minute AEMO SCADA) "
-        "to drive the optimizer, instead of the European renewables.ninja profiles."
+        "to drive the optimizer."
     )
 
     year = nem_data.DEFAULT_YEAR
@@ -275,37 +275,27 @@ def render() -> None:
     )
     use_disabled = not (any_ready and price_region_cached and (wind_duid or pv_duid))
 
-    cols = st.columns(2)
-    with cols[0]:
-        if st.button(
-            "✅ Use these plants", type="primary", width="stretch",
-            key="nm_use_plants", disabled=use_disabled,
-        ):
-            current = state.get_scenario()
-            if current is None:
-                from ppa.scenario import BASE_SCENARIO
-                current = BASE_SCENARIO
-            updated = dataclasses.replace(
-                current,
-                data_source="nem_map",
-                nem_pv_duid=pv_duid,
-                nem_wind_duid=wind_duid,
-                nem_price_region=price_region,
-                nem_year=year,
-            )
-            state.set_scenario(updated)
-            state.set_nem_selection({
-                "pv_duid": pv_duid, "wind_duid": wind_duid,
-                "price_region": price_region, "year": year,
-            })
-            state.clear_custom_upload()
-            state.clear_run_outputs()
-            st.rerun()
-    with cols[1]:
-        if st.button("↩️ Revert to European data", width="stretch", key="nm_revert"):
-            current = state.get_scenario()
-            if current is not None:
-                state.set_scenario(dataclasses.replace(current, data_source="european"))
-            state.clear_nem_selection()
-            state.clear_run_outputs()
-            st.rerun()
+    if st.button(
+        "✅ Use these plants", type="primary", width="stretch",
+        key="nm_use_plants", disabled=use_disabled,
+    ):
+        current = state.get_scenario()
+        if current is None:
+            from ppa.scenario import BASE_SCENARIO
+            current = BASE_SCENARIO
+        updated = dataclasses.replace(
+            current,
+            data_source="nem_map",
+            nem_pv_duid=pv_duid,
+            nem_wind_duid=wind_duid,
+            nem_price_region=price_region,
+            nem_year=year,
+        )
+        state.set_scenario(updated)
+        state.set_nem_selection({
+            "pv_duid": pv_duid, "wind_duid": wind_duid,
+            "price_region": price_region, "year": year,
+        })
+        state.clear_custom_upload()
+        state.clear_run_outputs()
+        st.rerun()

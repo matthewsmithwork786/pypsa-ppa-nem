@@ -25,9 +25,8 @@ reshape them into this repo's cache layout:
     data/cache/nem/price/rrp_{REGION}_{year}.parquet  # index=5-min settlementdate, col 'rrp'
 
 TIMEZONE NOTE: all timestamps written by this script are tz-NAIVE NEM standard
-time (AEST, UTC+10, no daylight saving) -- this is AEMO's native convention and
-is NOT the same as the tz-aware UTC caches produced by `ppa/data/renewables_ninja.py`
-and `ppa/data/entsoe_client.py`. Whoever wires `ppa/data/nem_data.py` up to
+time (AEST, UTC+10, no daylight saving) -- this is AEMO's native convention.
+Whoever wires `ppa/data/nem_data.py` up to
 `ppa/data/timeseries_utils.py::_align_to_index` (which assigns positionally) must
 account for this offset explicitly -- do not assume these indices are UTC.
 

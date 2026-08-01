@@ -90,13 +90,13 @@ def _warnings_for(diag: dict) -> list[tuple[str, str]]:
 def render() -> None:
     st.title("📤 Custom Data")
     st.markdown(
-        "Upload your own timeseries to drive the optimizer instead of European "
-        "or NEM plant data. Required columns:\n\n"
+        "Upload your own timeseries to drive the optimizer instead of the default "
+        "NEM plant data. Required columns:\n\n"
         "- `timestamp` — hourly (or finer) datetime\n"
         "- `ts_PVGen`, `ts_WindGen` — capacity factors in **[0, 1]**\n"
         "- `ts_LoadMW` — offtaker load in **absolute MW** (not a 0–1 profile)\n"
         "- `ts_MktPrice` — market price in **A$/MWh** (negative values allowed)\n\n"
-        "Applying an upload **overrides both the NEM Plant Map selection and the "
+        "Applying an upload **overrides both the Get Data (NEM plant) selection and the "
         "load-profile selector** — the uploaded `ts_LoadMW` column is used directly."
     )
 
@@ -208,7 +208,7 @@ def render() -> None:
         if st.button("↩️ Clear custom data", width="stretch", key="cd_clear"):
             current = state.get_scenario()
             if current is not None:
-                new_source = "nem_map" if state.get_nem_selection() else "european"
+                new_source = "nem_map" if state.get_nem_selection() else "nem_default"
                 state.set_scenario(dataclasses.replace(current, data_source=new_source))
             state.clear_custom_upload()
             state.clear_run_outputs()

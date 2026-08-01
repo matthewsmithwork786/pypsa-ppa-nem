@@ -202,6 +202,6 @@ def test_nem_generation_ready_accepts_a_ready_duid(data_source, tmp_path):
 
 
 def test_nem_generation_ready_non_nem_source_always_ready():
-    all_ready, problems = nem_data.nem_generation_ready("european", pv_duid="", wind_duid="")
+    all_ready, problems = nem_data.nem_generation_ready("custom_csv", pv_duid="", wind_duid="")
     assert all_ready is True
     assert problems == ()

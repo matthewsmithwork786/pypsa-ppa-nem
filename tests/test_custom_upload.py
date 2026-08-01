@@ -246,11 +246,12 @@ def test_prepare_timeseries_dispatches_to_custom_for_custom_csv_source():
     )
 
 
-def test_prepare_timeseries_european_path_unchanged():
+def test_prepare_timeseries_default_csv_path_unchanged():
+    """The non-custom path (default/NEM CSV) keeps the flat load synthesis."""
     default_csv = data_loader.find_default_csv()
     assert default_csv is not None, "march_2025_pypsa_timeseries.csv fixture must exist"
     ts = data_loader.load_timeseries(default_csv)
-    scenario = Scenario(data_source="european", load_profile="flat", ppaload_mw=123.0)
+    scenario = Scenario(data_source="nem_default", load_profile="flat", ppaload_mw=123.0)
     prepared = data_loader.prepare_timeseries(ts, scenario)
     assert (prepared["ppaload_mw"] == 123.0).all()
 

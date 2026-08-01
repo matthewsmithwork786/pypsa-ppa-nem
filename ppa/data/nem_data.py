@@ -417,7 +417,7 @@ def nem_generation_ready(
         return True, ()
     if not (pv_duid or wind_duid):
         return False, (
-            "No NEM plant selected -- pick a wind and/or solar plant on the NEM Plant Map "
+            "No NEM plant selected -- pick a wind and/or solar plant on the Get Data "
             "tab. Without one, the simulation would run with zero renewable generation.",
         )
     return check_selected_duids_ready(pv_duid, wind_duid, year, cache_dir, registry)
@@ -753,3 +753,41 @@ def get_timeseries_dicts(scenario, cache_dir=NEM_CACHE_DIR) -> tuple:
     pv_by_year, wind_by_year = get_cf_dicts(pv_duid, wind_duid, years=(year,), cache_dir=cache_dir)
     prices_by_year = get_price_dict(region, years=(year,), cache_dir=cache_dir)
     return pv_by_year, wind_by_year, prices_by_year
+
+
+def load_illustration_ts(
+    region: str = DEFAULT_REGION,
+    year: int = DEFAULT_YEAR,
+    cache_dir: Path = NEM_CACHE_DIR,
+    registry: "pd.DataFrame | None" = None,
+) -> "pd.DataFrame | None":
+    """Assemble a representative NEM hourly timeseries for the intro/help charts.
+
+    Reads the cached regional spot price and the capacity factors of the first
+    operating wind and solar plant in the registry. Returns a DataFrame with
+    ``ts_MktPrice``, ``ts_WindGen`` and ``ts_PVGen`` on a common hourly index.
+    Cache-only (no network); returns ``None`` if the required files are not
+    present so callers can degrade gracefully.
+    """
+    if registry is None:
+        registry = load_plant_registry(cache_dir=cache_dir)
+    try:
+        price = load_regional_price(region, year, cache_dir)
+        operating = registry[registry["status"] == OPERATING_STATUS]
+        solar_duid = str(operating.loc[operating["fuel_tech"] == "Solar", "duid"].iloc[0])
+        wind_duid = str(operating.loc[operating["fuel_tech"] == "Wind", "duid"].iloc[0])
+        pv_cf = capacity_factor_for_duid(solar_duid, year, cache_dir, registry)
+        wind_cf = capacity_factor_for_duid(wind_duid, year, cache_dir, registry)
+    except (FileNotFoundError, KeyError, IndexError, ValueError):
+        return None
+
+    price_hourly = to_hourly(price, year)
+    idx = price_hourly.index
+    return pd.DataFrame(
+        {
+            "ts_MktPrice": price_hourly.to_numpy(),
+            "ts_WindGen": to_hourly(wind_cf, year).to_numpy(),
+            "ts_PVGen": to_hourly(pv_cf, year).to_numpy(),
+        },
+        index=idx,
+    )

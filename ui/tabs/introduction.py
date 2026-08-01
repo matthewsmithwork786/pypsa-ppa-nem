@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from ppa.data.european_data import load_illustration_ts
+from ppa.data.nem_data import load_illustration_ts
 from ppa.scenario import BASE_SCENARIO
 from ui.charts import (
     make_price_vs_ppa_chart,
@@ -60,10 +60,10 @@ PPAs have become a central instrument in the global energy transition:
             height=400,
         )
         st.caption(
-            "Real European day-ahead wholesale prices (German DE-LU market) can swing from "
-            "deeply negative (oversupply) to hundreds of euros per MWh (scarcity events) within "
-            "the same day. A PPA fixes the revenue stream for the generator at the contracted "
-            "tariff — insulating both parties from this volatility."
+            "Real NEM regional wholesale prices (NSW1 spot, 2025) can swing from "
+            "deeply negative (oversupply) to hundreds of dollars per MWh (scarcity events) "
+            "within the same day. A PPA fixes the revenue stream for the generator at the "
+            "contracted tariff — insulating both parties from this volatility."
         )
 
     st.subheader("PPA structures vary widely")
@@ -119,7 +119,6 @@ PPAs have become a central instrument in the global energy transition:
 | **IPP** | Independent Power Producer — owns and operates generation assets |
 | **Offtaker** | The buyer in a PPA |
 | **BESS** | Battery Energy Storage System — co-located storage used to shift generation in time |
-| **ENTSO-E** | European Network of Transmission System Operators for Electricity — source of day-ahead wholesale prices |
 | **Spot price** | Real-time wholesale electricity price — can spike very high or go negative |
 | **Merchant revenue** | Revenue from selling into the spot market at prevailing prices |
 | **LCOE** | Levelised Cost of Energy — total lifetime costs ÷ total lifetime energy (A$/MWh) |

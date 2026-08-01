@@ -63,8 +63,7 @@ pypsa-ppa/
 ├── data/                        # Data
 │   ├── Scenario_definition.xls  # Template to define a scenario via Excel
 │   └── cache                    # Cached data
-│       ├── entsoe               # Cached day-ahead data
-│       └── renewables_ninja     # Cached renewable profiles
+│       └── nem                  # Cached NEM registry / SCADA / prices / hedges
 ├── ppa/                         # Core library — no Streamlit dependency
 │   ├── counterfactuals.py       # Counterfactual comparison of PPA
 │   ├── data_loader.py           # CSV loading and timeseries preparation
@@ -79,10 +78,9 @@ pypsa-ppa/
 │   ├── sensitivity.py           # Sensitivity analysis helpers
 │   ├── solver.py                # Linopy constraints + HiGHS solve
 │   └── data                     # Data handling libraries
-│       ├── entsoe_client.py     # ENTSO-E support functions
-│       ├── european_data.py     # Collect necessary data
-│       ├── ffe_profiles.py      # Industrial default profiles
-│       └── renewables_ninja.py  # Global renewable profiles
+│       ├── aer_futures.py       # AER base-futures cache reader
+│       ├── nem_data.py          # NEM registry / SCADA / price cache reader
+│       └── timeseries_utils.py  # Shared timeseries helpers
 ├── ui/                          # Streamlit UI layer
 │   ├── charts.py                # Plotly figure builders
 │   ├── scenario_form.py         # Interactive parameter form
@@ -105,7 +103,7 @@ pypsa-ppa/
 
 ### Renewable & price timeseries
 
-Market prices and renewable capacity factors are sourced from ENTSO-E (day-ahead prices) and [renewables.ninja](https://renewables.ninja) (wind/solar profiles for a user-specified location).
+Market prices and renewable capacity factors are sourced from the Australian NEM: AEMO regional spot prices and 5-minute SCADA output for user-selected wind/solar plants (cached via the acquisition scripts under `scripts/`).
 
 ### Industrial load profiles
 

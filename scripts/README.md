@@ -67,7 +67,7 @@ see the cache file for a plant commissioned mid-year and correctly exclude it.
 Skips existing files unless `--overwrite` is passed.
 
 Output timestamps are tz-**naive NEM standard time (AEST, UTC+10)** — unlike
-the tz-aware UTC caches from `renewables_ninja.py`/`entsoe_client.py`. Keep
+the tz-aware UTC caches used previously. Keep
 this in mind when aligning against `ppa/data/timeseries_utils.py::_align_to_index`.
 
 No environment variables required (nemosis pulls straight from AEMO's public

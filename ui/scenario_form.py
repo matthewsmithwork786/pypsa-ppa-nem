@@ -298,53 +298,20 @@ def render_scenario_form(initial: Scenario) -> Scenario:
 
     with st.expander("Market data source", expanded=False):
         from ppa.data import nem_data
-        from ppa.scenario import default_data_source
         from ui.nem_cache_status import cached_cache_status
 
-        _is_map_or_custom = initial.data_source in ("nem_map", "custom_csv")
-        if _is_map_or_custom:
-            st.info(
-                f"Data source is currently **{initial.data_source}**, set from the "
-                f"{'NEM Plant Map' if initial.data_source == 'nem_map' else 'Custom Data'} tab. "
-                "Choose 'european' or 'nem_default' below to override it here."
-            )
-
         _status = cached_cache_status(int(initial.nem_year))
-        _price_cache_present = bool(_status.get("price_regions_cached"))
-        _has_nem_duid = bool(initial.nem_pv_duid or initial.nem_wind_duid)
-        _seed_choice = default_data_source(initial.data_source, _price_cache_present, _has_nem_duid)
-        if _seed_choice not in ("european", "nem_default"):
-            _seed_choice = "european"
-        st.session_state.setdefault("sf_data_source", _seed_choice)
-        st.session_state.setdefault("_sf_data_source_touched", False)
-
-        cols = st.columns([2, 1, 1])
-        data_source_radio = cols[0].radio(
-            "Data source", options=["european", "nem_default"],
-            key="sf_data_source", horizontal=True,
-            help=(
-                "Legacy European (ENTSO-E day-ahead prices + renewables.ninja CFs) vs. "
-                "the NEM 2025 default (real NEM regional spot prices). A plant selected "
-                "on the NEM Plant Map tab, or an active Custom Data upload, stays "
-                "authoritative until you explicitly pick a value here."
-            ),
-        )
-        if data_source_radio != _seed_choice:
-            st.session_state["_sf_data_source_touched"] = True
-        if _is_map_or_custom and not st.session_state["_sf_data_source_touched"]:
-            data_source = initial.data_source
-        else:
-            data_source = data_source_radio
 
         def _region_label(r):
             return f"{r} ✓" if r in _status.get("price_regions_cached", []) else r
 
+        cols = st.columns(2)
         _region_options = nem_data.NEM_REGIONS
         _region_idx = (
             _region_options.index(initial.nem_price_region)
             if initial.nem_price_region in _region_options else 0
         )
-        nem_price_region = cols[1].selectbox(
+        nem_price_region = cols[0].selectbox(
             "NEM price region", options=_region_options,
             index=_region_idx, format_func=_region_label,
             key="sf_nem_price_region",
@@ -353,7 +320,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         _cached_years = nem_data.list_cached_price_years()
         _year_options = sorted(set(_cached_years) | {int(initial.nem_year), nem_data.DEFAULT_YEAR})
         _year_idx = _year_options.index(int(initial.nem_year)) if int(initial.nem_year) in _year_options else 0
-        nem_year = cols[2].selectbox(
+        nem_year = cols[1].selectbox(
             "NEM data year", options=_year_options, index=_year_idx, key="sf_nem_year",
         )
 
@@ -479,7 +446,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         cal_hedge_fraction=float(cal_hedge_fraction),
         cal_forward_source=cal_forward_source,
         cal_forward_note=cal_forward_note,
-        data_source=data_source,
+        data_source=initial.data_source,
         nem_price_region=nem_price_region,
         nem_year=int(nem_year),
         onsw_mw=float(onsw_mw),

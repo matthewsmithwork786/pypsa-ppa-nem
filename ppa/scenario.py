@@ -9,9 +9,9 @@ import pandas as pd
 
 from ppa.industrial_profiles import PROFILE_KEYS
 
-# "european" (legacy default), "nem_map" (NEM plants picked on the map),
-# "nem_default" (NEM prices/DUIDs without map interaction), "custom_csv" (Phase 3)
-DATA_SOURCES = ("european", "nem_map", "nem_default", "custom_csv")
+# "nem_map" (NEM plants picked on the map), "nem_default" (NEM prices/DUIDs
+# without map interaction), "custom_csv" (Phase 3)
+DATA_SOURCES = ("nem_map", "nem_default", "custom_csv")
 
 
 @dataclass
@@ -79,27 +79,16 @@ class Scenario:
     wind_degradation_rate: float = 0.002  # 0.2%/yr
     bess_degradation_rate: float = 0.020  # 2.0%/yr usable capacity fade
 
-    # Asset / offtaker locations. lat/lon is the *offtaker* (consumer) location — it
-    # determines the bidding zone whose day-ahead prices are used. PV and wind
-    # assets may sit elsewhere; None means "same as the offtaker".
-    lat: float = 51.5
-    lon: float = 10.0
-    pv_lat: float | None = None
-    pv_lon: float | None = None
-    wind_lat: float | None = None
-    wind_lon: float | None = None
-    # Explicit ENTSO-E bidding-zone code (e.g. "IT_NORD"); empty = derive from
-    # the offtaker lat/lon via ppa.data.bidding_zones.bidding_zone_for.
-    bidding_zone_override: str = ""
+    # Asset / offtaker locations. lat/lon is the *offtaker* (consumer) location.
     # Combined transmission / grid-use charge (A$/MWh) on every MWh delivered to
     # the offtaker, covering all network levels between generation sites and
     # consumer — charged regardless of whether they share a bidding zone.
     transmission_cost_aud_mwh: float = 0.0
 
     # ── Data source ──────────────────────────────────────────────────────────
-    # "european" (legacy default), "nem_map" (NEM plants picked on the map),
-    # "nem_default" (NEM prices/DUIDs without map interaction), "custom_csv" (Phase 3)
-    data_source: str = "european"
+    # "nem_map" (NEM plants picked on the map), "nem_default" (NEM prices/DUIDs
+    # without map interaction), "custom_csv" (Phase 3)
+    data_source: str = "nem_default"
     nem_price_region: str = "NSW1"
     nem_pv_duid: str = ""
     nem_wind_duid: str = ""
@@ -116,28 +105,6 @@ class Scenario:
     target_irr: float = 0.10
 
     # ── Derived properties ─────────────────────────────────────────────────────
-
-    @property
-    def pv_location(self) -> tuple[float, float]:
-        return (
-            self.pv_lat if self.pv_lat is not None else self.lat,
-            self.pv_lon if self.pv_lon is not None else self.lon,
-        )
-
-    @property
-    def wind_location(self) -> tuple[float, float]:
-        return (
-            self.wind_lat if self.wind_lat is not None else self.lat,
-            self.wind_lon if self.wind_lon is not None else self.lon,
-        )
-
-    @property
-    def bidding_zone(self) -> str:
-        if self.bidding_zone_override:
-            return self.bidding_zone_override
-        from ppa.data.bidding_zones import bidding_zone_for
-
-        return bidding_zone_for(self.lat, self.lon)
 
     @property
     def is_nem(self) -> bool:
@@ -228,6 +195,8 @@ CASE_STUDIES: list[CaseStudy] = [
             "market_buy_share": 0.0,
             "pen_mult": 1.5,
             "load_profile": "cement_plant",
+            "nem_wind_duid": "COLWF01",
+            "nem_pv_duid": "SUNRSF1",
         },
     ),
     CaseStudy(
@@ -257,6 +226,8 @@ CASE_STUDIES: list[CaseStudy] = [
             "required_delivery_share": 0.75,
             "market_buy_share": 0.0,
             "load_profile": "green_hydrogen",
+            "nem_wind_duid": "COLWF01",
+            "nem_pv_duid": "SUNRSF1",
         },
     ),
     CaseStudy(
@@ -289,6 +260,8 @@ CASE_STUDIES: list[CaseStudy] = [
             "pen_mult": 2.0,
             "market_spread": 0.50,
             "load_profile": "steel_eaf",
+            "nem_wind_duid": "COLWF01",
+            "nem_pv_duid": "SUNRSF1",
         },
     ),
     CaseStudy(
@@ -320,6 +293,8 @@ CASE_STUDIES: list[CaseStudy] = [
             "market_buy_share": 0.01,
             "pen_mult": 1.2,
             "load_profile": "data_center",
+            "nem_wind_duid": "COLWF01",
+            "nem_pv_duid": "SUNRSF1",
         },
     ),
 ]
@@ -375,43 +350,14 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
             errors.append(f"NEM data year {s.nem_year} is out of range.")
         if s.data_source in ("nem_map", "nem_default") and not (s.nem_pv_duid or s.nem_wind_duid):
             errors.append(
-                "No NEM plant selected -- pick a wind and/or solar plant on the NEM Plant Map "
-                "tab, or switch the data source back to European. (This applies to 'nem_default' "
-                "too: without a DUID there is no NEM generation data to read and the simulation "
-                "would silently run with zero renewable output.)"
-            )
-    if s.bidding_zone_override:
-        from ppa.data.bidding_zones import SUPPORTED_ZONES
-
-        if s.bidding_zone_override not in SUPPORTED_ZONES:
-            errors.append(
-                f"Unknown bidding zone '{s.bidding_zone_override}'. Valid options: {SUPPORTED_ZONES}"
+                "No NEM plant selected -- pick a wind and/or solar plant on the Get Data "
+                "tab. (This applies to 'nem_default' too: without a DUID there is no NEM "
+                "generation data to read and the simulation would silently run with zero "
+                "renewable output.)"
             )
     if available_days and s.chosen_day not in available_days:
         errors.append(f"chosen_day '{s.chosen_day}' is not present in the timeseries data.")
     return errors
-
-
-def default_data_source(current: str, nem_price_cache_present: bool, has_nem_duid: bool = False) -> str:
-    """'european' upgrades to 'nem_default' only when NEM prices are cached
-    AND the scenario already carries at least one non-empty NEM plant DUID
-    (nem_pv_duid/nem_wind_duid) -- i.e. only when there's actual evidence the
-    user wants NEM *generation* data, not merely that some NEM region's
-    *prices* happen to be cached. Cached prices alone are not enough: a
-    'nem_default' scenario with no DUIDs reads an all-zero capacity-factor
-    series for both wind and solar (see
-    ppa.data.nem_data._cf_dict_for_duid/get_cf_dicts), so auto-upgrading a
-    plain 'european' scenario into that state would silently zero out
-    renewable generation with no error at all. 'nem_map'/'custom_csv' are
-    never overridden by this helper (a plant-map selection or an active
-    custom upload is a deliberate user choice made on another tab and must
-    not be silently downgraded/upgraded here). A user who deliberately picks
-    'nem_default' via the UI radio bypasses this helper entirely -- it only
-    governs the initial/seeded value, never an explicit choice.
-    """
-    if current == "european" and nem_price_cache_present and has_nem_duid:
-        return "nem_default"
-    return current
 
 
 def scenario_from_excel(path: str | Path) -> Scenario:

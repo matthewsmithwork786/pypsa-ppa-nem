@@ -44,7 +44,7 @@ def compute_counterfactuals(
 
     All strategies source the same hourly load: `ts["ppaload_mw"]`, the actual
     hourly load series (the uploaded hourly load on the custom-CSV path, or the
-    profile-synthesized hourly load on the European/NEM paths). This is a strict
+    profile-synthesized hourly load on the NEM path). This is a strict
     improvement over the previous flat-`scenario.ppaload_mw`-scalar approach for
     ALL data sources, since `scenario.ppaload_mw` is the uploaded/contracted PEAK
     MW (needed for LP feasibility), not the actual average consumption -- using

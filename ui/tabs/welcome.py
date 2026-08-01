@@ -24,7 +24,8 @@ Navigate through the tabs to manage different aspects of your project (economic 
     * *Financial assumptions*: CAPEX, LCOE, IRR, NPV, and breakeven PPA price discovery.
     * *Optimization details:* Years of optimization, price escalation, and technology degradation.
 
-2. 📡 **Get Data** — download the necessary data.
+2. 📡 **Get Data** — pick real Australian NEM wind/solar plants on the map, and
+   download / cache the underlying data via the acquisition scripts.
 
 3. ⚙️ **Optimization** — review the scenario summary and run the optimization to solve
    the model. This typically takes 5–15 seconds.
@@ -48,8 +49,8 @@ Navigate through the tabs to manage different aspects of your project (economic 
 - [HiGHS](https://highs.dev) — LP solver
 - [Streamlit](https://streamlit.io) — web UI
 - [Plotly](https://plotly.com) — interactive charts
-- and using *historical* data from
-  - [renewables.ninja](https://renewables.ninja) for wind & solar hourly profiles, and
-  - [ENTSO-E](https://transparency.entsoe.eu) for day-ahead spot prices for Europe.
+- and using *historical* Australian data from
+  - AEMO NEM SCADA (5-minute) for wind & solar plant output, and
+  - AEMO NEM regional spot prices (the AER base-futures series for hedges).
             """
         )

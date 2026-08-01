@@ -279,7 +279,7 @@ def make_availability_profile_chart(ts: "pd.DataFrame") -> go.Figure:
         fillcolor="rgba(21,101,192,0.06)", line_width=0,
     )
     fig.update_layout(
-        title="Average renewable availability by hour of day — central Germany",
+        title="Average renewable availability by hour of day",
         xaxis=dict(title="Hour of day", tickvals=list(range(0, 24, 3))),
         yaxis=dict(title="Capacity factor (0–1)", range=[0, 1]),
         height=320,

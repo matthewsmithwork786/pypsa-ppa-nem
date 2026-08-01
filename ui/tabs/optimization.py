@@ -11,15 +11,7 @@ from ppa.scenario import BASE_SCENARIO, validate_scenario
 from ui import state
 
 
-# ── timeseries loader (European reference-month path) ──────────────────────────
-
-@st.cache_data
-def _cached_reference_ts(pv_lat: float, pv_lon: float, wind_lat: float, wind_lon: float, zone: str):
-    from ppa.data.european_data import load_reference_month_ts
-    return load_reference_month_ts(
-        lat=pv_lat, lon=pv_lon, zone=zone, wind_lat=wind_lat, wind_lon=wind_lon
-    )
-
+# ── timeseries loader (NEM period path) ───────────────────────────────────────
 
 @st.cache_data
 def _cached_nem_period_ts(
@@ -118,8 +110,8 @@ def _get_timeseries(scenario):
         upload = state.get_custom_upload()
         if upload is None:
             # Mirror the multi-year path's error handling (ppa.tabs.optimization
-            # ._run_simulation): don't silently fall through to the European
-            # reference-month cache below -- that would run the LP against the
+            # ._run_simulation): don't silently fall through to the NEM reference
+            # cache below -- that would run the LP against the
             # wrong data source with no indication anything is amiss.
             raise RuntimeError(
                 "Data source is 'custom_csv' but no uploaded file is active. "
@@ -133,17 +125,7 @@ def _get_timeseries(scenario):
     # no way to receive; see _cached_nem_period_ts / _render_nem_period_controls.
     if state.has_timeseries():
         return state.get_timeseries()
-    pv_lat, pv_lon = scenario.pv_location
-    wind_lat, wind_lon = scenario.wind_location
-    ts = _cached_reference_ts(pv_lat, pv_lon, wind_lat, wind_lon, scenario.bidding_zone)
-    if ts is None:
-        # Fall back to the default German reference cache so the single-day
-        # illustration keeps working before location-specific data is fetched.
-        ts = _cached_reference_ts(51.5, 10.0, 51.5, 10.0, "DE_LU")
-    if ts is None:
-        return None
-    state.set_timeseries(ts)
-    return ts
+    return None
 
 
 # ── scenario summary ──────────────────────────────────────────────────────────
@@ -230,7 +212,7 @@ def _render_nem_data_status(s) -> tuple[bool, bool]:
             st.success(f"NEM SCADA: {status['n_simulation_ready']} simulation-ready plant(s) cached ✓")
         else:
             st.warning(
-                "No simulation-ready NEM SCADA cached — go to **NEM Plant Map** tab "
+                "No simulation-ready NEM SCADA cached — go to **Get Data** tab "
                 f"(`python scripts/fetch_nem_scada_prices.py --year {s.nem_year}`)."
             )
     prices_ok = s.nem_price_region in status["price_regions_cached"]
@@ -277,43 +259,7 @@ def _render_data_status(s) -> tuple[bool, bool]:
         return _render_custom_data_status(s)
     if s.is_nem:
         return _render_nem_data_status(s)
-
-    from ppa.data.entsoe_client import list_cached_years as list_cached_price_years, AVAILABLE_YEARS as PRICE_YEARS
-    from ppa.data.renewables_ninja import list_cached_pv_years, list_cached_wind_years, AVAILABLE_YEARS
-
-    zone = s.bidding_zone
-    pv_lat, pv_lon = s.pv_location
-    wind_lat, wind_lon = s.wind_location
-
-    cached_price_years = list_cached_price_years(country_code=zone)
-    prices_ok = len(cached_price_years) > 0
-    cached_cf_years = sorted(
-        set(list_cached_pv_years(lat=pv_lat, lon=pv_lon))
-        & set(list_cached_wind_years(lat=wind_lat, lon=wind_lon))
-    )
-    cf_ok = len(cached_cf_years) > 0
-
-    cols = st.columns(2)
-    with cols[0]:
-        if prices_ok:
-            missing = [y for y in PRICE_YEARS if y not in cached_price_years]
-            label = f"ENTSO-E prices ({zone}): {len(cached_price_years)} / {len(PRICE_YEARS)} years cached"
-            st.warning(f"{label} (missing: {missing})") if missing else st.success(f"{label} ✓")
-        else:
-            st.warning(f"No ENTSO-E prices cached for zone {zone} — go to **Get Data** tab")
-
-    with cols[1]:
-        if cf_ok:
-            missing = [y for y in AVAILABLE_YEARS if y not in cached_cf_years]
-            label = f"CF profiles: {len(cached_cf_years)} /{len(AVAILABLE_YEARS)} years cached"
-            st.warning(f"{label} (missing: {missing})") if missing else st.success(f"{label} ✓")
-        else:
-            st.warning(
-                f"No CF profiles cached for PV ({pv_lat:.2f}, {pv_lon:.2f}) + "
-                f"wind ({wind_lat:.2f}, {wind_lon:.2f}) — go to **Download Data** tab"
-            )
-
-    return prices_ok, cf_ok
+    return False, False
 
 
 # ── Simulation runner ────────────────────────────────────────────────
@@ -340,32 +286,9 @@ def _run_simulation(scenario, max_workers: int) -> None:
         pv_by_year, wind_by_year, prices_by_year = nem_data.get_timeseries_dicts(scenario)
         load_by_year = None
     else:
-        from ppa.data import renewables_ninja as rn
-        from ppa.data.entsoe_client import fetch_day_ahead_prices, list_cached_years as list_cached_price_years
-
-        pv_lat, pv_lon = scenario.pv_location
-        wind_lat, wind_lon = scenario.wind_location
-        cached_cf_years = sorted(
-            set(rn.list_cached_pv_years(lat=pv_lat, lon=pv_lon))
-            & set(rn.list_cached_wind_years(lat=wind_lat, lon=wind_lon))
+        raise RuntimeError(
+            f"Unknown data source '{scenario.data_source}' for the simulation runner."
         )
-        pv_by_year: dict[int, pd.Series] = {}
-        wind_by_year: dict[int, pd.Series] = {}
-        for year in cached_cf_years:
-            pv_by_year[year] = rn.download_pv_cf(year, "", lat=pv_lat, lon=pv_lon)
-            wind_by_year[year] = rn.download_wind_cf(year, "", lat=wind_lat, lon=wind_lon)
-
-        zone = scenario.bidding_zone
-        prices_by_year: dict[int, pd.Series] = {}
-        for year in list_cached_price_years(country_code=zone):
-            prices_by_year[year] = fetch_day_ahead_prices(year, "", country_code=zone)
-
-        # Fall back to any available price year if a CF year has no matching price year
-        # (prices_by_year is cycled the same way as CF in pick_weather_year)
-        if not prices_by_year:
-            raise RuntimeError(f"No ENTSO-E prices cached for zone {zone}. Go to **Get Data** tab first.")
-
-        load_by_year = None
 
     progress_bar = st.progress(0, text="Starting optimization ...")
     status_text = st.empty()
@@ -643,20 +566,12 @@ def render() -> None:
             "the day to inspect under **Reference day selection**. Results feed the "
             "Results, and Analysis tabs."
         )
-    elif s.is_nem:
+    else:
         _single_day_title = "Period reference optimization (NEM data)"
         _single_day_caption = (
             f"Runs the LP over the selected NEM plants/prices (region {s.nem_price_region}, "
             f"{s.nem_year}) for any month or custom date range you pick below, at hourly, "
             "30-minute, or native 5-minute resolution. Pick the day to inspect under "
-            "**Reference day selection**. Results feed the Results, and Analysis tabs."
-        )
-    else:
-        _single_day_title = "Single-day reference optimization (European reference month)"
-        _single_day_caption = (
-            f"Runs the LP over a representative European month ({s.bidding_zone} prices + "
-            "renewables.ninja capacity factors, falling back to the German reference cache "
-            "if location data is not downloaded yet). Pick the day to inspect under "
             "**Reference day selection**. Results feed the Results, and Analysis tabs."
         )
 

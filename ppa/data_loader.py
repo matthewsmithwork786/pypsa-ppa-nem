@@ -49,11 +49,11 @@ def load_timeseries(csv_path: str | Path) -> pd.DataFrame:
 
 
 def prepare_timeseries(ts: pd.DataFrame, scenario: Scenario) -> pd.DataFrame:
-    if getattr(scenario, "data_source", "european") == "custom_csv" and "ts_LoadMW" in ts.columns:
+    if getattr(scenario, "data_source", "nem_default") == "custom_csv" and "ts_LoadMW" in ts.columns:
         return prepare_custom_timeseries(ts)
 
     ts = ts.copy()
-    # European data already carries ts_MktPrice; the legacy CSV exposes ts_NSWPrice.
+    # The NEM path carries ts_MktPrice; the legacy CSV exposes ts_NSWPrice.
     if "ts_MktPrice" not in ts.columns and "ts_NSWPrice" in ts.columns:
         ts["ts_MktPrice"] = ts["ts_NSWPrice"]
     profile = get_load_series(scenario.load_profile, ts.index)
@@ -246,7 +246,7 @@ def prepare_custom_timeseries(ts: pd.DataFrame) -> pd.DataFrame:
     Sub-hourly data is resampled to hourly means; super-hourly data (each row
     already one snapshot) is left as-is. ``ts_LoadMW`` (absolute MW) passes
     straight through as ``ppaload_mw``, bypassing the profile×ppaload_mw
-    synthesis used for the European/NEM paths.
+    synthesis used for the NEM path.
     """
     ts = ts.copy()
 

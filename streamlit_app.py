@@ -11,7 +11,6 @@ from ui.tabs import (
     welcome,
     introduction,
     case_study,
-    data_download,
     nem_map,
     custom_data,
     optimization,
@@ -39,9 +38,8 @@ with st.popover("Disclaimer", width="stretch", icon="⚠️"):
 tabs = st.tabs([
     "| 👋 Welcome",
     "| 1. 🔬 Case Setup",
-    "| 2.📡 Get Data",
-    "| 2b. 🗺️ NEM Plant Map",
-    "| 2c. 📤 Custom Data",
+    "| 2. 📡 Get Data",
+    "| 2b. 📤 Custom Data",
     "| 3. ⚙️ Optimization",
     "| 4. 🔍 Results",
     "| 5. 🏦 Financial Model",
@@ -61,11 +59,6 @@ i += 1
 if tabs[i].open:
     with tabs[i]:
         case_study.render()
-
-i += 1
-if tabs[i].open:
-    with tabs[i]:
-        data_download.render()
 
 i += 1
 if tabs[i].open:
