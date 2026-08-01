@@ -19,6 +19,9 @@ data/.~lock.*
 # Downloaded / cached data (re-fetchable)
 # data/cache/
 
+# Raw nemosis acquisition cache (intermediate, not the final per-DUID output)
+/nemosis_cache/
+
 # Editor
 .idea/
 .vscode/
