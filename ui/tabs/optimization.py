@@ -301,6 +301,8 @@ def _render_data_status(s) -> tuple[bool, bool]:
 # ── Simulation runner ────────────────────────────────────────────────
 
 def _run_simulation(scenario, max_workers: int) -> None:
+    import time
+
     from ppa.multi_year import run_multi_year
     from ppa.financials import run_multi_year_financial_analysis
 
@@ -330,9 +332,8 @@ def _run_simulation(scenario, max_workers: int) -> None:
     status_text = st.empty()
 
     # ── Capacity co-optimization pre-step ─────────────────────────────────────
+    sizing_seconds = None
     if scenario.optimize_capacity:
-        import time
-
         from ppa.sizing import (
             apply_sizing,
             build_sizing_timeseries,
@@ -373,6 +374,7 @@ def _run_simulation(scenario, max_workers: int) -> None:
             )
 
         sized = run_sizing_subprocess(sizing_ts, scenario, heartbeat=_sizing_heartbeat)
+        sizing_seconds = time.monotonic() - _t0
         if sized.status != "ok":
             raise RuntimeError(
                 f"Capacity sizing LP failed: {sized.status} / {sized.condition}"
@@ -385,16 +387,25 @@ def _run_simulation(scenario, max_workers: int) -> None:
         state.set_sizing_diagnostics(
             sizing_diagnostics(sized, scenario, sizing_ts)
         )
+        horizon_msg = (
+            f"Sizing LP: {sized.sizing_years_used} year(s). The subsequent hourly "
+            f"dispatch simulation still solves all {scenario.simulation_years} "
+            "year(s) — that is where most of the runtime goes."
+            if sized.horizon_clamped
+            else ""
+        )
         status_text.success(
             f"Optimized portfolio — {_sized_banner_text(sized)} "
-            f"(sized over {sized.sizing_years_used} year(s) at {sized.resolution_h}h resolution) — "
-            "running hourly dispatch..."
+            f"(sized over {sized.sizing_years_used} year(s) at {sized.resolution_h}h "
+            f"resolution in {sizing_seconds:.0f}s) — running hourly dispatch... "
+            f"{horizon_msg}"
         )
 
     def _on_progress(done: int, total: int, sim_year: int) -> None:
         progress_bar.progress(done / total, text=f"Year {sim_year} ({done}/{total})")
         status_text.text(f"Solved {done} of {total} year(s)...")
 
+    _t_dispatch = time.monotonic()
     results = run_multi_year(
         scenario=scenario,
         pv_cf_by_year=pv_by_year,
@@ -405,6 +416,7 @@ def _run_simulation(scenario, max_workers: int) -> None:
         max_workers=max_workers,
         progress_callback=_on_progress,
     )
+    dispatch_seconds = time.monotonic() - _t_dispatch
     state.set_multi_year_results(results)
 
     fin = run_multi_year_financial_analysis(
@@ -413,7 +425,8 @@ def _run_simulation(scenario, max_workers: int) -> None:
     state.set_multi_year_financial(fin)
 
     progress_bar.progress(1.0, text="Optimization complete!")
-    status_text.success(f"Completed {scenario.simulation_years} year(s) successfully.")
+    timing = f" (sizing {sizing_seconds:.0f}s + dispatch {dispatch_seconds:.0f}s)" if sizing_seconds is not None else f" ({dispatch_seconds:.0f}s)"
+    status_text.success(f"Completed {scenario.simulation_years} year(s) successfully{timing}.")
 
 
 # ── multi-year results display ────────────────────────────────────────────────
