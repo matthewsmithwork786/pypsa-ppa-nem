@@ -15,10 +15,13 @@ import streamlit as st
 
 from ppa import data_loader
 from ui import state
+from ui.constants import LARGE_TIMESERIES_ROWS, NEM_RESOLUTION_MINUTES
 from ui.scenario_form import PPALOAD_MW_MAX
 
 _PRICE_MAX_SANE = 20_000.0
 _PRICE_MIN_SANE = -1_000.0
+_TEMPLATE_MIN_DATE = pd.Timestamp(2025, 1, 1).date()
+_TEMPLATE_MAX_DATE = pd.Timestamp(2025, 12, 31).date()
 
 
 # ── Pure helpers (no Streamlit) ────────────────────────────────────────────────
@@ -109,11 +112,49 @@ def render() -> None:
 
     # ── Template ────────────────────────────────────────────────────────────
     st.subheader("1. Download the template")
-    template_bytes = data_loader.build_upload_template()
+
+    template_cols = st.columns([2, 1])
+    with template_cols[0]:
+        picked = st.date_input(
+            "Date range (within 2025)",
+            value=(_TEMPLATE_MIN_DATE, _TEMPLATE_MAX_DATE),
+            min_value=_TEMPLATE_MIN_DATE, max_value=_TEMPLATE_MAX_DATE,
+            key="cd_template_dates",
+        )
+    with template_cols[1]:
+        resolution_label = st.selectbox(
+            "Periodicity", options=list(NEM_RESOLUTION_MINUTES.keys()), index=0,
+            key="cd_template_resolution",
+        )
+    freq_minutes = NEM_RESOLUTION_MINUTES[resolution_label]
+
+    # Mirror the mid-selection single-date tuple handling used by
+    # ui/tabs/optimization.py::_render_nem_period_controls: with only one date
+    # picked so far, fall back to that single day.
+    if isinstance(picked, tuple) and len(picked) == 2:
+        start_date, end_date = picked
+    else:
+        single = picked[0] if isinstance(picked, tuple) else picked
+        start_date = end_date = single
+
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    n_template_rows = int((end - start) / pd.Timedelta(minutes=freq_minutes)) + 1
+    st.caption(f"Template row count: **{n_template_rows:,}** ({start.date()} → {end.date()}, {freq_minutes} min)")
+    if n_template_rows > LARGE_TIMESERIES_ROWS:
+        st.warning(
+            f"Full-year 5-min template = **{n_template_rows:,} rows** (~8 MB CSV) — "
+            "usable but slow to render in the browser."
+        )
+
+    template_bytes = data_loader.build_upload_template(
+        start=str(start.date()), end=str(end.date()), freq_minutes=freq_minutes,
+    )
+    template_filename = f"ppa_template_{start.date()}_{end.date()}_{freq_minutes}min.csv"
     st.download_button(
         "⬇️ Download CSV template",
         data=template_bytes,
-        file_name="ppa_custom_timeseries_template.csv",
+        file_name=template_filename,
         mime="text/csv",
         key="cd_template_dl",
     )

@@ -18,7 +18,7 @@ def test_template_header_and_parseable():
     raw = data_loader.build_upload_template()
     df = pd.read_csv(io.BytesIO(raw))
     assert list(df.columns) == data_loader.CUSTOM_UPLOAD_COLUMNS
-    assert len(df) == data_loader.TEMPLATE_HOURS
+    assert len(df) == 8760  # default template is the full 2025 year at hourly resolution
 
 
 def test_template_values_are_realistic():

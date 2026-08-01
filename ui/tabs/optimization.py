@@ -9,6 +9,7 @@ import streamlit as st
 
 from ppa.scenario import BASE_SCENARIO, validate_scenario
 from ui import state
+from ui.constants import NEM_RESOLUTION_MINUTES
 
 
 # ── timeseries loader (NEM period path) ───────────────────────────────────────
@@ -35,7 +36,6 @@ _NEM_MONTH_NAMES = [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
 ]
-_NEM_RESOLUTION_MINUTES = {"1 hour": 60, "30 minutes": 30, "5 minutes": 5}
 
 
 def _render_snapshot_warning(n_snapshots: int) -> None:
@@ -94,10 +94,10 @@ def _render_nem_period_controls(s) -> tuple[pd.Timestamp, pd.Timestamp, int]:
                 end_ts = start_ts + pd.Timedelta(days=1)
     with cols[2]:
         resolution_label = st.selectbox(
-            "Resolution", options=list(_NEM_RESOLUTION_MINUTES.keys()), index=0,
+            "Resolution", options=list(NEM_RESOLUTION_MINUTES.keys()), index=0,
             key="opt_nem_resolution",
         )
-        resolution_minutes = _NEM_RESOLUTION_MINUTES[resolution_label]
+        resolution_minutes = NEM_RESOLUTION_MINUTES[resolution_label]
 
     n_snapshots = int((end_ts - start_ts) / pd.Timedelta(minutes=resolution_minutes))
     _render_snapshot_warning(n_snapshots)

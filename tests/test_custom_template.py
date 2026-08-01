@@ -11,7 +11,6 @@ from __future__ import annotations
 import io
 
 import pandas as pd
-import pytest
 
 from ppa.data_loader import build_upload_template, load_custom_upload
 
@@ -20,7 +19,6 @@ def _load(template_bytes: bytes) -> pd.DataFrame:
     return load_custom_upload(io.BytesIO(template_bytes))
 
 
-@pytest.mark.xfail(strict=True, reason="W8: template is still a fixed 48-hour stub, not a 2025 full year")
 def test_default_template_is_full_year_hourly():
     ts = _load(build_upload_template())
     assert len(ts) == 8760
@@ -28,7 +26,6 @@ def test_default_template_is_full_year_hourly():
     assert ts.index[-1] == pd.Timestamp("2025-12-31 23:00")
 
 
-@pytest.mark.xfail(strict=True, reason="W8: build_upload_template takes (hours, start, load_mw), not start/end/freq_minutes")
 def test_month_range_30min_has_1488_rows():
     ts = _load(build_upload_template(start="2025-03-01", end="2025-03-31", freq_minutes=30))
     assert len(ts) == 1488  # 31 days × 48 half-hour slots
@@ -36,7 +33,6 @@ def test_month_range_30min_has_1488_rows():
     assert ts.index[-1] == pd.Timestamp("2025-03-31 23:30")
 
 
-@pytest.mark.xfail(strict=True, reason="W8: build_upload_template takes (hours, start, load_mw), not start/end/freq_minutes")
 def test_full_year_5min_has_105120_rows():
     ts = _load(
         build_upload_template(start="2025-01-01", end="2025-12-31", freq_minutes=5)

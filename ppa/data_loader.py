@@ -19,8 +19,9 @@ _DEFAULT_CSV_CANDIDATES = [
 CUSTOM_UPLOAD_COLUMNS = ["timestamp", "ts_PVGen", "ts_WindGen", "ts_LoadMW", "ts_MktPrice"]
 CUSTOM_DATA_COLUMNS = ["ts_PVGen", "ts_WindGen", "ts_LoadMW", "ts_MktPrice"]
 CUSTOM_CF_COLUMNS = ("ts_PVGen", "ts_WindGen")
-TEMPLATE_HOURS = 48
-TEMPLATE_START = "2025-01-01 00:00"
+TEMPLATE_START = "2025-01-01"
+TEMPLATE_END = "2025-12-31"
+TEMPLATE_FREQ_MINUTES = 60
 TEMPLATE_LOAD_MW = 100.0
 
 
@@ -88,12 +89,21 @@ def coerce_chosen_day(ts: pd.DataFrame, chosen_day: str) -> str:
 # ── Template generation ────────────────────────────────────────────────────────
 
 def build_upload_template(
-    hours: int = TEMPLATE_HOURS,
     start: str = TEMPLATE_START,
+    end: str = TEMPLATE_END,
+    freq_minutes: int = TEMPLATE_FREQ_MINUTES,
     load_mw: float = TEMPLATE_LOAD_MW,
 ) -> bytes:
-    """Return a realistic, deterministic (no RNG) example CSV as UTF-8 bytes."""
-    idx = pd.date_range(start, periods=hours, freq="h")
+    """Return a realistic, deterministic (no RNG) example CSV as UTF-8 bytes.
+
+    Defaults to the full 2025 year at hourly resolution (8760 rows). The date
+    range is inclusive of *end*, and *freq_minutes* must divide 60 so the PV
+    shape (computed from minute-of-day) stays correct at sub-hourly cadence.
+    """
+    if freq_minutes <= 0 or 60 % freq_minutes != 0:
+        raise ValueError(f"freq_minutes must divide 60 evenly, got {freq_minutes}")
+    idx = pd.date_range(start, pd.Timestamp(end) + pd.Timedelta(days=1),
+                        freq=f"{freq_minutes}min", inclusive="left")
     minutes_of_day = idx.hour * 60 + idx.minute
     frac = minutes_of_day / 1440.0
 
