@@ -38,7 +38,7 @@ def render() -> None:
     st.title("🔬 Case Selection and Adjustment")
     st.markdown(
         "Choose a predefined scenario to explore, then customise any parameters below — "
-        "including **project location**, **simulation horizon**, and **technology degradation**. "
+        "including **simulation horizon** and **technology degradation**. "
         "Head to **Get Data** to fetch data, then **Optimization** to run."
     )
     # st.markdown("---")

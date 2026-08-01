@@ -200,13 +200,6 @@ def _render_scenario_summary(s) -> None:
 
         with cols[3]:
             st.markdown("**Simulation**")
-            st.markdown(
-                f"- Offtaker: **{s.lat:.2f}°N, {s.lon:.2f}°E** — zone **{s.bidding_zone}**"
-            )
-            if s.pv_location != (s.lat, s.lon):
-                st.markdown(f"- PV site: **{s.pv_location[0]:.2f}°N, {s.pv_location[1]:.2f}°E**")
-            if s.wind_location != (s.lat, s.lon):
-                st.markdown(f"- Wind site: **{s.wind_location[0]:.2f}°N, {s.wind_location[1]:.2f}°E**")
             if s.transmission_cost_aud_mwh > 0:
                 st.markdown(f"- Transmission: **A${s.transmission_cost_aud_mwh:.1f}/MWh** delivered")
             if s.simulation_years == 1:
