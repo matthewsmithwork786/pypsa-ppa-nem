@@ -9,7 +9,6 @@ plotly==6.6.0
 matplotlib==3.10.9
 scipy==1.17.1
 streamlit==1.57.0
-pytest==8.3.4
 pypsatopo==1.1.2
 xarray==2026.2.0
 netcdf4==1.7.4
@@ -18,6 +17,3 @@ shapely==2.1.2
 pyogrio==0.12.1
 folium==0.20.0
 streamlit-folium==0.27.2
-# Optional: typical-day clustering for the capacity-sizing LP (guarded import —
-# the app runs without it and falls back to coarse/full-hourly sizing).
-tsam==3.4.2

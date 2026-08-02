@@ -1,0 +1,12 @@
+[server]
+# The app ships its own NEM data caches; nothing is uploaded at runtime except
+# the optional custom-timeseries CSV, which a full-year 5-min file can make
+# large (105,120 rows, ~8 MB).
+maxUploadSize = 50
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"

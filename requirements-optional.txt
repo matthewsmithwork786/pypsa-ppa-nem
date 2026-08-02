@@ -1,0 +1,13 @@
+# Optional extras. NOT installed by default and deliberately NOT in
+# requirements.txt: tsam pins highspy<=1.15.0, which conflicts with the
+# highspy==1.15.1 the rest of the stack uses and makes the runtime requirement
+# set unresolvable (pip: ResolutionImpossible).
+#
+# tsam enables the "Typical days" sizing method. The app runs without it and
+# falls back to full-hourly (the default) or coarse sizing. Note that clustered
+# sizing under-sizes storage relative to the exact LP -- see
+# docs/sizing_experiments.md E7/E9.
+#
+# To use it, install into an environment pinned to highspy<=1.15.0:
+#     pip install tsam==3.4.2 "highspy<=1.15.0"
+tsam==3.4.2
