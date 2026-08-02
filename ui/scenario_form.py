@@ -165,12 +165,13 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 50.0, key="sf_max_build_bess",
             )
             _method_labels = {
-                "tsam": "Typical days (tsam)",
                 "full_hourly": "Full year hourly",
                 "coarse": "Coarse resolution (legacy)",
+                "tsam": "Typical days (tsam)",
             }
             _method_idx = list(_method_labels).index(
-                initial.sizing_method if initial.sizing_method in _method_labels else "tsam"
+                initial.sizing_method if initial.sizing_method in _method_labels
+                else "full_hourly"
             )
             sizing_method = st.radio(
                 "Sizing representation",
@@ -178,12 +179,14 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 index=_method_idx,
                 key="sf_sizing_method",
                 help=(
-                    "How the sizing LP represents the year. **Typical days (tsam)** "
-                    "clusters the hourly year into representative days at full hourly "
-                    "resolution (default; needs the optional `tsam` package). "
-                    "**Full year hourly** is exact but slowest. **Coarse resolution** "
-                    "block-averages to the legacy 1-6 h resolution. The sized portfolio "
-                    "is always re-simulated at hourly resolution afterwards."
+                    "How the sizing LP represents the year. **Full year hourly** is "
+                    "exact and the default, but slowest. **Coarse resolution** "
+                    "block-averages to the legacy 1-6 h resolution (~4% smaller fleet, "
+                    "~8x faster). **Typical days (tsam)** clusters the year into "
+                    "representative days and is ~85x faster, but currently sizes the "
+                    "fleet ~11% low and the BESS to zero — see docs/sizing_experiments.md. "
+                    "The sized portfolio is always re-simulated at hourly resolution "
+                    "afterwards."
                 ),
                 horizontal=True,
             )
@@ -194,10 +197,11 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                     "Typical periods (tsam)", 4, 36, _n_periods_idx,
                     key="sf_sizing_n_periods",
                     help=(
-                        "Number of representative days to cluster into. More periods "
-                        "capture more of the year's variability (solar lulls, wind "
-                        "stretches, peak load) at the cost of a bigger LP. Peak-load "
-                        "and dark-lull days are always preserved even at low counts."
+                        "Number of representative days to cluster into. In principle "
+                        "more periods capture more of the year's variability, but "
+                        "measured accuracy currently gets *worse* as the count rises "
+                        "(-5.3% fleet at 8 days, -11.2% at 12, -19.1% at 24), so treat "
+                        "high counts with suspicion until that is fixed."
                     ),
                 )
                 sizing_resolution_h = initial.sizing_resolution_h

@@ -57,9 +57,17 @@ class Scenario:
     # The subsequent dispatch simulation and financials always run hourly on the
     # sized portfolio.
     sizing_resolution_h: int = 3
-    # Sizing representation: "tsam" (typical days, default), "full_hourly"
-    # (exact hourly), or "coarse" (legacy block-averaged resolution).
-    sizing_method: str = "tsam"
+    # Sizing representation: "full_hourly" (exact hourly, default), "tsam"
+    # (typical days) or "coarse" (legacy block-averaged resolution).
+    #
+    # The default was "tsam" until it was benchmarked (docs/sizing_experiments.md
+    # E2). On the Corporate PPA case it sizes the fleet 11.2% below the exact LP
+    # and the BESS to *zero* (exact: 19 MW), and accuracy degrades as the period
+    # count rises (-5.3% at 8 days, -11.2% at 12, -19.1% at 24) — backwards, and
+    # a sign of a defect rather than an inherent clustering limit. tsam is ~85x
+    # faster and worth fixing, so it stays selectable; it must not be the default
+    # while it is knowingly biased. See PLAN_sizing_underbuild.md U8.
+    sizing_method: str = "full_hourly"
     # Number of typical periods for the tsam method (4-36).
     sizing_n_periods: int = 12
     # Merchant sales earn revenue in the sizing LP at this fraction of historic
@@ -106,10 +114,9 @@ class Scenario:
     wind_degradation_rate: float = 0.002  # 0.2%/yr
     bess_degradation_rate: float = 0.020  # 2.0%/yr usable capacity fade
 
-    # Asset / offtaker locations. lat/lon is the *offtaker* (consumer) location.
     # Combined transmission / grid-use charge (A$/MWh) on every MWh delivered to
-    # the offtaker, covering all network levels between generation sites and
-    # consumer — charged regardless of whether they share a bidding zone.
+    # the offtaker, covering all network levels between the generation sites and
+    # the consumer, whatever the source (RE, BESS or market buy).
     transmission_cost_aud_mwh: float = 0.0
 
     # ── Data source ──────────────────────────────────────────────────────────
