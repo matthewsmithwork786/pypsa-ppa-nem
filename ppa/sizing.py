@@ -85,6 +85,51 @@ def weather_cycle_years(
     return cycle, note
 
 
+# Peak RSS of the sizing LP by representation, measured with
+# scripts/measure_peak_rss.py on the Corporate PPA case, 1-year horizon
+# (baseline after data load ~355 MB is included in these figures):
+#
+#     full_hourly   1,143 MB   171 s
+#     coarse (3 h)    778 MB    10 s
+#     tsam                small (the LP is ~25x smaller)
+#
+# Used to warn BEFORE a solve that would exhaust a memory-limited container,
+# because the failure mode otherwise is a silent SIGKILL with no traceback.
+SIZING_PEAK_MB = {"full_hourly": 1150.0, "coarse": 800.0, "tsam": 400.0}
+
+
+def sizing_memory_advice(scenario: Scenario) -> "str | None":
+    """Warn when the chosen sizing representation will not fit in RAM.
+
+    Returns a human-readable message, or None when there is enough headroom
+    (or memory cannot be read). Deliberately advisory rather than automatic:
+    silently switching representation would change the sized fleet without the
+    user knowing, and the methods do not agree (docs/sizing_experiments.md E2).
+    """
+    mem_mb = _available_memory_mb()
+    if mem_mb is None:
+        return None
+    method = getattr(scenario, "sizing_method", "full_hourly")
+    needed = SIZING_PEAK_MB.get(method)
+    if needed is None or mem_mb >= needed:
+        return None
+
+    cheaper = [m for m in ("coarse", "tsam") if SIZING_PEAK_MB[m] <= mem_mb]
+    suggestion = (
+        f" Switch the sizing representation to "
+        f"{' or '.join('Coarse resolution' if m == 'coarse' else 'Typical days' for m in cheaper)}"
+        ", or reduce the max-build caps and simulation years."
+        if cheaper else
+        " Reduce the max-build caps and the simulation years, or run this locally."
+    )
+    return (
+        f"Only ~{mem_mb / 1024:.1f} GB of memory is available, but the "
+        f"'{method}' sizing LP peaked at ~{needed / 1024:.1f} GB when measured. "
+        f"The solve may be killed by the OS (which happens without a traceback)."
+        + suggestion
+    )
+
+
 def clamp_sizing_years(requested_years: int, resolution_h: float = 1.0) -> tuple[int, str | None]:
     """Clamp the sizing-LP horizon to what fits in available RAM.
 

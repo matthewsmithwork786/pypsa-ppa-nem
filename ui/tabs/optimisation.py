@@ -366,6 +366,7 @@ def _run_simulation(scenario, max_workers: int) -> None:
             apply_sizing,
             build_sizing_timeseries,
             clamp_sizing_years,
+            sizing_memory_advice,
             run_sizing_subprocess,
             sizing_diagnostics,
             weather_cycle_years,
@@ -381,6 +382,11 @@ def _run_simulation(scenario, max_workers: int) -> None:
         )
         if notice:
             st.warning(notice)
+        # Warn BEFORE the solve: an out-of-memory kill arrives as a silent
+        # SIGKILL with no traceback, which is impossible to diagnose from the UI.
+        mem_advice = sizing_memory_advice(scenario)
+        if mem_advice:
+            st.warning(mem_advice)
         progress_bar.progress(
             0.0,
             text=(

@@ -158,3 +158,50 @@ def _run_with_stubs(monkeypatch, n_years: int):
         first_sim_year=2025,
         max_workers=2,
     )
+
+
+# ── Pre-solve memory advice (deployment guard) ───────────────────────────────
+
+def test_sizing_memory_advice_warns_when_method_will_not_fit(monkeypatch):
+    """An OOM kill is a silent SIGKILL, so warn before the solve, not after."""
+    import dataclasses
+
+    from ppa import sizing
+    from ppa.scenario import Scenario
+
+    monkeypatch.setattr(sizing, "_available_memory_mb", lambda: 900.0)
+    scn = dataclasses.replace(Scenario(), sizing_method="full_hourly")
+    msg = sizing.sizing_memory_advice(scn)
+    assert msg and "full_hourly" in msg
+    # Must point at a representation that actually fits in the memory available.
+    assert "Coarse resolution" in msg
+
+
+def test_sizing_memory_advice_silent_when_it_fits(monkeypatch):
+    import dataclasses
+
+    from ppa import sizing
+    from ppa.scenario import Scenario
+
+    monkeypatch.setattr(sizing, "_available_memory_mb", lambda: 8000.0)
+    assert sizing.sizing_memory_advice(
+        dataclasses.replace(Scenario(), sizing_method="full_hourly")
+    ) is None
+
+    monkeypatch.setattr(sizing, "_available_memory_mb", lambda: 900.0)
+    assert sizing.sizing_memory_advice(
+        dataclasses.replace(Scenario(), sizing_method="coarse")
+    ) is None
+
+
+def test_sizing_memory_advice_silent_when_memory_unreadable(monkeypatch):
+    """Never block or warn on a platform where memory cannot be read."""
+    import dataclasses
+
+    from ppa import sizing
+    from ppa.scenario import Scenario
+
+    monkeypatch.setattr(sizing, "_available_memory_mb", lambda: None)
+    assert sizing.sizing_memory_advice(
+        dataclasses.replace(Scenario(), sizing_method="full_hourly")
+    ) is None

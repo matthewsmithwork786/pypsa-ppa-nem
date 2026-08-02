@@ -60,8 +60,15 @@ locally:
 |---|---|
 | Baseline after data load | ~350 MB |
 | Sizing LP, coarse 3 h | ~780 MB |
-| Sizing LP, **full hourly (the default)** | see `scripts/measure_peak_rss.py` |
+| Sizing LP, **full hourly (the default)** | **~1,143 MB** (171 s) |
 | Dispatch, 2 forked workers | ~1,770 MB |
+| Dispatch, 1 worker (serial) | ~725 MB |
+
+> **On a 1 GB tier the default `full_hourly` sizing LP will not fit.** The app now
+> warns before the solve rather than being killed silently — but the practical
+> setting for a memory-limited deployment is **Coarse resolution (3 h)** at
+> ~780 MB, which is ~8x faster and only about 4.5% off on sized fleet. Capacity
+> sizing is the only feature affected; fixed-capacity dispatch runs in ~725 MB.
 
 The app already defends itself:
 
