@@ -244,7 +244,7 @@ def test_run_financial_analysis_cashflow_includes_devex():
 # AUD-model files only. The deleted European-data files are intentionally out
 # of scope (they no longer exist).
 #
-# Note: ui/tabs/optimization.py is deliberately excluded from this list — it is
+# Note: ui/tabs/optimisation.py is deliberately excluded from this list — it is
 # under concurrent active development elsewhere and out of scope for this check.
 CHECKED_FILES = [
     os.path.join(REPO_ROOT, "ppa", "financial_model.py"),

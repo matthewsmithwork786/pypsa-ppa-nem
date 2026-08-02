@@ -129,7 +129,7 @@ def render() -> None:
     freq_minutes = NEM_RESOLUTION_MINUTES[resolution_label]
 
     # Mirror the mid-selection single-date tuple handling used by
-    # ui/tabs/optimization.py::_render_nem_period_controls: with only one date
+    # ui/tabs/optimisation.py::_render_nem_period_controls: with only one date
     # picked so far, fall back to that single day.
     if isinstance(picked, tuple) and len(picked) == 2:
         start_date, end_date = picked

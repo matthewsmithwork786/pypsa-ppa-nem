@@ -49,7 +49,7 @@ class Scenario:
     cal_forward_note: str = ""
 
     # Capacity co-optimisation (ignores the fixed MW values below when enabled)
-    optimize_capacity: bool = False
+    optimise_capacity: bool = False
     max_build_wind_mw: float = 1000.0
     max_build_pv_mw: float = 1000.0
     max_build_bess_mw: float = 1000.0
@@ -341,7 +341,7 @@ def load_case_study(cs: CaseStudy) -> Scenario:
 
 def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> list[str]:
     errors: list[str] = []
-    if s.optimize_capacity:
+    if s.optimise_capacity:
         # Fixed MW inputs are ignored; only the build caps matter.
         if s.max_build_wind_mw < 0 or s.max_build_pv_mw < 0 or s.max_build_bess_mw < 0:
             errors.append("Max build capacities must be ≥ 0 MW.")
@@ -380,7 +380,7 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
         errors.append("PPA price must be > 0 $/MWh.")
     if not (0.0 < s.required_delivery_share <= 1.0):
         errors.append("Required delivery share must be between 0 and 1.")
-    if not s.optimize_capacity and s.onsw_mw == 0 and s.pv_mw == 0:
+    if not s.optimise_capacity and s.onsw_mw == 0 and s.pv_mw == 0:
         errors.append("At least one generation asset (wind or solar) must have capacity > 0.")
     if s.load_profile not in PROFILE_KEYS:
         errors.append(f"Unknown load profile '{s.load_profile}'. Valid options: {PROFILE_KEYS}")
@@ -436,6 +436,8 @@ def scenario_from_excel(path: str | Path) -> Scenario:
         enable_shortfall=_yn("enable_shortfall"),
         enable_penalty=_yn("enable_penalty"),
         run_financial_analysis=_yn("run_financial_analysis"),
+        # Accept both spellings: older templates use "optimize_capacity".
+        optimise_capacity=_yn("optimise_capacity") or _yn("optimize_capacity"),
         onsw_mw=_float("onsw_mw", 150.0),
         pv_mw=_float("pv_mw", 200.0),
         bess_mw=_float("bess_mw", 60.0),

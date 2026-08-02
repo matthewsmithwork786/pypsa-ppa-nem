@@ -1,6 +1,6 @@
 """W14: better sizing representation via `tsam` typical periods.
 
-The sizing LP (`ppa.sizing.optimize_capacities`) can run over the full hourly
+The sizing LP (`ppa.sizing.optimise_capacities`) can run over the full hourly
 year, coarse block averages, or — with the optional `tsam` dependency —
 typical periods at full hourly resolution. Typical days preserve intra-day
 variability (which the 3-hourly blocks smooth away) while keeping the LP ~2

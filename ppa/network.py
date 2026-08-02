@@ -21,7 +21,7 @@ def build_network(
 ) -> pypsa.Network:
     """Build an unsolved PyPSA network from prepared timeseries and scenario.
 
-    When `scenario.optimize_capacity` is True, wind/PV/BESS capacities and the
+    When `scenario.optimise_capacity` is True, wind/PV/BESS capacities and the
     three transport links become extendable investment variables. Generation is
     bounded by the per-tech max-build caps; the links are bounded by
     `scenario.grid_connection_max_mw` and priced at the connection cost, so the
@@ -54,7 +54,7 @@ def build_network(
             n.snapshot_weightings.loc[:, :] = float(resolution_h)
         total_hours = len(ts) * resolution_h
 
-    sizing = s.optimize_capacity
+    sizing = s.optimise_capacity
     # Annualized A$/MW/yr (or A$/MW-of-BESS/yr via fixed duration), scaled by the
     # fraction of a year the LP covers so capex and operational costs are summed
     # over the same horizon. crf annualizes overnight capex; opex_rate adds fixed O&M.

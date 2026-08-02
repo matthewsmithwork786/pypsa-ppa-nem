@@ -90,7 +90,7 @@ def _ffe_profile(sector_id: int, index: pd.DatetimeIndex) -> pd.Series:
         for t in index
     ])
 
-    # Normalize to [0, 1] so max hour = 1.0
+    # Normalise to [0, 1] so max hour = 1.0
     values /= values.max()
     return pd.Series(values, index=index, dtype=float)
 

@@ -74,7 +74,7 @@ def list_cached_futures_years(cache_dir: Path = NEM_CACHE_DIR) -> list:
 def load_aer_base_futures(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> pd.DataFrame:
     """Read + normalise the AER hedge cache parquet for `year`.
 
-    Normalizes region (strip/upper + alias map), quarter_label (strip),
+    Normalises region (strip/upper + alias map), quarter_label (strip),
     product (strip/title), price_aud_mwh (numeric, NaN rows dropped),
     as_at_date (datetime, coerced). Dedupes on (region, parsed quarter,
     product) -- using `parse_quarter_label`'s (year, quarter) tuple rather

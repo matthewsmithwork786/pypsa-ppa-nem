@@ -156,11 +156,11 @@ def run_multi_year(
     historical base year to the simulation year via `scenario.price_escalation_rate`.
     Technology degradation is applied per-year via `scenario.*_degradation_rate`.
     """
-    if scenario.optimize_capacity:
+    if scenario.optimise_capacity:
         raise ValueError(
-            "run_multi_year received a scenario with optimize_capacity=True — "
+            "run_multi_year received a scenario with optimise_capacity=True — "
             "the dispatch simulation needs fixed capacities. Run the sizing LP "
-            "first (ppa.sizing.optimize_capacities) and pass the scenario "
+            "first (ppa.sizing.optimise_capacities) and pass the scenario "
             "returned by ppa.sizing.apply_sizing."
         )
 

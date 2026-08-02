@@ -13,7 +13,7 @@ from ui.tabs import (
     case_study,
     nem_map,
     custom_data,
-    optimization,
+    optimisation,
     results_overview,
     results_deep_dive,
     sensitivity_analysis,
@@ -73,7 +73,7 @@ if tabs[i].open:
 i += 1
 if tabs[i].open:
     with tabs[i]:
-        optimization.render()
+        optimisation.render()
 
 i += 1
 if tabs[i].open:

@@ -31,7 +31,7 @@ import pandas as pd
 
 from ppa.network import build_network
 from ppa.scenario import Scenario
-from ppa.sizing import optimize_capacities
+from ppa.sizing import optimise_capacities
 from ppa.solver import solve
 
 
@@ -67,7 +67,7 @@ def _synthetic_year(hours: int) -> pd.DataFrame:
 def _sizing_scenario(method: str, periods: int) -> Scenario:
     return Scenario(
         name="solver-bench",
-        optimize_capacity=True,
+        optimise_capacity=True,
         sizing_method=method,
         sizing_n_periods=periods,
         sizing_resolution_h=3,
@@ -180,12 +180,12 @@ def main() -> None:
         print(f"  {r.label:28s} {ratio:6.2f}x  -> {verdict}")
 
 def dataclasses_replace_sizing(scn: Scenario) -> Scenario:
-    """Mirror the sizing-scenario de-rating done in optimize_capacities."""
+    """Mirror the sizing-scenario de-rating done in optimise_capacities."""
     import dataclasses
 
     sizing_scn = dataclasses.replace(
         scn,
-        optimize_capacity=True,
+        optimise_capacity=True,
         include_bess=scn.include_bess and scn.max_build_bess_mw > 0,
         bess_mw=1.0,
         bess_mwh=scn.bess_max_hours,

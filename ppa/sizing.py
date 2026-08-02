@@ -109,7 +109,7 @@ def clamp_sizing_years(requested_years: int, resolution_h: float = 1.0) -> tuple
         f"to fit available memory (~{mem_mb / 1024:.1f} GB free, "
         f"~{per_year_mem_mb / 1024:.1f} GB per simulated year at "
         f"{resolution_h:.0f}h resolution). "
-        "Optimized capacities are sized on the reduced horizon; the full "
+        "Optimised capacities are sized on the reduced horizon; the full "
         f"{requested_years}-year simulation still runs with those capacities."
     )
     return fit_years, notice
@@ -182,7 +182,7 @@ def coarsen_timeseries(ts: pd.DataFrame, resolution_h: int) -> pd.DataFrame:
     return coarse
 
 
-def optimize_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities:
+def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities:
     """Solve the investment LP at coarse resolution and extract optimal capacities.
 
     `ts` is the hourly timeseries. How it is represented before the solve is
@@ -221,7 +221,7 @@ def optimize_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
 
     sizing_scn = dataclasses.replace(
         scenario,
-        optimize_capacity=True,
+        optimise_capacity=True,
         include_bess=scenario.include_bess and scenario.max_build_bess_mw > 0,
         # Fixed duration for the sizing LP, de-rated for average degradation.
         # bess_max_hours reads bess_mwh/bess_mw, so encode via a 1 MW reference.
@@ -382,7 +382,7 @@ def _sizing_worker(conn, ts: pd.DataFrame, scenario_fields: dict) -> None:
     pickling reason as `ppa.multi_year._solve_one_year`.
     """
     try:
-        sized = optimize_capacities(ts, Scenario(**scenario_fields))
+        sized = optimise_capacities(ts, Scenario(**scenario_fields))
         conn.send(("ok", sized))
     except BaseException:
         conn.send(("err", traceback.format_exc()))
@@ -396,7 +396,7 @@ def run_sizing_subprocess(
     heartbeat: Callable[[], None] | None = None,
     poll_interval: float = 0.5,
 ) -> SizedCapacities:
-    """Run `optimize_capacities` in a killable child process.
+    """Run `optimise_capacities` in a killable child process.
 
     The solve is one blocking native HiGHS call, so it cannot be interrupted
     in-process (Streamlit's Stop button, Ctrl+C and SIGTERM are all deferred
@@ -462,5 +462,5 @@ def apply_sizing(scenario: Scenario, sized: SizedCapacities) -> Scenario:
         wind_link_mw=round(sized.wind_link_mw, 1),
         pvbess_link_mw=round(sized.pvbess_link_mw, 1),
         sell_link_mw=round(sized.sell_link_mw, 1),
-        optimize_capacity=False,
+        optimise_capacity=False,
     )

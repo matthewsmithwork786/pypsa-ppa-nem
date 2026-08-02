@@ -621,7 +621,7 @@ def cache_status(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> d
     }
 
 
-# ── Optimizer-facing adapters ────────────────────────────────────────────────
+# ── Optimiser-facing adapters ────────────────────────────────────────────────
 
 def _cf_dict_for_duid(
     duid: str | None, years, cache_dir: Path, registry: "pd.DataFrame | None"

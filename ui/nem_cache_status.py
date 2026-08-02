@@ -3,7 +3,7 @@
 `nem_data.cache_status()` calls `list_simulation_ready_plants()` internally,
 which does a full whole-year-check read of every registry plant's 5-minute
 SCADA parquet file (~187 real plants -> several seconds). Both
-`ui/tabs/nem_map.py` and `ui/tabs/optimization.py` need this status on every
+`ui/tabs/nem_map.py` and `ui/tabs/optimisation.py` need this status on every
 rerun, so it's cached here, keyed on `(year, cache_fingerprint(year, cache_dir))`
 so it invalidates whenever the on-disk SCADA/price/registry cache changes.
 

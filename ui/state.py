@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from ppa.counterfactuals import CounterfactualResult
 
 SCENARIO_KEY = "scenario"
-RESULT_KEY = "optimization_result"
+RESULT_KEY = "optimisation_result"
 FINANCIAL_KEY = "financial_result"
 COUNTERFACTUAL_KEY = "counterfactual_result"
 TIMESERIES_KEY = "timeseries"
@@ -20,7 +20,7 @@ ACTIVE_CASE_STUDY_KEY = "active_case_study_id"
 MULTI_YEAR_RESULTS_KEY = "multi_year_results"
 MULTI_YEAR_FINANCIAL_KEY = "multi_year_financial"
 PROJECT_FINANCE_KEY = "project_finance_result"
-OPTIMIZED_SIZES_KEY = "optimized_sizes"
+OPTIMISED_SIZES_KEY = "optimised_sizes"
 SIZING_DIAGNOSTICS_KEY = "sizing_diagnostics"
 NEM_SELECTION_KEY = "nem_selection"
 CUSTOM_UPLOAD_KEY = "custom_upload"
@@ -60,7 +60,7 @@ _SCENARIO_FORM_KEYS = [
     "sf_lat", "sf_lon",
     "sf_sim_years", "sf_first_sim_year", "sf_escalation",
     "sf_pv_deg", "sf_wind_deg", "sf_bess_deg",
-    "sf_optimize_capacity", "sf_max_build_wind", "sf_max_build_pv", "sf_max_build_bess",
+    "sf_optimise_capacity", "sf_max_build_wind", "sf_max_build_pv", "sf_max_build_bess",
     "sf_sizing_resolution", "sf_load_profile",
     "sf_data_source", "sf_nem_price_region", "sf_nem_year",
     "sf_aer_region", "sf_aer_quarters",
@@ -72,16 +72,16 @@ def get_effective_scenario() -> "Scenario | None":
     """The scenario as actually simulated — optimised capacities applied.
 
     After a capacity-sizing run the session scenario deliberately keeps the
-    user's slider values and `optimize_capacity=True` (so re-runs re-size),
+    user's slider values and `optimise_capacity=True` (so re-runs re-size),
     while the dispatch results were produced with the sized fleet. Any tab that
     combines scenario capacities with result-derived values (capacity factors,
     BESS SoC/cycles, CAPEX breakdowns) must read this accessor, not
     `get_scenario`, or the numbers won't match the dispatch.
     """
     s = get_scenario()
-    if s is None or not s.optimize_capacity:
+    if s is None or not s.optimise_capacity:
         return s
-    sized = get_optimized_sizes()
+    sized = get_optimised_sizes()
     if sized is None:
         return s
     from ppa.sizing import apply_sizing
@@ -188,16 +188,16 @@ def has_multi_year_financial() -> bool:
     return MULTI_YEAR_FINANCIAL_KEY in st.session_state
 
 
-def get_optimized_sizes() -> "object | None":
-    return st.session_state.get(OPTIMIZED_SIZES_KEY)
+def get_optimised_sizes() -> "object | None":
+    return st.session_state.get(OPTIMISED_SIZES_KEY)
 
 
-def set_optimized_sizes(sized: "object") -> None:
-    st.session_state[OPTIMIZED_SIZES_KEY] = sized
+def set_optimised_sizes(sized: "object") -> None:
+    st.session_state[OPTIMISED_SIZES_KEY] = sized
 
 
-def has_optimized_sizes() -> bool:
-    return OPTIMIZED_SIZES_KEY in st.session_state
+def has_optimised_sizes() -> bool:
+    return OPTIMISED_SIZES_KEY in st.session_state
 
 
 def get_sizing_diagnostics() -> "dict | None":
@@ -263,6 +263,6 @@ def clear_run_outputs() -> None:
     timeseries (relevant once a NEM/custom-CSV selection changes the data source).
     """
     clear_result()
-    for key in (MULTI_YEAR_RESULTS_KEY, MULTI_YEAR_FINANCIAL_KEY, OPTIMIZED_SIZES_KEY,
+    for key in (MULTI_YEAR_RESULTS_KEY, MULTI_YEAR_FINANCIAL_KEY, OPTIMISED_SIZES_KEY,
                 SIZING_DIAGNOSTICS_KEY, TIMESERIES_KEY):
         st.session_state.pop(key, None)

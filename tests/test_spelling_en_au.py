@@ -51,6 +51,11 @@ _ALLOWLIST_PATTERNS = [
     re.compile(r"\bscipy\.optimize\b"),
     re.compile(r"\blinopy\b"),
     re.compile(r"\bstr\.center\b"),
+    # pandas Timestamp/Index.normalize() (third-party API — never renamed)
+    re.compile(r"\.normalize\("),
+    # Excel-tab compat: scenario_from_excel must accept the legacy US spelling
+    # of the optimise_capacity column key (plan W10b).
+    re.compile(r"optimize_capacity"),
 ]
 
 
@@ -72,8 +77,9 @@ def _scan_files() -> list[Path]:
     return unique
 
 
-@pytest.mark.xfail(strict=True, reason="W10: Australian-English pass not landed yet")
 def test_no_american_spellings_in_app_code():
+    """Australian-English pass (W10) landed; this gate must now stay green.
+    Rename our own strings/identifiers, never third-party APIs (see allowlist)."""
     hits: list[str] = []
     for path in _scan_files():
         try:

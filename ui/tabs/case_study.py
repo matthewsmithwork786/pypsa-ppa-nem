@@ -39,7 +39,7 @@ def render() -> None:
     st.markdown(
         "Choose a predefined scenario to explore, then customise any parameters below — "
         "including **simulation horizon** and **technology degradation**. "
-        "Head to **Get Data** to fetch data, then **Optimization** to run."
+        "Head to **Get Data** to fetch data, then **Optimisation** to run."
     )
     # st.markdown("---")
 
@@ -73,7 +73,7 @@ def render() -> None:
             if st.button("Apply changes", type="primary", width="stretch"):
                 state.set_scenario(updated)
                 state.clear_run_outputs()
-                st.success("Scenario updated. Head to Optimization to run.")
+                st.success("Scenario updated. Head to Optimisation to run.")
         with cols[1]:
             if st.button("Reset to base defaults", type="secondary", width="stretch"):
                 state.set_scenario(BASE_SCENARIO)

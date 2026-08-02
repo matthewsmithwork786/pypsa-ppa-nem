@@ -42,7 +42,7 @@ def solve(
     # shortfall/buys into the worst weather years. Single-year runs keep the
     # original single aggregate constraint (identical behaviour).
     years = pd.Index(ts.index.year)
-    if s.optimize_capacity and years.nunique() > 1:
+    if s.optimise_capacity and years.nunique() > 1:
         snapshot_groups = [(f"_{y}", ts.index[years == y]) for y in years.unique()]
     else:
         snapshot_groups = [("", ts.index)]

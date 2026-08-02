@@ -21,7 +21,7 @@ import pytest
 
 from ppa.network import build_network
 from ppa.scenario import Scenario
-from ppa.sizing import apply_sizing, optimize_capacities
+from ppa.sizing import apply_sizing, optimise_capacities
 from ppa.solver import solve
 
 TRANSPORT_LINKS = [
@@ -55,7 +55,7 @@ def _toy_ts(n_hours: int = 72, load_mw: float = 100.0) -> pd.DataFrame:
 def _toy_scenario(**overrides) -> Scenario:
     base = dict(
         name="sizing-network toy",
-        optimize_capacity=True,
+        optimise_capacity=True,
         onsw_mw=50.0,
         pv_mw=50.0,
         bess_mw=0.0,
@@ -92,7 +92,7 @@ def test_links_extendable_in_sizing_mode():
 
 def test_links_fixed_in_dispatch_mode():
     ts = _toy_ts()
-    scn = dataclasses.replace(_toy_scenario(), optimize_capacity=False)
+    scn = dataclasses.replace(_toy_scenario(), optimise_capacity=False)
     n = build_network(ts, scn)
     ext = n.links.static.p_nom_extendable
     assert not ext.any(), "no link may be extendable in dispatch mode"
@@ -194,7 +194,7 @@ def test_toy_lp_builds_more_than_slider_values():
     The bug pins the delivered/connection capacity at the slider values, so the
     reported sized link MW are the direct acceptance signal for W12."""
     ts = _toy_ts()
-    sized = optimize_capacities(ts, _toy_scenario())
+    sized = optimise_capacities(ts, _toy_scenario())
     sized_link_total = sized.wind_link_mw + sized.pvbess_link_mw
     assert sized_link_total > 150.0, (
         f"sizing LP sized only {sized_link_total:.1f} MW of transport/connection "
@@ -208,14 +208,14 @@ def test_toy_lp_builds_more_than_slider_values():
 def test_apply_sizing_carries_link_mw_into_dispatch():
     ts = _toy_ts()
     scn = _toy_scenario()
-    sized = optimize_capacities(ts, scn)
+    sized = optimise_capacities(ts, scn)
     sim = apply_sizing(scn, sized)
     # The dispatch scenario must pin the transport links to the sized MW, not
     # re-derive them from nameplate, so the simulation matches what the LP sized.
     assert sim.wind_link_mw == pytest.approx(round(sized.wind_link_mw, 1))
     assert sim.pvbess_link_mw == pytest.approx(round(sized.pvbess_link_mw, 1))
     assert sim.sell_link_mw == pytest.approx(round(sized.sell_link_mw, 1))
-    assert not sim.optimize_capacity
+    assert not sim.optimise_capacity
 
     n = build_network(ts, sim)
     assert not n.links.static.p_nom_extendable.any()
@@ -232,7 +232,7 @@ def test_grid_connection_cap_limits_link_builds():
     n = build_network(ts, scn)
     assert n.links.static.p_nom_extendable["OnshoreWind_to_IPPGeneration"]
     assert n.links.static.p_nom_max["OnshoreWind_to_IPPGeneration"] == pytest.approx(120.0)
-    sized = optimize_capacities(ts, scn)
+    sized = optimise_capacities(ts, scn)
     assert sized.wind_link_mw <= 120.0 * (1.0 + 1e-3) + 1e-3
     assert sized.pvbess_link_mw <= 120.0 * (1.0 + 1e-3) + 1e-3
     assert sized.sell_link_mw <= 120.0 * (1.0 + 1e-3) + 1e-3
@@ -245,7 +245,7 @@ def test_sizing_diagnostics_reports_costs_and_binding():
 
     ts = _toy_ts()
     scn = _toy_scenario()
-    sized = optimize_capacities(ts, scn)
+    sized = optimise_capacities(ts, scn)
     diag = sizing_diagnostics(sized, scn, ts)
     assert len(diag["tech_rows"]) == 2  # wind + solar
     assert len(diag["link_rows"]) == 3  # three transport links

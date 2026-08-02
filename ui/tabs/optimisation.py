@@ -198,7 +198,7 @@ def _render_scenario_summary(s) -> None:
         cols = st.columns(4)
         with cols[0]:
             st.markdown("**Portfolio**")
-            if s.optimize_capacity:
+            if s.optimise_capacity:
                 st.markdown("- Mode: **co-optimised sizing** ⚡")
                 st.markdown(
                     f"- Max build: wind **{s.max_build_wind_mw:.0f}** / "
@@ -360,7 +360,7 @@ def _run_simulation(scenario, max_workers: int) -> None:
 
     # ── Capacity co-optimisation pre-step ─────────────────────────────────────
     sizing_seconds = None
-    if scenario.optimize_capacity:
+    if scenario.optimise_capacity:
         from ppa.sizing import (
             apply_sizing,
             build_sizing_timeseries,
@@ -407,10 +407,10 @@ def _run_simulation(scenario, max_workers: int) -> None:
                 f"Capacity sizing LP failed: {sized.status} / {sized.condition}"
             )
         # Keep the sized scenario local to this run: the user's scenario keeps
-        # optimize_capacity=True so re-runs re-size; the optimised fleet is
-        # surfaced via state.set_optimized_sizes.
+        # optimise_capacity=True so re-runs re-size; the optimised fleet is
+        # surfaced via state.set_optimised_sizes.
         scenario = apply_sizing(scenario, sized)
-        state.set_optimized_sizes(sized)
+        state.set_optimised_sizes(sized)
         state.set_sizing_diagnostics(
             sizing_diagnostics(sized, scenario, sizing_ts)
         )
@@ -422,7 +422,7 @@ def _run_simulation(scenario, max_workers: int) -> None:
             else ""
         )
         status_text.success(
-            f"Optimized portfolio — {_sized_banner_text(sized)} "
+            f"Optimised portfolio — {_sized_banner_text(sized)} "
             f"(sized over {sized.sizing_years_used} year(s), "
             f"{_sizing_method_label(sized)} in {sizing_seconds:.0f}s) — "
             f"running hourly dispatch... {horizon_msg}"
@@ -461,7 +461,7 @@ def _run_simulation(scenario, max_workers: int) -> None:
     )
     state.set_multi_year_financial(fin)
 
-    progress_bar.progress(1.0, text="Optimization complete!")
+    progress_bar.progress(1.0, text="Optimisation complete!")
     timing = f" (sizing {sizing_seconds:.0f}s + dispatch {dispatch_seconds:.0f}s)" if sizing_seconds is not None else f" ({dispatch_seconds:.0f}s)"
     status_text.success(f"Completed {scenario.simulation_years} year(s) successfully{timing}.")
 
@@ -469,7 +469,7 @@ def _run_simulation(scenario, max_workers: int) -> None:
 # ── multi-year results display ────────────────────────────────────────────────
 
 def _render_results(fin, n_years: int) -> None:
-    with st.expander("Optimization results", expanded=True):
+    with st.expander("Optimisation results", expanded=True):
         cols = st.columns(5)
         irr_str = f"{fin.irr:.1%}" if fin.irr == fin.irr else "N/A"
         lcoe_str = f"A${fin.lcoe:.1f}/MWh" if fin.lcoe == fin.lcoe else "N/A"
@@ -584,7 +584,7 @@ def _render_yearly_table(fin) -> None:
 # ── main render ───────────────────────────────────────────────────────────────
 
 def render() -> None:
-    st.title("⚙️ Optimization")
+    st.title("⚙️ Optimisation")
 
     if not state.has_scenario():
         state.set_scenario(BASE_SCENARIO)
@@ -594,15 +594,15 @@ def render() -> None:
     # st.markdown("---")
 
     # ── Simulation ───────────────────────────────────────────────────
-    # st.subheader("Optimization")
-    with st.expander("Optimization", expanded=True):
+    # st.subheader("Optimisation")
+    with st.expander("Optimisation", expanded=True):
         prices_ok, cf_ok = _render_data_status(s)
         data_ready = prices_ok and cf_ok
 
         cols = st.columns([1, 1, 2], vertical_alignment="bottom")
         with cols[0]:
             model_run = st.button(
-                "▶ Run Optimization",
+                "▶ Run Optimisation",
                 type="primary",
                 width="stretch",
                 key="opt_run_eu",
@@ -629,16 +629,16 @@ def render() -> None:
         try:
             _run_simulation(s, int(max_workers))
         except Exception as exc:
-            st.error(f"Optimization failed: {exc}")
+            st.error(f"Optimisation failed: {exc}")
         else:
             st.rerun()
 
     if state.has_multi_year_financial():
         # st.markdown("---")
-        if s.optimize_capacity and state.has_optimized_sizes():
-            sized = state.get_optimized_sizes()
+        if s.optimise_capacity and state.has_optimised_sizes():
+            sized = state.get_optimised_sizes()
             st.info(
-                f"⚡ **Optimized portfolio** — {_sized_banner_text(sized)} "
+                f"⚡ **Optimised portfolio** — {_sized_banner_text(sized)} "
                 f"(sized over {sized.sizing_years_used} year(s) "
                 f"at {getattr(sized, 'resolution_h', 1)}h resolution; dispatch & financials run hourly)"
             )
@@ -737,22 +737,22 @@ def render() -> None:
                             ts_prep = prepare_timeseries(ts, s)
 
                             # Capacity co-optimisation pre-step (reference period → fast;
-                            # optimize_capacities coarsens internally via
+                            # optimise_capacities coarsens internally via
                             # scenario.sizing_resolution_h regardless of ts_prep's own
                             # resolution, so it needs no resolution_h argument here).
-                            if s.optimize_capacity:
-                                from ppa.sizing import apply_sizing, optimize_capacities, sizing_diagnostics
+                            if s.optimise_capacity:
+                                from ppa.sizing import apply_sizing, optimise_capacities, sizing_diagnostics
 
-                                sized = optimize_capacities(ts_prep, s)
+                                sized = optimise_capacities(ts_prep, s)
                                 if sized.status != "ok":
                                     raise RuntimeError(
                                         f"Capacity sizing LP failed: {sized.status} / {sized.condition}"
                                     )
                                 s = apply_sizing(s, sized)
-                                state.set_optimized_sizes(sized)
+                                state.set_optimised_sizes(sized)
                                 state.set_sizing_diagnostics(sizing_diagnostics(sized, s, ts_prep))
                                 st.info(
-                                    f"Optimized portfolio — {_sized_banner_text(sized)} "
+                                    f"Optimised portfolio — {_sized_banner_text(sized)} "
                                     "(sized on the reference period)"
                                 )
 
@@ -768,7 +768,7 @@ def render() -> None:
                                 cf = compute_counterfactuals(ts_prep, s, result, dt=resolution_h)
                                 state.set_counterfactual(cf)
                         except Exception as exc:
-                            st.error(f"Optimization failed: {exc}")
+                            st.error(f"Optimisation failed: {exc}")
                         else:
                             st.success(f"Complete — {status} / {condition}. See Results tabs.")
                             _render_sizing_diagnostics()

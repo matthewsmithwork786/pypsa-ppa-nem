@@ -108,7 +108,7 @@ def _render_multi_year_overview(fin) -> None:
 
     st.caption(
         "Detailed hourly dispatch analysis is available in **Results Deep Dive** "
-        "after running the Single-Day reference in the Optimization tab."
+        "after running the Single-Day reference in the Optimisation tab."
     )
 
 
