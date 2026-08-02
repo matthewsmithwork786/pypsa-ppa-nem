@@ -39,7 +39,7 @@ The app opens at `http://localhost:8501`. Navigate through the tabs:
 . **Welcome** — capabilities overview and navigation guide
 1. **Case Setup** — select a predefined case study and customise parameters
 2. **Get Data** — download necessary time series data
-3. **Optimization** — review the scenario and click *Run Optimization*
+3. **Optimisation** — review the scenario and click *Run Optimisation*
 4. **Results** — financial analysis (LCOE, IRR, NPV), daily dispatch detail
 5. **Financial model** — project-finance appraisal layered on the energy-model results
 6. **Sensitivity analysis** — financial-parameter sensitivity
@@ -106,6 +106,26 @@ pypsa-ppa/
 Market prices and renewable capacity factors are sourced from the Australian NEM: AEMO regional spot prices and 5-minute SCADA output for user-selected wind/solar plants (cached via the acquisition scripts under `scripts/`).
 
 **Capacity sizing caveat:** only one weather year (2025 SCADA) is currently cached, so a sized portfolio is tuned to 2025 weather. Fetching additional SCADA years (e.g. via `scripts/fetch_nem_scada_prices.py` for earlier/later years) is a future TODO — the sizing code already cycles multiple cached weather years when present.
+
+## Memory
+
+The capacity-sizing LP is the memory peak of the whole app: a full-year hourly sizing model is ~306,000 rows × ~123,000 columns and costs multiple GB while it solves. Two mechanisms keep that from taking the process down, and both matter if you are changing this code:
+
+- **The sizing LP runs in a child process** (`ppa/sizing.py::run_sizing_subprocess`). Killing the child returns its memory to the OS immediately rather than leaving it resident in the app. Calling `optimise_capacities` directly in-process and then running a multi-year dispatch is the reliable way to get OOM-killed — the analysis scripts under `scripts/` all use the subprocess path for this reason.
+- **The multi-year dispatch forks its workers** (`ppa/multi_year.py`). Fork is copy-on-write, but CPython's reference counting writes to the header of nearly every object a child touches, so each worker ends up costing roughly the *parent's* whole footprint. The worker budget therefore accounts for the parent's RSS, not just a flat per-worker constant, and anything large is released before the fork.
+
+If a run is killed with no traceback and no exit code, that is the OOM killer (SIGKILL). Knobs:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `PPA_WORKER_MEM_MB` | `1200` | Raise to budget more per dispatch worker (→ fewer workers) |
+| `PPA_RESERVE_MEM_MB` | `800` | Headroom left for the OS and the Streamlit process |
+
+Killed workers are recovered rather than fatal: the run falls back to the in-process serial path and re-solves only the years that never returned. To measure where the memory actually goes:
+
+```bash
+PYTHONPATH=. python3 scripts/measure_peak_rss.py --phase both --years 15
+```
 
 ### Industrial load profiles
 

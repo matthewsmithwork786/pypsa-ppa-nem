@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import gc
 
 import numpy as np
 import pandas as pd
@@ -414,6 +415,13 @@ def _run_simulation(scenario, max_workers: int) -> None:
         state.set_sizing_diagnostics(
             sizing_diagnostics(sized, scenario, sizing_ts)
         )
+        # Release the full-year sizing frame before run_multi_year forks its
+        # workers. Fork is copy-on-write, but CPython refcounting dirties nearly
+        # every page a child touches, so whatever is still resident here is paid
+        # for once per worker. `sized` (a small dataclass) and the diagnostics
+        # are all that is needed from here on.
+        del sizing_ts
+        gc.collect()
         horizon_msg = (
             f"Sizing LP: {sized.sizing_years_used} year(s). The subsequent hourly "
             f"dispatch simulation still solves all {scenario.simulation_years} "
