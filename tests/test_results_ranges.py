@@ -3,7 +3,7 @@ link (connection) MW reporting.
 
 `build_24h_avg` already exists; W16 adds sub-hourly cadence grouping, an
 inclusive date-range filter, and per-link sized/peak/utilisation reporting on the
-OptimizationResult.
+OptimisationResult.
 """
 from __future__ import annotations
 

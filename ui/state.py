@@ -7,7 +7,7 @@ import streamlit as st
 if TYPE_CHECKING:
     import pandas as pd
     from ppa.scenario import Scenario
-    from ppa.results import OptimizationResult
+    from ppa.results import OptimisationResult
     from ppa.financials import FinancialResult, MultiYearFinancialResult
     from ppa.counterfactuals import CounterfactualResult
 
@@ -100,11 +100,11 @@ def has_scenario() -> bool:
     return SCENARIO_KEY in st.session_state
 
 
-def get_result() -> "OptimizationResult | None":
+def get_result() -> "OptimisationResult | None":
     return st.session_state.get(RESULT_KEY)
 
 
-def set_result(r: "OptimizationResult") -> None:
+def set_result(r: "OptimisationResult") -> None:
     st.session_state[RESULT_KEY] = r
     st.session_state.pop(FINANCIAL_KEY, None)
     st.session_state.pop(COUNTERFACTUAL_KEY, None)

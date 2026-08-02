@@ -13,7 +13,7 @@ The model is driven by two input objects:
 
 * :class:`EnergyInputs` — the per-year energy results coming out of the PyPSA
   optimisation (generation, PPA vs. excess split by solar/non-solar hours,
-  capture prices, …). Build these from an ``OptimizationResult`` with
+  capture prices, …). Build these from an ``OptimisationResult`` with
   :func:`energy_inputs_from_result`.
 * :class:`ProjectFinanceInputs` — all the financial assumptions (costs, debt,
   tax, depreciation, timing). Defaults are Australian NEM benchmarks sourced
@@ -28,9 +28,9 @@ from dataclasses import dataclass, field
 import numpy as np
 
 try:  # optional — only needed by energy_inputs_from_result
-    from ppa.results import OptimizationResult
+    from ppa.results import OptimisationResult
 except Exception:  # pragma: no cover
-    OptimizationResult = object  # type: ignore
+    OptimisationResult = object  # type: ignore
 
 SOLAR_HOUR_START = 9   # inclusive — "solar hours" defined as 09:00–17:00
 SOLAR_HOUR_END = 17    # exclusive
@@ -198,11 +198,11 @@ class ProjectFinanceResult:
 
 
 def energy_inputs_from_result(
-    result: "OptimizationResult",
+    result: "OptimisationResult",
     *,
     annualise: bool = True,
 ) -> EnergyInputs:
-    """Map a PyPSA ``OptimizationResult`` onto :class:`EnergyInputs`.
+    """Map a PyPSA ``OptimisationResult`` onto :class:`EnergyInputs`.
 
     Splits merchant volumes/prices by solar (09–17) vs. non-solar hours and
     annualises the period (scaling by 8760 / period-hours) so that the financial

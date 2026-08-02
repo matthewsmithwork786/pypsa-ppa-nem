@@ -61,7 +61,7 @@ class RevenueBreakdown:
 
 
 @dataclass
-class OptimizationResult:
+class OptimisationResult:
     scenario: Scenario
     dispatch: DispatchSeries
     summary: SummaryVolumes
@@ -102,7 +102,7 @@ def extract_results(
     solver_status: str,
     solver_condition: str,
     resolution_h: float = 1.0,
-) -> OptimizationResult:
+) -> OptimisationResult:
     """`resolution_h` is the hours each row of `ts`/`n`'s snapshots represents
     (must match what was passed to `build_network`). All `.sum()`-based MW ->
     MWh/`$` conversions below need it: summing MW samples only equals MWh when
@@ -200,7 +200,7 @@ def extract_results(
         transmission_cost=transmission_cost,
     )
 
-    return OptimizationResult(
+    return OptimisationResult(
         scenario=scenario,
         dispatch=dispatch,
         summary=summary,

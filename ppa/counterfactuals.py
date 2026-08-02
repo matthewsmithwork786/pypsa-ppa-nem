@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ppa.results import OptimizationResult
+from ppa.results import OptimisationResult
 from ppa.scenario import Scenario
 
 
@@ -37,7 +37,7 @@ class CounterfactualResult:
 def compute_counterfactuals(
     ts: pd.DataFrame,
     scenario: Scenario,
-    result: OptimizationResult,
+    result: OptimisationResult,
     dt: float = 1.0,
 ) -> CounterfactualResult:
     """Compare PPA offtaker cost against spot-only and calendar-year base-futures procurement.

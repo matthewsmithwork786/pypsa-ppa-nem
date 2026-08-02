@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from scipy.optimize import brentq
 
 from ppa.scenario import Scenario
-from ppa.results import SummaryVolumes, RevenueBreakdown, OptimizationResult
+from ppa.results import SummaryVolumes, RevenueBreakdown, OptimisationResult
 
 HOURS_PER_YEAR = 8_760
 
@@ -181,7 +181,7 @@ class MultiYearFinancialResult:
 
 def run_multi_year_financial_analysis(
     scenario: Scenario,
-    year_results: list[OptimizationResult],
+    year_results: list[OptimisationResult],
     first_sim_year: int = 2025,
 ) -> MultiYearFinancialResult:
     """

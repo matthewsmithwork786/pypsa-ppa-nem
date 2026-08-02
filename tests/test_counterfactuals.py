@@ -11,11 +11,11 @@ import pandas as pd
 import pytest
 
 from ppa.counterfactuals import compute_counterfactuals
-from ppa.results import DispatchSeries, OptimizationResult, SummaryVolumes, RevenueBreakdown
+from ppa.results import DispatchSeries, OptimisationResult, SummaryVolumes, RevenueBreakdown
 from ppa.scenario import Scenario
 
 
-def _make_result(scenario: Scenario, ppa_delivery: pd.Series) -> OptimizationResult:
+def _make_result(scenario: Scenario, ppa_delivery: pd.Series) -> OptimisationResult:
     idx = ppa_delivery.index
     zeros = pd.Series(0.0, index=idx)
     dispatch = DispatchSeries(
@@ -36,7 +36,7 @@ def _make_result(scenario: Scenario, ppa_delivery: pd.Series) -> OptimizationRes
         ppa_revenue=0.0, excess_revenue=0.0, market_purchase_cost=0.0,
         penalty_cost=0.0, net_revenue=0.0, effective_capture_price=0.0,
     )
-    return OptimizationResult(
+    return OptimisationResult(
         scenario=scenario, dispatch=dispatch, summary=summary, revenue=revenue,
         solver_status="ok", solver_condition="optimal", n_period_hours=len(idx),
     )
