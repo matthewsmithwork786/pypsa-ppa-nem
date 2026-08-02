@@ -60,35 +60,35 @@ class Scenario:
     # Sizing representation: "full_hourly" (exact hourly, default), "tsam"
     # (typical days) or "coarse" (legacy block-averaged resolution).
     #
-    # The default was "tsam" until it was benchmarked (docs/sizing_experiments.md
-    # E2/E7). tsam is ~85x faster (1.6 s vs 137 s) and its generation error is
-    # a tolerable +-5%, but it sizes STORAGE TO ZERO whenever storage is
-    # economic: clustering removes about half the intraday price spread that
-    # battery arbitrage monetises (A$432 -> A$202/MWh at 12 periods). That is
-    # inherent to representing 365 daily price shapes with 12-26, not a
-    # configuration mistake -- typical weeks and both of tsam's representation
-    # options were tested and none recover it. So tsam stays selectable (with a
-    # warning when a BESS is in play) but must not be the default.
-    # See PLAN_sizing_underbuild.md U8.
+    # Default is the exact hourly LP. tsam is ~85x faster (1.6 s vs 137 s) and
+    # is a reasonable screening tool, but it carries ordinary clustering error
+    # in both generation (about +-5%) and storage (207 vs 299 MW of BESS on the
+    # Corporate PPA under a hard SLA). Use validate_sizing_representation() to
+    # measure the error for a given scenario before relying on a tsam result.
+    #
+    # It formerly sized storage to exactly zero -- a units error in the storage
+    # timestep, not a clustering limit; see docs/sizing_experiments.md E9.
     sizing_method: str = "full_hourly"
     # Number of typical periods for the tsam method (4-36).
     sizing_n_periods: int = 12
-    # Model each plant's UNCONSTRAINED output (AEMO UIGF) rather than its
-    # historical sent-out SCADA. The SCADA trace is what the plant actually
-    # delivered, after network constraints and after whatever economic
-    # curtailment its own offtake contract incentivised -- so using it as the
-    # capacity factor for a NEW build charges that curtailment twice.
+    # Model each plant's UNCONSTRAINED output (AEMO UIGF from DISPATCHLOAD)
+    # rather than its historical sent-out SCADA. ON by default: this is the
+    # correct input, not a variant.
     #
-    # Off by default: it needs the optional availability cache
-    # (scripts/fetch_nem_availability.py) and it changes what the model means,
-    # so it should be a deliberate choice. Silently falls back to SCADA per
-    # DUID when the cache is missing.
+    # The LP takes the CF series as p_max_pu -- an upper bound it then curtails
+    # against itself (negative prices, connection limits, satisfied offtake).
+    # SCADA is already reduced by another plant's network constraints and by
+    # whatever economic curtailment that plant's own offtake contract
+    # incentivised, so using it would double-count curtailment for a new build.
+    # Measured per-plant curtailment ranges ~0-71% (docs/sizing_experiments.md
+    # E8), so it cannot be corrected with a flat uplift either.
     #
-    # Measured over the 2025 cache (docs/sizing_experiments.md E8): fleet CF
-    # rises wind 27.7% -> 30.7% and solar 16.9% -> 20.4%, but per-plant
-    # curtailment ranges from ~0% to 71%, so this cannot be approximated with a
-    # flat uplift.
-    use_unconstrained_cf: bool = False
+    # Turn OFF only to reproduce pre-U4 results, or to model taking offtake
+    # from a specific EXISTING plant, where its actual constrained sent-out
+    # energy is what you would receive. Falls back to SCADA per DUID when no
+    # availability cache exists (5 of 184 DUIDs in the 2025 cache, plus any
+    # install without the optional cache).
+    use_unconstrained_cf: bool = True
     # Green-certificate (LGC) revenue on SURPLUS generation only, A$/MWh.
     #
     # The PPA is treated as bundled: certificates attached to contracted energy

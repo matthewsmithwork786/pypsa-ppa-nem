@@ -77,13 +77,19 @@ def test_falls_back_to_scada_when_availability_absent(tmp_path, monkeypatch):
     assert float(result[2025].mean()) == pytest.approx(0.20, abs=1e-6)
 
 
-def test_scenario_flag_defaults_off_and_is_plumbed():
-    assert Scenario().use_unconstrained_cf is False
-    assert dataclasses.replace(Scenario(), use_unconstrained_cf=True).use_unconstrained_cf
+def test_scenario_flag_defaults_on_and_is_plumbed():
+    """UIGF is the correct input for a new build, so it is the default, not a
+    variant. SCADA remains selectable for the existing-plant-offtake case."""
+    assert Scenario().use_unconstrained_cf is True
+    assert not dataclasses.replace(Scenario(), use_unconstrained_cf=False).use_unconstrained_cf
 
 
 def test_get_timeseries_dicts_tolerates_scenario_without_the_field(fake_cache, monkeypatch):
-    """Duck-typed access: fake scenarios in other tests lack this attribute."""
+    """Duck-typed access: fake scenarios in other tests lack this attribute.
+
+    They must get the same default as a real Scenario (UIGF), not a different
+    code path.
+    """
     monkeypatch.setattr(nem_data, "plant_capacity_mw", lambda *a, **k: 100.0)
     monkeypatch.setattr(nem_data, "get_price_dict", lambda *a, **k: {2025: pd.Series([1.0])})
     monkeypatch.setattr(nem_data, "load_plant_registry", lambda *a, **k: pd.DataFrame())
@@ -95,5 +101,5 @@ def test_get_timeseries_dicts_tolerates_scenario_without_the_field(fake_cache, m
         nem_year = 2025
 
     pv, wind, _ = nem_data.get_timeseries_dicts(_Bare(), cache_dir=fake_cache)
-    # No use_unconstrained_cf attribute -> constrained SCADA path.
-    assert float(wind[2025].mean()) == pytest.approx(0.20, abs=1e-6)
+    # No use_unconstrained_cf attribute -> defaults to UIGF, same as Scenario().
+    assert float(wind[2025].mean()) == pytest.approx(0.50, abs=1e-6)

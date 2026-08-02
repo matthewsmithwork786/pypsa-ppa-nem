@@ -6,32 +6,19 @@ typical periods at full hourly resolution. Typical days preserve intra-day
 variability (which the 3-hourly blocks smooth away) while keeping the LP ~2
 orders of magnitude smaller than the full year.
 
-STORAGE CAVEAT (measured, docs/sizing_experiments.md E7) — clustering
-systematically sizes storage to ZERO, and this cannot be configured away.
+STORAGE NOTE. Clustered sizing under-sizes storage against the exact LP
+(207 vs 299 MW on the Corporate PPA under a hard SLA), which is ordinary
+clustering error -- use `ppa.sizing.validate_sizing_representation` to measure
+it for a given scenario.
 
-W14 assumed the cause was `cyclic_state_of_charge=True` forcing the battery
-back to its starting SoC within each representative day, and proposed
-`hours_per_period=168` (typical weeks) as the remedy. **Both the diagnosis and
-the remedy are wrong.** Typical weeks were tested and still size the BESS to
-zero (-100% against the exact LP at every period count).
-
-The actual cause is that clustering destroys intraday PRICE VOLATILITY, which
-is precisely what storage arbitrage monetises. Representing 365 distinct daily
-price shapes with 12-26 representatives roughly halves the mean intraday
-spread (A$432/MWh -> A$202/MWh at 12 periods, -53%), so the arbitrage revenue
-that justifies a battery largely disappears from the LP's view. Energy, the
-annual mean and the load peak are all preserved exactly -- only volatility is
-lost, which is why the usual aggregation checks pass while the storage
-decision is destroyed.
-
-Neither of tsam's representation options fixes this: `mean` loses 33% of the
-spread and `medoid` (the hierarchical default this module uses) loses 53%.
-More periods help only weakly (-41% at 24 days).
-
-Consequence: do not use `sizing_method="tsam"` when storage is economically
-relevant. `ppa.scenario.validate_scenario` warns on that combination, and
-`ppa.sizing.validate_sizing_representation` measures the error for a given
-scenario against the exact LP.
+It used to size storage to *exactly zero* under every configuration. That was
+not a clustering limitation but a units error: the occurrence count was being
+used as `snapshot_weightings["stores"]`, i.e. as the dt in the storage energy
+balance, making one snapshot span up to ~55 h so that no short-duration battery
+could shift anything (docs/sizing_experiments.md E9). Fixed in
+`ppa.network.build_network` via `intra_period_hours`. W14's earlier diagnosis
+(cyclic SoC within a representative day) and its proposed remedy (typical
+weeks) were both wrong -- weeks were tested and changed nothing.
 """
 from __future__ import annotations
 
@@ -68,9 +55,9 @@ def cluster_typical_periods(
     tsam's `addPeakMax`/`addPeakMin`) so the sized fleet must still cover the
     hours that matter instead of optimising only for the average day.
 
-    BESS caveat: clustering halves the intraday price spread, so the sizing LP
-    sizes storage to zero regardless of `hours_per_period` — see the module
-    docstring. Typical weeks do NOT fix it.
+    BESS caveat: clustered sizing under-sizes storage relative to the exact LP
+    (ordinary clustering error, not the structural zero it used to be — see the
+    module docstring).
     """
     if not tsam_available():
         raise ImportError(

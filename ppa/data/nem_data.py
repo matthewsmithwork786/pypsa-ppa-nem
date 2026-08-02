@@ -664,7 +664,7 @@ def cache_status(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> d
 
 def _cf_dict_for_duid(
     duid: str | None, years, cache_dir: Path, registry: "pd.DataFrame | None",
-    unconstrained: bool = False,
+    unconstrained: bool = True,
 ) -> dict:
     result: dict = {}
     for year in years:
@@ -674,10 +674,18 @@ def _cf_dict_for_duid(
             result[year] = pd.Series(np.zeros(hours), index=idx, name="cf")
             continue
         capacity_mw = plant_capacity_mw(duid, registry=registry, cache_dir=cache_dir)
-        # Unconstrained (UIGF) output when asked for and available, else the
-        # constrained SCADA trace. Falling back silently is deliberate: the
-        # availability cache is optional, and a missing file must degrade to
-        # today's behaviour rather than break an existing install.
+        # UNCONSTRAINED availability (UIGF) is the correct input and the
+        # default. The LP treats the CF series as p_max_pu -- an upper bound it
+        # then curtails against itself (negative prices, connection limits,
+        # satisfied offtake). Feeding it constrained SCADA would bound the new
+        # build by *another* plant's network constraints and by whatever
+        # economic curtailment that plant's own offtake contract incentivised,
+        # and then curtail again on top: a double-count, and one that varies
+        # ~0-71% per plant so it cannot be corrected with a flat factor.
+        #
+        # SCADA remains the fallback for the handful of DUIDs with no UIGF
+        # (older wind farms predating semi-scheduling: 5 of 184 in the 2025
+        # cache) and for installs without the optional availability cache.
         series = None
         if unconstrained and has_availability(duid, year, cache_dir):
             series = load_availability(duid, year, cache_dir)
@@ -690,7 +698,7 @@ def _cf_dict_for_duid(
 
 def get_cf_dicts(
     pv_duid, wind_duid, years=(DEFAULT_YEAR,), cache_dir=NEM_CACHE_DIR, registry=None,
-    unconstrained: bool = False,
+    unconstrained: bool = True,
 ) -> tuple:
     if registry is None and (pv_duid or wind_duid):
         registry = load_plant_registry(cache_dir)
@@ -722,7 +730,7 @@ def reference_month_ts(scenario, month: int = 3, cache_dir: Path = NEM_CACHE_DIR
 
     # Duck-typed like every other attribute here, so callers without the field
     # (tests, fake scenarios) keep working.
-    unconstrained = bool(getattr(scenario, "use_unconstrained_cf", False))
+    unconstrained = bool(getattr(scenario, "use_unconstrained_cf", True))
 
     pv_by_year, wind_by_year = get_cf_dicts(
         pv_duid, wind_duid, years=(year,), cache_dir=cache_dir, unconstrained=unconstrained
@@ -853,7 +861,7 @@ def get_timeseries_dicts(scenario, cache_dir=NEM_CACHE_DIR) -> tuple:
 
     # Duck-typed like every other attribute here, so callers without the field
     # (tests, fake scenarios) keep working.
-    unconstrained = bool(getattr(scenario, "use_unconstrained_cf", False))
+    unconstrained = bool(getattr(scenario, "use_unconstrained_cf", True))
 
     pv_by_year, wind_by_year = get_cf_dicts(
         pv_duid, wind_duid, years=(year,), cache_dir=cache_dir, unconstrained=unconstrained

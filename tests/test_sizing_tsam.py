@@ -135,3 +135,59 @@ def test_validate_handles_zero_build_without_dividing_by_zero(hourly_year):
     bess = next(r for r in report["rows"] if r["Technology"] == "BESS")
     assert bess["Difference"] is None
     assert report["max_abs_delta"] == report["max_abs_delta"]  # not NaN
+
+
+# ── Regression: occurrence count must not be used as the storage timestep ────
+
+def test_store_weighting_is_intra_period_not_occurrence_count(hourly_year):
+    """`snapshot_weightings["stores"]` is the dt in the storage energy balance.
+
+    Occurrence counts (5-55 h on a 12-period year) scale cost and energy to the
+    represented year, but they are NOT the elapsed time between consecutive
+    snapshots. Using them as the storage dt makes one step span up to ~55 h, and
+    a 4-hour battery cannot shift anything across that -- which sized storage to
+    exactly zero under every typical-period configuration. Inside a
+    representative period the snapshots are 1 h apart.
+    """
+    from ppa.network import build_network
+    from ppa.scenario import Scenario
+
+    clustered, weights = cluster_typical_periods(hourly_year, n_periods=8)
+    assert weights.max() > 5.0, "fixture must have non-uniform occurrence counts"
+
+    n = build_network(
+        clustered,
+        Scenario(optimise_capacity=True, sizing_method="tsam"),
+        snapshot_weightings=weights,
+    )
+
+    # Cost/energy scaling keeps the occurrence counts ...
+    np.testing.assert_allclose(
+        n.snapshot_weightings["objective"].to_numpy(), weights.to_numpy(), rtol=1e-9
+    )
+    # ... but the storage timestep must be the real intra-period step.
+    assert (n.snapshot_weightings["stores"] == 1.0).all(), (
+        "storage dt must be the intra-period hour, not the occurrence count"
+    )
+
+
+def test_storage_is_buildable_under_typical_periods(hourly_year):
+    """A battery must be able to shift energy in a clustered LP at all.
+
+    Guards the class of bug rather than a specific number: with the occurrence
+    count as the storage dt the LP could never build storage, whatever the
+    economics.
+    """
+    from ppa.sizing import optimise_capacities
+
+    scn = _sizing_scenario(
+        sizing_method="tsam", sizing_n_periods=8,
+        bess_capex_per_kwh=5.0,      # deliberately cheap: if storage can ever
+        max_build_bess_mw=500.0,     # be built, it must be built here
+    )
+    sized = optimise_capacities(hourly_year, scn)
+    assert sized.status == "ok"
+    assert sized.bess_mw > 1.0, (
+        "clustered sizing built no storage even at throwaway capex -- the "
+        "storage timestep is probably wrong again"
+    )

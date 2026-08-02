@@ -293,7 +293,23 @@ almost always is.
 
 ---
 
-## E7 — U8: why tsam sizes storage to zero (the W14 diagnosis was wrong)
+## E7 — RETRACTED: "tsam cannot size storage" (superseded by E9)
+
+> **This section's conclusion was wrong.** It attributed tsam sizing storage to zero to an
+> inherent property of clustering (loss of intraday price spread) and declared it
+> unfixable. E9 shows the real cause was a **units error** — the occurrence count was being
+> used as the storage timestep — and that fixing it makes clustered sizing build storage
+> normally. The spread-loss measurement below is real but second-order; it is not why the
+> BESS was zero.
+>
+> Kept for the record because the reasoning error is instructive: every aggregation check
+> passed (energy, mean, peak all preserved), which made a mechanical fault look like an
+> economic one. The tell that should have been followed sooner: under a *hard* 90%
+> delivery constraint tsam still built no storage and instead over-built wind to 484 MW —
+> economics cannot explain a technology being refused when it is the cheapest way to meet
+> a binding constraint.
+
+## E7 (original text) — why tsam sizes storage to zero (the W14 diagnosis was wrong)
 
 ### What was measured
 
@@ -426,3 +442,90 @@ inferred; these are measured against AEMO's own unconstrained forecast.
 `Scenario.use_unconstrained_cf` (default **off**) selects the UIGF trace. It falls back to
 SCADA per DUID when the cache is missing, so installs without it are unaffected. Exposed as
 a toggle in Case Setup next to the NEM region/year selectors.
+
+---
+
+## E9 — Two real bugs in the weighted (typical-period) LP
+
+Prompted by a domain challenge: *"the BESS should be used to meet the PPA hurdle. As the
+penalty is a fixed 1.5x PPA tariff the intraday price spread shouldn't really affect the
+BESS build out. Something is definitely strange though because some BESS should be built."*
+
+Both halves were right, and following them found two genuine defects.
+
+### The delivery economics dominate, as claimed
+
+In the LP a delivered MWh earns `ppa_price` (the offtake link carries `-ppa_price`), while
+shortfall and penalty generators sit on `Bus_PPAOfftake` and bypass that link entirely. So
+shifting a MWh into a deficit hour is worth **A$105–231/MWh** — an order of magnitude more
+than any intraday arbitrage spread. Confirmed by forcing the SLA: BESS goes **22 → 298 MW**
+on the exact LP. Storage here is a delivery instrument, not an arbitrage instrument.
+
+### Bug 1 — energy constraints ignored snapshot weightings
+
+`ppa/solver.py` summed all three energy constraints unweighted:
+
+```python
+period_load_mwh = float(load.loc[snaps].sum())            # no weights
+allowed_shortfall_expr = gen_p.loc[snaps, "..."].sum()    # no weights
+```
+
+With uniform weightings (full hourly = 1 h, coarse = `resolution_h`) both sides scale
+together and the ratios are correct, so this was invisible. tsam gives each representative
+hour a different weight (5–55 h), so the constraints bound the wrong quantity: a **hard 90%
+delivery constraint was landing at 85.6% of actual load**.
+
+Affects `AllowedShortfall_Limit` and `BuyFromMarket_Limit` as well as `MinDelivery_Limit` —
+i.e. **pre-existing since W14**, not introduced with the hard-SLA work. Every tsam run to
+date solved with a mis-scaled shortfall cap and market-buy cap. Fixed: tsam now hits
+exactly 90.0%.
+
+### Bug 2 — the occurrence count was used as the storage timestep
+
+```python
+n.snapshot_weightings.loc[:, :] = w   # sets objective, generators AND stores
+```
+
+The `stores` column is the **dt in the storage energy balance** — elapsed time between
+consecutive snapshots — not an occurrence count. Setting it to the occurrence count makes
+one snapshot span up to ~55 h, and a 4-hour battery cannot shift anything across a 55-hour
+step. The LP was correct to build none.
+
+Isolated cleanly (constrained SCADA data and old BESS capex held fixed; only the storage
+`dt` varies):
+
+| storage dt | hard SLA | wind | PV | **BESS** | delivery |
+|---|---|---|---|---|---|
+| occurrence count (bug) | off | 71 | 117 | **0** | 48.9% |
+| occurrence count (bug) | on | **484** | 353 | **0** | 90.0% |
+| 1 h intra-period (fixed) | off | 81 | 165 | **79** | 65.6% |
+| 1 h intra-period (fixed) | on | **94** | 284 | **222** | 90.0% |
+
+Note the wind over-build collapsing from 484 → 94 MW: with storage available the LP no
+longer has to brute-force the SLA with generation. Soft-SLA delivery also improves from
+48.9% to 65.6% at lower cost.
+
+**tsam typical-period sizing has been structurally incapable of building storage since
+W14** — a units error, not a clustering limitation.
+
+### Post-fix comparison (UIGF data, old BESS capex)
+
+| method | hard SLA | wind | PV | BESS | delivery |
+|---|---|---|---|---|---|
+| full hourly | off | 57 | 139 | 35 | 50.5% |
+| full hourly | on | 128 | 379 | 299 | 90.0% |
+| tsam 12 | off | 85 | 158 | **94** | 68.5% |
+| tsam 12 | on | 124 | 201 | **207** | 90.0% |
+| coarse 3h | off | 53 | 136 | 17 | 48.7% |
+| coarse 3h | on | 131 | 371 | 258 | 90.0% |
+
+tsam still under-sizes storage against the exact LP (207 vs 299 MW under a hard SLA), which
+is ordinary clustering error and is what `validate_sizing_representation()` exists to
+measure. It is no longer a structural zero.
+
+### Regression cover
+
+`tests/test_sizing_tsam.py` asserts that `snapshot_weightings["stores"]` is the
+intra-period hour while `objective`/`generators` keep the occurrence counts, and that a
+battery is buildable at throwaway capex under clustering — guarding the class of bug, not a
+specific number.

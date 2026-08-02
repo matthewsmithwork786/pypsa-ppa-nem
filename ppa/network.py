@@ -18,6 +18,7 @@ def build_network(
     scenario: Scenario,
     resolution_h: float = 1.0,
     snapshot_weightings: "pd.Series | None" = None,
+    intra_period_hours: float = 1.0,
 ) -> pypsa.Network:
     """Build an unsolved PyPSA network from prepared timeseries and scenario.
 
@@ -47,7 +48,20 @@ def build_network(
     n.set_snapshots(ts.index)
     if snapshot_weightings is not None:
         w = snapshot_weightings.to_numpy(dtype=float)
-        n.snapshot_weightings.loc[:, :] = w.reshape(-1, 1)
+        # Occurrence counts scale COST and ENERGY to the represented year, but
+        # they are NOT the elapsed time between consecutive snapshots, and the
+        # "stores" column means exactly that: it is the dt in the storage
+        # energy balance.
+        #
+        # Setting stores to the occurrence count makes one snapshot span up to
+        # ~55 h on a 12-period year, and a 4-hour battery cannot shift anything
+        # across a 55-hour step -- so the LP sized storage to ZERO under every
+        # typical-period configuration (docs/sizing_experiments.md E9). Inside a
+        # representative period the snapshots really are `intra_period_hours`
+        # apart (1 h for hourly typical days), so that is the correct dt.
+        n.snapshot_weightings["objective"] = w
+        n.snapshot_weightings["generators"] = w
+        n.snapshot_weightings["stores"] = float(intra_period_hours)
         total_hours = float(snapshot_weightings.sum())
     else:
         if resolution_h != 1.0:

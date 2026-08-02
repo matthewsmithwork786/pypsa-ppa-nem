@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import xarray as xr
 import pypsa
 
 pypsa.options.general.allow_network_requests = False
@@ -47,10 +48,29 @@ def solve(
     else:
         snapshot_groups = [("", ts.index)]
 
+    # Energy constraints must integrate over REAL hours, not snapshot counts.
+    # With uniform weightings (full-hourly = 1 h, coarse = resolution_h) an
+    # unweighted sum is proportional on both sides and the ratios come out
+    # right, so this was invisible until tsam. Typical-period clustering gives
+    # each representative hour a different weight (occurrence counts ranged
+    # 5-55 h on a 12-period year), and an unweighted sum then constrains the
+    # wrong quantity entirely — a "hard 90% delivery" constraint was landing at
+    # 85.6% of actual load. Weight every energy term explicitly.
+    weights = n.snapshot_weightings["objective"]
+
+    def _w(snaps):
+        """Snapshot weightings as an xarray coefficient aligned to `snaps`."""
+        return xr.DataArray(
+            weights.loc[snaps].to_numpy(dtype=float),
+            dims=["snapshot"],
+            coords={"snapshot": snaps},
+        )
+
     for suffix, snaps in snapshot_groups:
+        w = _w(snaps)
         # Constraint 1 — allowed shortfall cap (aggregate over period)
-        period_load_mwh = float(load.loc[snaps].sum())
-        allowed_shortfall_expr = gen_p.loc[snaps, "Gen_AllowedShortfall"].sum()
+        period_load_mwh = float((load.loc[snaps] * weights.loc[snaps]).sum())
+        allowed_shortfall_expr = (gen_p.loc[snaps, "Gen_AllowedShortfall"] * w).sum()
         m.add_constraints(
             allowed_shortfall_expr <= s.allowed_shortfall_share * period_load_mwh,
             name=f"AllowedShortfall_Limit{suffix}",
@@ -74,7 +94,7 @@ def solve(
         # Matches ppa.results.fulfilled_share exactly: delivered MWh is the flow
         # on IPPGen_to_PPAOfftake (efficiency 1.0), over total load.
         if s.optimise_capacity and s.enforce_min_delivery:
-            delivered_expr = link_p.loc[snaps, "IPPGen_to_PPAOfftake"].sum()
+            delivered_expr = (link_p.loc[snaps, "IPPGen_to_PPAOfftake"] * w).sum()
             m.add_constraints(
                 delivered_expr >= s.required_delivery_share * period_load_mwh,
                 name=f"MinDelivery_Limit{suffix}",
@@ -82,8 +102,8 @@ def solve(
 
         # Constraint 2 — market buy cap relative to PPA delivery (only when enabled)
         if s.enable_market_buy and s.market_buy_share > 0:
-            buy_expr = gen_p.loc[snaps, "Gen_BuyFromMarket"].sum()
-            delivery_expr = link_p.loc[snaps, "IPPGen_to_PPAOfftake"].sum()
+            buy_expr = (gen_p.loc[snaps, "Gen_BuyFromMarket"] * w).sum()
+            delivery_expr = (link_p.loc[snaps, "IPPGen_to_PPAOfftake"] * w).sum()
             m.add_constraints(
                 buy_expr <= s.market_buy_share * delivery_expr,
                 name=f"BuyFromMarket_Limit{suffix}",
