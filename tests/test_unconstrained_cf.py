@@ -103,3 +103,48 @@ def test_get_timeseries_dicts_tolerates_scenario_without_the_field(fake_cache, m
     pv, wind, _ = nem_data.get_timeseries_dicts(_Bare(), cache_dir=fake_cache)
     # No use_unconstrained_cf attribute -> defaults to UIGF, same as Scenario().
     assert float(wind[2025].mean()) == pytest.approx(0.50, abs=1e-6)
+
+
+def test_period_ts_uses_the_same_source_as_the_sizing_path(fake_cache, monkeypatch):
+    """Every path that builds capacity factors must make the same UIGF choice.
+
+    `period_ts` (the Optimisation tab's reference-period path) previously called
+    `load_scada` directly, so a single scenario meant constrained output in one
+    tab and unconstrained output in the simulation it fed.
+    """
+    monkeypatch.setattr(nem_data, "plant_capacity_mw", lambda *a, **k: 100.0)
+    monkeypatch.setattr(nem_data, "load_plant_registry", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(
+        nem_data, "load_regional_price",
+        lambda *a, **k: pd.Series(
+            50.0, index=pd.date_range("2025-01-01", periods=288 * 5, freq="5min")
+        ),
+    )
+
+    class _Scn:
+        nem_pv_duid = ""
+        nem_wind_duid = "TESTWF1"
+        nem_price_region = "NSW1"
+        nem_year = 2025
+
+        def __init__(self, unconstrained):
+            self.use_unconstrained_cf = unconstrained
+
+    window = ("2025-01-01", "2025-01-03")
+    con = nem_data.period_ts(_Scn(False), *window, resolution_minutes=60, cache_dir=fake_cache)
+    unc = nem_data.period_ts(_Scn(True), *window, resolution_minutes=60, cache_dir=fake_cache)
+
+    # Fixture: SCADA 20 MW, availability 50 MW, capacity 100 MW.
+    assert float(con["ts_WindGen"].mean()) == pytest.approx(0.20, abs=1e-6)
+    assert float(unc["ts_WindGen"].mean()) == pytest.approx(0.50, abs=1e-6)
+
+
+def test_generation_series_falls_back_per_duid(fake_cache):
+    """The shared chooser degrades to SCADA when a DUID has no availability."""
+    got = nem_data._generation_series("TESTWF1", 2025, fake_cache, unconstrained=True)
+    assert float(got.mean()) == pytest.approx(50.0)
+
+    # SCADA-only DUID: write one with no availability sibling.
+    _write_5min(fake_cache / "scada" / "SCADAONLY_2025.parquet", "scadavalue", 33.0)
+    got = nem_data._generation_series("SCADAONLY", 2025, fake_cache, unconstrained=True)
+    assert float(got.mean()) == pytest.approx(33.0)

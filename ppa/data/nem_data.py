@@ -729,6 +729,20 @@ def cache_status(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> d
 
 # ── Optimiser-facing adapters ────────────────────────────────────────────────
 
+def _generation_series(
+    duid: str, year: int, cache_dir: Path, unconstrained: bool
+) -> pd.Series:
+    """The 5-min generation series to model this DUID with.
+
+    Single source of truth for the UIGF-vs-SCADA choice, so every path that
+    builds capacity factors makes the same one. Falls back to SCADA per DUID
+    when no availability cache exists.
+    """
+    if unconstrained and has_availability(duid, year, cache_dir):
+        return load_availability(duid, year, cache_dir)
+    return load_scada(duid, year, cache_dir)
+
+
 def _cf_dict_for_duid(
     duid: str | None, years, cache_dir: Path, registry: "pd.DataFrame | None",
     unconstrained: bool = True,
@@ -753,11 +767,7 @@ def _cf_dict_for_duid(
         # SCADA remains the fallback for the handful of DUIDs with no UIGF
         # (older wind farms predating semi-scheduling: 5 of 184 in the 2025
         # cache) and for installs without the optional availability cache.
-        series = None
-        if unconstrained and has_availability(duid, year, cache_dir):
-            series = load_availability(duid, year, cache_dir)
-        if series is None:
-            series = load_scada(duid, year, cache_dir)
+        series = _generation_series(duid, year, cache_dir, unconstrained)
         cf_5min = capacity_factor_series(series, capacity_mw)
         result[year] = to_hourly(cf_5min, year)
     return result
@@ -862,6 +872,11 @@ def period_ts(
     wind_duid = getattr(scenario, "nem_wind_duid", "")
     region = getattr(scenario, "nem_price_region", DEFAULT_REGION)
     year = getattr(scenario, "nem_year", DEFAULT_YEAR)
+    # Same resource assumption as the sizing and multi-year paths. Previously
+    # this read SCADA directly, so the Optimisation tab's reference period used
+    # constrained output while the simulation it fed used UIGF -- one scenario
+    # meaning two different things depending on the tab.
+    unconstrained = bool(getattr(scenario, "use_unconstrained_cf", True))
 
     start_ts = pd.Timestamp(start)
     end_ts = pd.Timestamp(end)
@@ -888,15 +903,19 @@ def period_ts(
 
     if pv_duid:
         capacity_mw = plant_capacity_mw(pv_duid, registry=registry, cache_dir=cache_dir)
-        pv_native = capacity_factor_series(load_scada(pv_duid, year, cache_dir), capacity_mw)
-        pv_r = _resampled(pv_native, f"PV SCADA for {pv_duid}")
+        pv_native = capacity_factor_series(
+            _generation_series(pv_duid, year, cache_dir, unconstrained), capacity_mw
+        )
+        pv_r = _resampled(pv_native, f"PV generation for {pv_duid}")
     else:
         pv_r = pd.Series(0.0, index=canonical_idx)
 
     if wind_duid:
         capacity_mw = plant_capacity_mw(wind_duid, registry=registry, cache_dir=cache_dir)
-        wind_native = capacity_factor_series(load_scada(wind_duid, year, cache_dir), capacity_mw)
-        wind_r = _resampled(wind_native, f"Wind SCADA for {wind_duid}")
+        wind_native = capacity_factor_series(
+            _generation_series(wind_duid, year, cache_dir, unconstrained), capacity_mw
+        )
+        wind_r = _resampled(wind_native, f"Wind generation for {wind_duid}")
     else:
         wind_r = pd.Series(0.0, index=canonical_idx)
 

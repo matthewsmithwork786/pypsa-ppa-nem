@@ -55,11 +55,12 @@ def _render_dispatch_section(result, s, chosen_day: str) -> None:
     if last_day > first_day:
         start, end = st.slider(
             "Date range to inspect",
-            min_value=first_day,
-            max_value=last_day,
-            value=(default_start, default_end),
+            min_value=first_day.date(),
+            max_value=last_day.date(),
+            value=(default_start.date(), default_end.date()),
             format="DD MMM",
         )
+        start, end = pd.Timestamp(start), pd.Timestamp(end)
     else:
         start = end = first_day
 
