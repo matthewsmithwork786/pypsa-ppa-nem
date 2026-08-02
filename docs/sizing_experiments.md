@@ -529,3 +529,72 @@ measure. It is no longer a structural zero.
 intra-period hour while `objective`/`generators` keep the occurrence counts, and that a
 battery is buildable at throwaway capex under clustering — guarding the class of bug, not a
 specific number.
+
+---
+
+## E10 — Excluding plants that were not fully operational in 2025
+
+A plant still being built out generates in every month and passes every existing
+coverage/span check, but its capacity factor describes a half-built asset. MacIntyre
+(923 MW) ran at a **9.8% CF** through 2025 while its monthly peak climbed 0.09 → 0.53 of
+nameplate. The pre-existing `whole_year_check` only required a monthly peak above **5%** of
+nameplate, which such a plant clears easily.
+
+### The discriminator is the ramp, not the level
+
+Comparing each plant's early-year peak against its **own** annual peak separates the two
+populations cleanly, with a wide margin:
+
+| plant | Jan–Feb peak ÷ annual peak | verdict |
+|---|---|---|
+| STOCKYD1 Stockyard Hill | 1.00 | operational |
+| WDGPH1 Western Downs | 1.00 | operational |
+| BLUEGSF1 Blue Grass | 1.00 | operational |
+| LIMOSF11 Limondale | 0.99 | operational (mid-year dips are curtailment) |
+| GPWFEST2 Golden Plains E | 0.51 | commissioning |
+| CLRKCWF1 Clarke Creek | 0.44 | commissioning |
+| STUBSF1 Stubbo | 0.33 | commissioning |
+| MCINTYR1 MacIntyre | 0.30 | commissioning |
+| WOLARSF1 Wollar | 0.26 | commissioning |
+
+Worst operational case 0.99 against best commissioning case 0.51, so the threshold sits at
+**0.60** with room on both sides.
+
+Three design choices matter:
+
+- **Normalise by the plant's own annual peak, not nameplate.** Solar clips at roughly 0.80
+  of registered AC and would otherwise be penalised.
+- **Anchor on the EARLY months.** Requiring a high peak in *every* month would reject
+  Limondale, whose Aug peak falls to 0.40 of nameplate through curtailment — an
+  operational plant, not a commissioning one.
+- **Use the best of January and February.** Tolerates a single-month outage.
+- **Prefer UIGF over SCADA for the ramp test**, so a plant heavily curtailed early in the
+  year is not mistaken for one still being commissioned.
+
+### Result
+
+**19 of 184 plants excluded, 5,172 MW of 27,244 MW.** Selectable plants drop 184 → 165.
+
+| | before | after |
+|---|---|---|
+| Solar, capacity-weighted CUF | 15.3% (n=95) | **17.6%** (n=84) |
+| Wind, capacity-weighted CUF | 27.8% (n=89) | **30.8%** (n=81) |
+
+Excluded (largest first): MCINTYR1, ALDGASF1, CUSF1, GOESF1, CLRKCWF1, WOLARSF1, GPWFEST2,
+STUBSF1, WAMBOWF1, STUBSF2, GPWFEST1, GPWFEST3, CRWARP1, MUCRKSF1, GUSF1, CLRKCWF2,
+ELAINWF1, KERNGSP1, COHUNSF1.
+
+The two checks are complementary: ELAINWF1 passes the UIGF ramp test (0.98) but is caught
+by the existing SCADA monthly check — it was forecast available in January yet generated
+almost nothing, i.e. connected but not yet in service.
+
+Manildra (MANSLR1) is **retained** at a 6.1% SCADA CF: it is fully operational, just 71%
+curtailed. Its UIGF CF is 21.3%. Low output alone is not a reason to exclude a plant — only
+an incomplete year is.
+
+### Note
+
+The filter is applied at the eligibility layer (`scada_summary` → `list_eligible_plants` →
+`list_simulation_ready_plants`), so these plants no longer appear in the map or the
+selectors. The cached parquets are deliberately **not** deleted: they are valid data for
+their operating months, and a plant excluded for 2025 will qualify for 2026.

@@ -37,6 +37,19 @@ WHOLE_YEAR_MIN_COVERAGE = 0.95
 WHOLE_YEAR_FIRST_TS_LATEST = (1, 15)
 WHOLE_YEAR_LAST_TS_EARLIEST = (12, 15)
 WHOLE_YEAR_MONTHLY_MAX_FRACTION = 0.05
+# Commissioning-ramp detection. A plant still being built out produces all year
+# and passes every coverage/span check, but its capacity factor understates the
+# finished asset -- MacIntyre (923 MW) ran at a 9.8% CF through 2025 while its
+# monthly peak climbed 0.09 -> 0.53 of nameplate.
+#
+# The discriminator is the RAMP, not the level: compare the plant's early-year
+# peak against its own annual peak. An operational plant reaches roughly its
+# annual peak in the first months (measured: >=0.90); a commissioning one does
+# not (measured: <=0.33). Using the best of the first two months tolerates a
+# single-month outage, and normalising by the plant's own peak keeps it robust
+# to AC clipping and to heavy curtailment later in the year.
+COMMISSIONING_EARLY_MONTHS = (1, 2)
+COMMISSIONING_MIN_PEAK_FRACTION = 0.60
 
 
 # ── Path helpers ─────────────────────────────────────────────────────────────
@@ -363,6 +376,33 @@ def whole_year_check(
     )
 
 
+def commissioning_ramp_check(
+    series: pd.Series, year: int
+) -> "tuple[bool, float | None]":
+    """Detect a plant that was still ramping into service during `year`.
+
+    Returns ``(is_fully_operational, early_peak_ratio)`` where the ratio is the
+    best of the first `COMMISSIONING_EARLY_MONTHS` monthly peaks divided by the
+    annual peak. ``None`` when there is no usable data.
+
+    Pass `availability` (UIGF) in preference to SCADA: availability reflects
+    what the plant *could* have produced, so a plant heavily curtailed early in
+    the year is not mistaken for one that was still being commissioned.
+    """
+    s = series[series.index.year == year].dropna()
+    if s.empty:
+        return False, None
+    annual_peak = float(s.max())
+    if annual_peak <= 0:
+        return False, None
+    monthly_max = s.groupby(s.index.month).max()
+    early = [float(monthly_max[m]) for m in COMMISSIONING_EARLY_MONTHS if m in monthly_max.index]
+    if not early:
+        return False, 0.0
+    ratio = max(early) / annual_peak
+    return ratio >= COMMISSIONING_MIN_PEAK_FRACTION, ratio
+
+
 def _first_sustained_output_date(
     cf: "pd.Series", min_intervals: int = 6, threshold: float = 0.01
 ) -> "str | None":
@@ -387,12 +427,16 @@ def _first_sustained_output_date(
 class ScadaSummary:
     duid: str
     year: int
-    status: str  # "ready" | "no_scada" | "incomplete" | "unreadable"
+    status: str  # "ready" | "commissioning" | "no_scada" | "incomplete" | "unreadable"
     check: "WholeYearCheck | None"
     mean_cf: "float | None"
     reject_reasons: str
     cuf: "float | None" = None
     first_output_date: "str | None" = None
+    # Commissioning-ramp detection: False when the plant was still being built
+    # out during `year`, so its capacity factor understates the finished asset.
+    fully_operational: bool = True
+    early_peak_ratio: "float | None" = None
 
 
 def scada_summary(
@@ -409,14 +453,36 @@ def scada_summary(
         scada = load_scada(duid, year, cache_dir)
         cf = capacity_factor_series(scada, capacity_mw)
         check = whole_year_check(scada, capacity_mw, year, duid=duid)
-        status = "ready" if check.passed else "incomplete"
         mean_cf = float(cf.mean())
         # CUF (capacity utilisation factor): energy ÷ (nameplate × hours in
         # year) -- the stricter definition than the mean CF. scada is the raw
         # 5-min MW series; each interval is 5 minutes = 5/60 h.
         energy_mwh = float(scada.sum() * (INTERVAL_MINUTES / 60.0))
         cuf = energy_mwh / (float(capacity_mw) * expected_hours(year)) if capacity_mw > 0 else None
-        reasons = "; ".join(check.reject_reasons)
+        # Prefer UIGF for the ramp check: it reflects available capacity, so a
+        # plant heavily curtailed early in the year is not mistaken for one
+        # still being commissioned.
+        ramp_series = scada
+        if has_availability(duid, year, cache_dir):
+            try:
+                ramp_series = load_availability(duid, year, cache_dir)
+            except Exception:  # noqa: BLE001 - fall back to SCADA
+                ramp_series = scada
+        fully_operational, early_peak_ratio = commissioning_ramp_check(ramp_series, year)
+
+        reasons_list = list(check.reject_reasons)
+        if not fully_operational:
+            reasons_list.append(
+                f"still commissioning in {year}: early-year peak is only "
+                f"{early_peak_ratio:.0%} of its own annual peak "
+                f"(need >={COMMISSIONING_MIN_PEAK_FRACTION:.0%})"
+                if early_peak_ratio is not None else
+                f"still commissioning in {year}"
+            )
+        status = "ready" if (check.passed and fully_operational) else (
+            "commissioning" if check.passed else "incomplete"
+        )
+        reasons = "; ".join(reasons_list)
         first_output_date = _first_sustained_output_date(cf, min_intervals=6)
     except Exception as exc:  # noqa: BLE001 - deliberately broad, surfaced to the UI
         return ScadaSummary(
@@ -426,6 +492,7 @@ def scada_summary(
     return ScadaSummary(
         duid=duid, year=year, status=status, check=check, mean_cf=mean_cf,
         reject_reasons=reasons, cuf=cuf, first_output_date=first_output_date,
+        fully_operational=fully_operational, early_peak_ratio=early_peak_ratio,
     )
 
 
