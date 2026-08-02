@@ -168,6 +168,45 @@ def load_scada(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_
     return _load_5min_series(path, ["scadavalue"], "scadavalue", year, msg)
 
 
+def availability_path(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> Path:
+    duid = duid.strip().upper()
+    return Path(cache_dir) / "availability" / f"{duid}_{year}.parquet"
+
+
+def has_availability(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> bool:
+    """True when an unconstrained-availability (UIGF) cache exists for `duid`."""
+    return availability_path(duid, year, cache_dir).exists()
+
+
+def load_availability(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> pd.Series:
+    """5-min UNCONSTRAINED availability (MW) from AEMO DISPATCHLOAD.
+
+    For semi-scheduled units this is AEMO's Unconstrained Intermittent
+    Generation Forecast: the plant's physically available output, before
+    network constraints and before any economic curtailment its own offtake
+    contract incentivised. `load_scada` returns what was actually sent out,
+    i.e. *after* both.
+
+    Which one to model with matters. Measured over the 2025 cache
+    (docs/sizing_experiments.md E8) the fleet gap is wind 27.7% -> 30.7% and
+    solar 16.9% -> 20.4%, but it is very unevenly distributed: solar
+    curtailment has a median of 21.6% and a maximum of 71.3%, because it
+    depends on each plant's own contract and network position. That is exactly
+    why a flat uplift factor would be wrong and this series is needed.
+
+    Optional cache: raises FileNotFoundError with acquisition instructions when
+    absent, so existing installs without it keep working.
+    """
+    duid = duid.strip().upper()
+    path = availability_path(duid, year, cache_dir)
+    msg = (
+        f"No cached availability data for DUID '{duid}' at {path}. Run "
+        f"`python scripts/fetch_nem_availability.py --year {year}` in a "
+        "non-sandboxed environment and copy the output into this cache."
+    )
+    return _load_5min_series(path, ["availability"], "availability", year, msg)
+
+
 def load_regional_price(
     region: str = DEFAULT_REGION, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR
 ) -> pd.Series:
@@ -624,7 +663,8 @@ def cache_status(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> d
 # ── Optimiser-facing adapters ────────────────────────────────────────────────
 
 def _cf_dict_for_duid(
-    duid: str | None, years, cache_dir: Path, registry: "pd.DataFrame | None"
+    duid: str | None, years, cache_dir: Path, registry: "pd.DataFrame | None",
+    unconstrained: bool = False,
 ) -> dict:
     result: dict = {}
     for year in years:
@@ -634,19 +674,28 @@ def _cf_dict_for_duid(
             result[year] = pd.Series(np.zeros(hours), index=idx, name="cf")
             continue
         capacity_mw = plant_capacity_mw(duid, registry=registry, cache_dir=cache_dir)
-        scada = load_scada(duid, year, cache_dir)
-        cf_5min = capacity_factor_series(scada, capacity_mw)
+        # Unconstrained (UIGF) output when asked for and available, else the
+        # constrained SCADA trace. Falling back silently is deliberate: the
+        # availability cache is optional, and a missing file must degrade to
+        # today's behaviour rather than break an existing install.
+        series = None
+        if unconstrained and has_availability(duid, year, cache_dir):
+            series = load_availability(duid, year, cache_dir)
+        if series is None:
+            series = load_scada(duid, year, cache_dir)
+        cf_5min = capacity_factor_series(series, capacity_mw)
         result[year] = to_hourly(cf_5min, year)
     return result
 
 
 def get_cf_dicts(
-    pv_duid, wind_duid, years=(DEFAULT_YEAR,), cache_dir=NEM_CACHE_DIR, registry=None
+    pv_duid, wind_duid, years=(DEFAULT_YEAR,), cache_dir=NEM_CACHE_DIR, registry=None,
+    unconstrained: bool = False,
 ) -> tuple:
     if registry is None and (pv_duid or wind_duid):
         registry = load_plant_registry(cache_dir)
-    pv_cf_by_year = _cf_dict_for_duid(pv_duid, years, cache_dir, registry)
-    wind_cf_by_year = _cf_dict_for_duid(wind_duid, years, cache_dir, registry)
+    pv_cf_by_year = _cf_dict_for_duid(pv_duid, years, cache_dir, registry, unconstrained)
+    wind_cf_by_year = _cf_dict_for_duid(wind_duid, years, cache_dir, registry, unconstrained)
     return pv_cf_by_year, wind_cf_by_year
 
 
@@ -671,7 +720,13 @@ def reference_month_ts(scenario, month: int = 3, cache_dir: Path = NEM_CACHE_DIR
     region = getattr(scenario, "nem_price_region", DEFAULT_REGION)
     year = getattr(scenario, "nem_year", DEFAULT_YEAR)
 
-    pv_by_year, wind_by_year = get_cf_dicts(pv_duid, wind_duid, years=(year,), cache_dir=cache_dir)
+    # Duck-typed like every other attribute here, so callers without the field
+    # (tests, fake scenarios) keep working.
+    unconstrained = bool(getattr(scenario, "use_unconstrained_cf", False))
+
+    pv_by_year, wind_by_year = get_cf_dicts(
+        pv_duid, wind_duid, years=(year,), cache_dir=cache_dir, unconstrained=unconstrained
+    )
     prices_by_year = get_price_dict(region, years=(year,), cache_dir=cache_dir)
 
     pv_hourly = pv_by_year[year]
@@ -796,7 +851,13 @@ def get_timeseries_dicts(scenario, cache_dir=NEM_CACHE_DIR) -> tuple:
     region = getattr(scenario, "nem_price_region", DEFAULT_REGION)
     year = getattr(scenario, "nem_year", DEFAULT_YEAR)
 
-    pv_by_year, wind_by_year = get_cf_dicts(pv_duid, wind_duid, years=(year,), cache_dir=cache_dir)
+    # Duck-typed like every other attribute here, so callers without the field
+    # (tests, fake scenarios) keep working.
+    unconstrained = bool(getattr(scenario, "use_unconstrained_cf", False))
+
+    pv_by_year, wind_by_year = get_cf_dicts(
+        pv_duid, wind_duid, years=(year,), cache_dir=cache_dir, unconstrained=unconstrained
+    )
     prices_by_year = get_price_dict(region, years=(year,), cache_dir=cache_dir)
     return pv_by_year, wind_by_year, prices_by_year
 

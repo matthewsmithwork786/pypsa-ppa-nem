@@ -208,6 +208,19 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 horizontal=True,
             )
             sizing_method = {v: k for k, v in _method_labels.items()}[sizing_method]
+            if sizing_method == "tsam" and include_bess and max_build_bess_mw > 0:
+                # Measured, not theoretical (docs/sizing_experiments.md E7).
+                # A warning rather than a block: tsam's ~85x speed-up is still
+                # worth having for a generation-only screen.
+                st.warning(
+                    "**Typical days will size the BESS to zero.** Clustering removes "
+                    "about half the intraday price spread (A$432 → A$202/MWh) that "
+                    "battery arbitrage depends on, so the LP cannot see the revenue "
+                    "that justifies storage. Measured against the exact LP: −100% BESS "
+                    "at every period count, and typical *weeks* do not fix it. Use "
+                    "**Full year hourly** when the battery matters, or set max BESS "
+                    "build to 0 to size generation only."
+                )
             if sizing_method == "tsam":
                 _n_periods_idx = max(4, min(36, int(initial.sizing_n_periods)))
                 sizing_n_periods = st.slider(
@@ -441,6 +454,23 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         _year_idx = _year_options.index(int(initial.nem_year)) if int(initial.nem_year) in _year_options else 0
         nem_year = cols[1].selectbox(
             "NEM data year", options=_year_options, index=_year_idx, key="sf_nem_year",
+        )
+        use_unconstrained_cf = cols[2].toggle(
+            "Use unconstrained output",
+            value=bool(initial.use_unconstrained_cf),
+            key="sf_use_unconstrained_cf",
+            help=(
+                "Model each plant's **physically available** output (AEMO's UIGF, from "
+                "DISPATCHLOAD) instead of what it actually sent out. The historical SCADA "
+                "trace is already reduced by network constraints and by whatever economic "
+                "curtailment that plant's own offtake contract incentivised — so using it "
+                "as the capacity factor for a *new* build charges that curtailment twice.\n\n"
+                "Measured across the 2025 cache: fleet CF rises from 27.7% to 30.7% for "
+                "wind and 16.9% to 20.4% for solar, but individual plants range from ~0% "
+                "to 71% curtailed, so this cannot be approximated with a flat uplift. "
+                "Needs the availability cache (`scripts/fetch_nem_availability.py`); "
+                "falls back to SCADA per plant when it is missing."
+            ),
         )
 
     with st.expander("Counterfactual sourcing", expanded=True):

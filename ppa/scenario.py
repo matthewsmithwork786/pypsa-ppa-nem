@@ -61,15 +61,34 @@ class Scenario:
     # (typical days) or "coarse" (legacy block-averaged resolution).
     #
     # The default was "tsam" until it was benchmarked (docs/sizing_experiments.md
-    # E2). On the Corporate PPA case it sizes the fleet 11.2% below the exact LP
-    # and the BESS to *zero* (exact: 19 MW), and accuracy degrades as the period
-    # count rises (-5.3% at 8 days, -11.2% at 12, -19.1% at 24) — backwards, and
-    # a sign of a defect rather than an inherent clustering limit. tsam is ~85x
-    # faster and worth fixing, so it stays selectable; it must not be the default
-    # while it is knowingly biased. See PLAN_sizing_underbuild.md U8.
+    # E2/E7). tsam is ~85x faster (1.6 s vs 137 s) and its generation error is
+    # a tolerable +-5%, but it sizes STORAGE TO ZERO whenever storage is
+    # economic: clustering removes about half the intraday price spread that
+    # battery arbitrage monetises (A$432 -> A$202/MWh at 12 periods). That is
+    # inherent to representing 365 daily price shapes with 12-26, not a
+    # configuration mistake -- typical weeks and both of tsam's representation
+    # options were tested and none recover it. So tsam stays selectable (with a
+    # warning when a BESS is in play) but must not be the default.
+    # See PLAN_sizing_underbuild.md U8.
     sizing_method: str = "full_hourly"
     # Number of typical periods for the tsam method (4-36).
     sizing_n_periods: int = 12
+    # Model each plant's UNCONSTRAINED output (AEMO UIGF) rather than its
+    # historical sent-out SCADA. The SCADA trace is what the plant actually
+    # delivered, after network constraints and after whatever economic
+    # curtailment its own offtake contract incentivised -- so using it as the
+    # capacity factor for a NEW build charges that curtailment twice.
+    #
+    # Off by default: it needs the optional availability cache
+    # (scripts/fetch_nem_availability.py) and it changes what the model means,
+    # so it should be a deliberate choice. Silently falls back to SCADA per
+    # DUID when the cache is missing.
+    #
+    # Measured over the 2025 cache (docs/sizing_experiments.md E8): fleet CF
+    # rises wind 27.7% -> 30.7% and solar 16.9% -> 20.4%, but per-plant
+    # curtailment ranges from ~0% to 71%, so this cannot be approximated with a
+    # flat uplift.
+    use_unconstrained_cf: bool = False
     # Green-certificate (LGC) revenue on SURPLUS generation only, A$/MWh.
     #
     # The PPA is treated as bundled: certificates attached to contracted energy
