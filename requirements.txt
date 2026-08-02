@@ -18,3 +18,6 @@ shapely==2.1.2
 pyogrio==0.12.1
 folium==0.20.0
 streamlit-folium==0.27.2
+# Optional: typical-day clustering for the capacity-sizing LP (guarded import —
+# the app runs without it and falls back to coarse/full-hourly sizing).
+tsam==3.4.2

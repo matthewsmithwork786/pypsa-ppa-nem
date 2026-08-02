@@ -14,6 +14,14 @@ from ppa.industrial_profiles import PROFILE_KEYS
 DATA_SOURCES = ("nem_map", "nem_default", "custom_csv")
 
 
+def _tsam_available() -> bool:
+    try:
+        import tsam  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 @dataclass
 class Scenario:
     name: str = "Custom Scenario"
@@ -45,9 +53,15 @@ class Scenario:
     max_build_wind_mw: float = 1000.0
     max_build_pv_mw: float = 1000.0
     max_build_bess_mw: float = 1000.0
-    # Time resolution (hours) of the sizing LP only. The subsequent dispatch
-    # simulation and financials always run hourly on the sized portfolio.
+    # Time resolution (hours) of the sizing LP only (legacy "coarse" method).
+    # The subsequent dispatch simulation and financials always run hourly on the
+    # sized portfolio.
     sizing_resolution_h: int = 3
+    # Sizing representation: "tsam" (typical days, default), "full_hourly"
+    # (exact hourly), or "coarse" (legacy block-averaged resolution).
+    sizing_method: str = "tsam"
+    # Number of typical periods for the tsam method (4-36).
+    sizing_n_periods: int = 12
     # Merchant sales earn revenue in the sizing LP at this fraction of historic
     # spot (a haircut for capture-price cannibalisation, MLF and curtailment).
     # Applied to positive prices only — negative hours keep their full
@@ -335,6 +349,18 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
             errors.append("At least one of wind/solar max build must be > 0 MW.")
         if int(s.sizing_resolution_h) < 1 or int(s.sizing_resolution_h) > 24:
             errors.append("Sizing LP resolution must be between 1 and 24 hours.")
+        if s.sizing_method not in ("tsam", "full_hourly", "coarse"):
+            errors.append(
+                "Unknown sizing method. Valid options: tsam, full_hourly, coarse."
+            )
+        if s.sizing_method == "tsam" and not (4 <= s.sizing_n_periods <= 36):
+            errors.append("Typical-period count must be between 4 and 36.")
+        if s.sizing_method == "tsam" and not _tsam_available():
+            errors.append(
+                "Typical-days sizing needs the optional 'tsam' package. "
+                "Install it (`pixi add --pypi tsam` or `pip install tsam`) or "
+                "switch the sizing method to 'Full year hourly' / 'Coarse resolution'."
+            )
         if s.grid_connection_max_mw is not None and s.grid_connection_max_mw < 0:
             errors.append("Grid connection limit must be ≥ 0 MW (blank = unlimited).")
         if not (0.0 <= s.sizing_merchant_value_share <= 1.0):

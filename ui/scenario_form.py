@@ -164,22 +164,64 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 "Max BESS build (MW)", 0.0, 10_000.0, float(initial.max_build_bess_mw),
                 50.0, key="sf_max_build_bess",
             )
-            _res_options = [1, 2, 3, 4, 6]
-            _res_idx = (
-                _res_options.index(int(initial.sizing_resolution_h))
-                if int(initial.sizing_resolution_h) in _res_options
-                else _res_options.index(3)
+            _method_labels = {
+                "tsam": "Typical days (tsam)",
+                "full_hourly": "Full year hourly",
+                "coarse": "Coarse resolution (legacy)",
+            }
+            _method_idx = list(_method_labels).index(
+                initial.sizing_method if initial.sizing_method in _method_labels else "tsam"
             )
-            sizing_resolution_h = cols[3].selectbox(
-                "Sizing LP resolution (h)", _res_options, index=_res_idx,
-                key="sf_sizing_resolution",
+            sizing_method = st.radio(
+                "Sizing representation",
+                list(_method_labels.values()),
+                index=_method_idx,
+                key="sf_sizing_method",
                 help=(
-                    "Time resolution of the capacity-sizing LP only. Coarser "
-                    "blocks (e.g. 3h) solve much faster and use less memory; the "
-                    "sized portfolio is then always re-simulated at hourly "
-                    "resolution for dispatch and financials."
+                    "How the sizing LP represents the year. **Typical days (tsam)** "
+                    "clusters the hourly year into representative days at full hourly "
+                    "resolution (default; needs the optional `tsam` package). "
+                    "**Full year hourly** is exact but slowest. **Coarse resolution** "
+                    "block-averages to the legacy 1-6 h resolution. The sized portfolio "
+                    "is always re-simulated at hourly resolution afterwards."
                 ),
+                horizontal=True,
             )
+            sizing_method = {v: k for k, v in _method_labels.items()}[sizing_method]
+            if sizing_method == "tsam":
+                _n_periods_idx = max(4, min(36, int(initial.sizing_n_periods)))
+                sizing_n_periods = st.slider(
+                    "Typical periods (tsam)", 4, 36, _n_periods_idx,
+                    key="sf_sizing_n_periods",
+                    help=(
+                        "Number of representative days to cluster into. More periods "
+                        "capture more of the year's variability (solar lulls, wind "
+                        "stretches, peak load) at the cost of a bigger LP. Peak-load "
+                        "and dark-lull days are always preserved even at low counts."
+                    ),
+                )
+                sizing_resolution_h = initial.sizing_resolution_h
+            elif sizing_method == "full_hourly":
+                sizing_n_periods = initial.sizing_n_periods
+                sizing_resolution_h = 1
+            else:  # coarse
+                _res_options = [1, 2, 3, 4, 6]
+                _res_idx = (
+                    _res_options.index(int(initial.sizing_resolution_h))
+                    if int(initial.sizing_resolution_h) in _res_options
+                    else _res_options.index(3)
+                )
+                sizing_n_periods = initial.sizing_n_periods
+                sizing_resolution_h = st.selectbox(
+                    "Sizing LP resolution (h)", _res_options, index=_res_idx,
+                    key="sf_sizing_resolution",
+                    help=(
+                        "Block-average resolution of the capacity-sizing LP only. "
+                        "Coarser blocks (e.g. 3h) solve faster and use less memory; "
+                        "the sized portfolio is then always re-simulated at hourly "
+                        "resolution for dispatch and financials."
+                    ),
+                )
             cols = st.columns(4)
             grid_connection = cols[0].text_input(
                 "Grid connection limit (MW)",
@@ -207,6 +249,8 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             max_build_pv_mw = initial.max_build_pv_mw
             max_build_bess_mw = initial.max_build_bess_mw
             sizing_resolution_h = initial.sizing_resolution_h
+            sizing_method = initial.sizing_method
+            sizing_n_periods = initial.sizing_n_periods
             grid_connection = "" if initial.grid_connection_max_mw == float("inf") else str(initial.grid_connection_max_mw)
             merchant_share = float(initial.sizing_merchant_value_share)
 
@@ -502,6 +546,8 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         max_build_pv_mw=float(max_build_pv_mw),
         max_build_bess_mw=float(max_build_bess_mw),
         sizing_resolution_h=int(sizing_resolution_h),
+        sizing_method=str(sizing_method),
+        sizing_n_periods=int(sizing_n_periods),
         grid_connection_max_mw=(
             float("inf") if not str(grid_connection).strip() else float(str(grid_connection).strip())
         ),

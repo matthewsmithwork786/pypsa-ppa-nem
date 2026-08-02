@@ -29,6 +29,9 @@ highs = ">=1.15.1,<2"
 
 [pypi-dependencies]
 pypsatopo = ">=0.2"
+# Optional: typical-day clustering for the capacity-sizing LP (guarded import —
+# the app runs without it and falls back to coarse/full-hourly sizing).
+tsam = ">=3.4"
 
 [tasks]
 app = "streamlit run streamlit_app.py"

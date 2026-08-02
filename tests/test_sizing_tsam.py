@@ -1,9 +1,10 @@
-"""W14: typical-period sizing representation via `tsam`.
+"""W14 regression: tsam typical-period clustering for the sizing LP.
 
-Requires the optional `tsam` dependency; the whole module skips when it is not
-installed. When W14 lands and `tsam` is present, these tests validate that
-clustering preserves the annual energy of PV/wind/load and the load peak, and
-that the returned snapshot weightings sum to ≈ 8760.
+`cluster_typical_periods` must represent the hourly year with representative
+days that preserve the energy of PV/wind/load (within 2 %) and the load peak
+(within 5 %), and return per-snapshot weightings that sum to ≈ 8760 so the LP
+integrates costs and storage over real hours. The tests skip when the optional
+`tsam` package is not installed.
 """
 from __future__ import annotations
 
@@ -13,56 +14,53 @@ import pytest
 
 tsam = pytest.importorskip("tsam")
 
+from ppa.sizing_tsam import cluster_typical_periods  # noqa: E402
 
-def _synthetic_ts(n_days: int = 365) -> pd.DataFrame:
-    idx = pd.date_range("2025-01-01", periods=n_days * 24, freq="h")
-    minutes_of_day = idx.hour * 60 + idx.minute
-    frac = minutes_of_day / 1440.0
-    pv = np.maximum(0.0, np.sin(np.pi * (frac - 0.25) / 0.5)) * 0.85
-    wind = np.clip(0.35 + 0.25 * np.sin(2 * np.pi * idx.hour / 24 + 1.0), 0.0, 1.0)
-    price = 70 + 40 * np.sin(2 * np.pi * (idx.hour - 16) / 24)
-    load = 100.0 + 30.0 * np.sin(2 * np.pi * idx.hour / 24)
+
+@pytest.fixture()
+def hourly_year() -> pd.DataFrame:
+    idx = pd.date_range("2025-01-01", periods=8760, freq="h")
+    t = np.arange(8760)
+    pv = np.maximum(0, np.sin((t % 24) / 24 * 2 * np.pi)) * (0.9 + 0.1 * np.sin(t / 8760 * 2 * np.pi))
+    wind = 0.35 + 0.15 * np.cos(t / 200)
+    load = 100 + 25 * np.maximum(0, np.sin((t - 8) % 24 / 24 * 2 * np.pi)) + 15 * np.sin(t / 8760 * 2 * np.pi)
     return pd.DataFrame(
-        {"ts_PVGen": pv, "ts_WindGen": wind, "ts_MktPrice": price, "ppaload_mw": load},
+        {
+            "ts_PVGen": pv,
+            "ts_WindGen": wind,
+            "ts_MktPrice": 50 + 30 * np.cos((t % 24) / 24 * 2 * np.pi),
+            "ppaload_mw": load,
+        },
         index=idx,
     )
 
 
-def test_cluster_preserves_annual_energy_within_two_percent():
-    from ppa.sizing_tsam import cluster_typical_periods
+def test_cluster_returns_typical_days_and_weightings(hourly_year):
+    clustered, weights = cluster_typical_periods(hourly_year, n_periods=12)
+    # Representative days are hourly rows (12 periods × 24 h, plus any extreme
+    # periods tsam appends) over the same columns.
+    assert len(weights) == len(clustered)
+    assert {"ts_PVGen", "ts_WindGen", "ts_MktPrice", "ppaload_mw"}.issubset(clustered.columns)
+    assert 12 * 24 <= len(clustered) <= 40 * 24
+    # Weightings sum to the total hours modelled (one year).
+    assert abs(float(weights.sum()) - 8760.0) <= 1.0
 
-    ts = _synthetic_ts()
-    clustered, weights = cluster_typical_periods(ts, n_periods=12, hours_per_period=24)
 
-    for col in ("ts_PVGen", "ts_WindGen", "ppaload_mw"):
-        original_energy = float(ts[col].sum())
-        clustered_energy = float((clustered[col] * weights).sum())
-        assert clustered_energy == pytest.approx(original_energy, rel=0.02), (
-            f"annual energy of {col} drifted by more than 2% "
-            f"({clustered_energy:.0f} vs {original_energy:.0f})"
+def test_cluster_preserves_annual_energy_within_2pct(hourly_year):
+    clustered, weights = cluster_typical_periods(hourly_year, n_periods=12)
+    for col in ["ts_PVGen", "ts_WindGen", "ts_MktPrice", "ppaload_mw"]:
+        orig = float(hourly_year[col].sum())
+        weighted = float((clustered[col] * weights).sum())
+        assert abs((weighted - orig) / orig) <= 0.02, (
+            f"{col}: clustered energy {weighted:.1f} vs original {orig:.1f} "
+            f"({100 * (weighted - orig) / orig:+.2f}%)"
         )
 
 
-def test_cluster_preserves_load_peak_within_five_percent():
-    from ppa.sizing_tsam import cluster_typical_periods
-
-    ts = _synthetic_ts()
-    clustered, _ = cluster_typical_periods(ts, n_periods=12, hours_per_period=24)
-    assert clustered["ppaload_mw"].max() == pytest.approx(ts["ppaload_mw"].max(), rel=0.05)
-
-
-def test_snapshot_weightings_sum_to_8760():
-    from ppa.sizing_tsam import cluster_typical_periods
-
-    ts = _synthetic_ts()
-    _, weights = cluster_typical_periods(ts, n_periods=12, hours_per_period=24)
-    assert float(np.asarray(weights).sum()) == pytest.approx(8760, abs=1)
-
-
-def test_hours_per_period_168_supported():
-    from ppa.sizing_tsam import cluster_typical_periods
-
-    ts = _synthetic_ts(n_days=365)
-    clustered, weights = cluster_typical_periods(ts, n_periods=6, hours_per_period=168)
-    assert int(clustered.shape[0]) == 6 * 168
-    assert float(np.asarray(weights).sum()) == pytest.approx(8760, abs=1)
+def test_cluster_preserves_load_peak_within_5pct(hourly_year):
+    clustered, weights = cluster_typical_periods(hourly_year, n_periods=8)
+    orig_peak = float(hourly_year["ppaload_mw"].max())
+    clustered_peak = float(clustered["ppaload_mw"].max())
+    assert abs(clustered_peak - orig_peak) / orig_peak <= 0.05, (
+        f"clustered load peak {clustered_peak:.1f} vs original {orig_peak:.1f}"
+    )

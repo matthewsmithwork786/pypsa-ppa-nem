@@ -13,7 +13,12 @@ pypsa.options.api.new_components_api = True
 from ppa.scenario import Scenario
 
 
-def build_network(ts: pd.DataFrame, scenario: Scenario, resolution_h: float = 1.0) -> pypsa.Network:
+def build_network(
+    ts: pd.DataFrame,
+    scenario: Scenario,
+    resolution_h: float = 1.0,
+    snapshot_weightings: "pd.Series | None" = None,
+) -> pypsa.Network:
     """Build an unsolved PyPSA network from prepared timeseries and scenario.
 
     When `scenario.optimize_capacity` is True, wind/PV/BESS capacities and the
@@ -30,18 +35,30 @@ def build_network(ts: pd.DataFrame, scenario: Scenario, resolution_h: float = 1.
     `resolution_h` is the hours each snapshot represents (>1 for the coarse
     sizing LP). It sets the snapshot weightings so marginal costs and storage
     state-of-charge integrate over real hours, not snapshot counts.
+
+    `snapshot_weightings` is an optional per-snapshot weighting Series (e.g.
+    tsam typical-period occurrence counts, which sum to ≈ 8760). When given it
+    overrides the uniform `resolution_h` weighting so costs and storage
+    integrate over the real hours each snapshot represents. `horizon_years` is
+    derived from its sum (total modelled hours ÷ 8760).
     """
     s = scenario
     n = pypsa.Network()
     n.set_snapshots(ts.index)
-    if resolution_h != 1.0:
-        n.snapshot_weightings.loc[:, :] = float(resolution_h)
+    if snapshot_weightings is not None:
+        w = snapshot_weightings.to_numpy(dtype=float)
+        n.snapshot_weightings.loc[:, :] = w.reshape(-1, 1)
+        total_hours = float(snapshot_weightings.sum())
+    else:
+        if resolution_h != 1.0:
+            n.snapshot_weightings.loc[:, :] = float(resolution_h)
+        total_hours = len(ts) * resolution_h
 
     sizing = s.optimize_capacity
     # Annualized A$/MW/yr (or A$/MW-of-BESS/yr via fixed duration), scaled by the
     # fraction of a year the LP covers so capex and operational costs are summed
     # over the same horizon. crf annualizes overnight capex; opex_rate adds fixed O&M.
-    horizon_years = len(ts) * resolution_h / 8760.0
+    horizon_years = total_hours / 8760.0
 
     def _crf(rate: float, life: int) -> float:
         return rate / (1 - (1 + rate) ** -life) if rate > 0 else 1.0 / life

@@ -68,6 +68,7 @@ def _toy_scenario(**overrides) -> Scenario:
         pv_capex_per_kw=100.0,
         bess_capex_per_kwh=50.0,
         sizing_resolution_h=1,
+        sizing_method="full_hourly",  # W14 default is tsam; these LP tests use the exact-hourly path
         simulation_years=1,
     )
     base.update(overrides)

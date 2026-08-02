@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -20,6 +21,16 @@ def _sized_banner_text(sized) -> str:
         f"Wind link **{sized.wind_link_mw:.0f} MW** · PV+BESS link **{sized.pvbess_link_mw:.0f} MW** · "
         f"Export link **{sized.sell_link_mw:.0f} MW**"
     )
+
+
+def _sizing_method_label(sized) -> str:
+    """Human-readable sizing representation for the success message."""
+    labels = {
+        "tsam": "typical-day clustering (tsam)",
+        "full_hourly": "full hourly year",
+        "coarse": f"{getattr(sized, 'resolution_h', 1)}h coarse resolution",
+    }
+    return labels.get(getattr(sized, "sizing_method", "coarse"), "sizing LP")
 
 
 def _render_sizing_diagnostics() -> None:
@@ -41,6 +52,22 @@ def _render_sizing_diagnostics() -> None:
         st.dataframe(diag["tech_rows"], width="stretch")
         st.markdown("**Connection links**")
         st.dataframe(diag["link_rows"], width="stretch")
+        _delivery_sizing = diag.get("sizing_delivery_share")
+        _delivery_full = diag.get("delivery_share_full")
+        if _delivery_sizing is not None and _delivery_full is not None:
+            _gap = (_delivery_full - _delivery_sizing) * 100
+            _gap_note = (
+                " — the full hourly year delivers materially more than the "
+                "sizing representation suggested, so the clustering dropped "
+                "some scarcity hours; try more typical periods."
+                if _gap > 2.0
+                else ""
+            )
+            st.caption(
+                f"PPA delivery share: sizing LP **{_delivery_sizing:.1%}** "
+                f"({diag.get('sizing_method', 'coarse')} representation) vs full "
+                f"hourly simulation **{_delivery_full:.1%}** ({_gap:+.1f}pp){_gap_note}."
+            )
         st.caption(
             "“Max-build cap binding / Connection limit binding = Yes” means that cap is what "
             "stopped the LP building more — the binding constraint is the real sizing decision. "
@@ -396,9 +423,9 @@ def _run_simulation(scenario, max_workers: int) -> None:
         )
         status_text.success(
             f"Optimized portfolio — {_sized_banner_text(sized)} "
-            f"(sized over {sized.sizing_years_used} year(s) at {sized.resolution_h}h "
-            f"resolution in {sizing_seconds:.0f}s) — running hourly dispatch... "
-            f"{horizon_msg}"
+            f"(sized over {sized.sizing_years_used} year(s), "
+            f"{_sizing_method_label(sized)} in {sizing_seconds:.0f}s) — "
+            f"running hourly dispatch... {horizon_msg}"
         )
 
     def _on_progress(done: int, total: int, sim_year: int) -> None:
@@ -418,6 +445,16 @@ def _run_simulation(scenario, max_workers: int) -> None:
     )
     dispatch_seconds = time.monotonic() - _t_dispatch
     state.set_multi_year_results(results)
+
+    # Compare the sizing LP's delivery share against the full hourly simulation
+    # of the sized portfolio (plan W14 item 6): a large gap means the typical-
+    # period / coarse representation dropped something the hourly year has.
+    if sizing_seconds is not None and state.has_sizing_diagnostics():
+        diag = state.get_sizing_diagnostics()
+        diag["delivery_share_full"] = float(
+            np.mean([r.summary.fulfilled_share for r in results])
+        )
+        state.set_sizing_diagnostics(diag)
 
     fin = run_multi_year_financial_analysis(
         scenario, results, first_sim_year=scenario.first_sim_year

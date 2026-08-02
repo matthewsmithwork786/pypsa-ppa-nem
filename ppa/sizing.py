@@ -37,6 +37,13 @@ class SizedCapacities:
     sizing_years_used: int
     horizon_clamped: bool
     resolution_h: int = 1
+    # Sizing representation used ("tsam" / "full_hourly" / "coarse")
+    sizing_method: str = "coarse"
+    # PPA delivery share the sizing LP itself achieves on its representation
+    # (clustered typical days / coarse blocks / full hourly) — compared against
+    # the full hourly simulation of the sized portfolio to catch clustering
+    # losses (plan W14 item 6).
+    sizing_delivery_share: float = 0.0
     # Sized connection/transport link MW (carried into dispatch via apply_sizing)
     wind_link_mw: float = 0.0
     pvbess_link_mw: float = 0.0
@@ -178,18 +185,36 @@ def coarsen_timeseries(ts: pd.DataFrame, resolution_h: int) -> pd.DataFrame:
 def optimize_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities:
     """Solve the investment LP at coarse resolution and extract optimal capacities.
 
-    `ts` is the hourly timeseries; it is downsampled here to
-    `scenario.sizing_resolution_h`-hour blocks before the solve. Snapshot
-    weightings (set in `build_network`) keep costs and storage dynamics in real
-    hours.
+    `ts` is the hourly timeseries. How it is represented before the solve is
+    chosen by `scenario.sizing_method`: "tsam" clusters it into typical days at
+    hourly resolution (best fidelity for the size; W14), "full_hourly" keeps the
+    exact hourly year (slowest), and "coarse" block-averages to
+    `scenario.sizing_resolution_h`-hour blocks (legacy, fastest per snapshot).
+    Snapshot weightings (set in `build_network`) keep costs and storage
+    dynamics in real hours either way.
 
     BESS energy capacity fade cannot be time-varied on a StorageUnit, so the
     horizon-average degradation factor is applied to the fixed duration — a
     slight de-rating that approximates multi-year usable-capacity fade.
     """
     resolution_h = max(1, int(scenario.sizing_resolution_h))
-    ts = coarsen_timeseries(ts, resolution_h)
-    n_years = max(1, round(len(ts) * resolution_h / 8760))
+    method = scenario.sizing_method
+    if method == "tsam":
+        from ppa.sizing_tsam import cluster_typical_periods
+
+        ts, weights = cluster_typical_periods(
+            ts, n_periods=max(4, int(scenario.sizing_n_periods))
+        )
+        n_years = max(1, round(float(weights.sum()) / 8760))
+        # Report the effective (clustered) resolution for diagnostics
+        resolution_h = 1
+    elif method == "full_hourly":
+        n_years = max(1, round(len(ts) / 8760))
+        resolution_h = 1
+    else:  # coarse (legacy)
+        ts = coarsen_timeseries(ts, resolution_h)
+        n_years = max(1, round(len(ts) * resolution_h / 8760))
+
     avg_bess_factor = (
         sum((1.0 - scenario.bess_degradation_rate) ** i for i in range(n_years)) / n_years
     )
@@ -209,7 +234,13 @@ def optimize_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
     if not sizing_scn.include_bess:
         sizing_scn = dataclasses.replace(sizing_scn, max_build_bess_mw=0.0)
 
-    n = build_network(ts, sizing_scn, resolution_h=resolution_h)
+    if method == "tsam":
+        n = build_network(ts, sizing_scn, snapshot_weightings=weights)
+    elif method == "full_hourly":
+        n = build_network(ts, sizing_scn, resolution_h=1.0)
+    else:
+        n = build_network(ts, sizing_scn, resolution_h=resolution_h)
+
     status, condition = solve(n, sizing_scn, ts)
 
     # max(0, ·) clamps solver noise (e.g. -0.0 / -1e-9) at zero builds
@@ -239,6 +270,19 @@ def optimize_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
     # Report undegraded nameplate energy (the simulation applies fade per year itself)
     bess_mwh = bess_mw * scenario.bess_max_hours
 
+    # PPA delivery share achieved *within the sizing LP* on its representation,
+    # so the diagnostics can compare it against the full hourly simulation of
+    # the sized portfolio (plan W14 item 6: a large gap = clustering dropped
+    # something). Energy is p (MW) × snapshot weighting (hours), so both sides
+    # are weighted the same way to integrate over real hours.
+    w = n.snapshot_weightings["objective"].to_numpy()
+    load_mwh = float((ts["ppaload_mw"].to_numpy() * w).sum())
+    if "IPPGen_to_PPAOfftake" in n.links.dynamic.p1.columns and load_mwh > 0:
+        delivered_mwh = float((-n.links.dynamic.p1["IPPGen_to_PPAOfftake"].to_numpy() * w).sum())
+        sizing_delivery_share = min(1.0, delivered_mwh / load_mwh)
+    else:
+        sizing_delivery_share = 0.0
+
     return SizedCapacities(
         onsw_mw=onsw_mw,
         pv_mw=pv_mw,
@@ -249,6 +293,8 @@ def optimize_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         sizing_years_used=n_years,
         horizon_clamped=n_years < scenario.simulation_years,
         resolution_h=resolution_h,
+        sizing_method=method,
+        sizing_delivery_share=sizing_delivery_share,
         wind_link_mw=wind_link_mw,
         pvbess_link_mw=pvbess_link_mw,
         sell_link_mw=sell_link_mw,
@@ -323,6 +369,9 @@ def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFr
         "avg_spot": None if avg_spot is None else round(avg_spot, 1),
         "horizon_years": horizon_years,
         "sizing_merchant_value_share": scenario.sizing_merchant_value_share,
+        "sizing_method": scenario.sizing_method,
+        "sizing_delivery_share": sized.sizing_delivery_share,
+        "delivery_share_full": None,
     }
 
 
