@@ -64,3 +64,74 @@ def test_cluster_preserves_load_peak_within_5pct(hourly_year):
     assert abs(clustered_peak - orig_peak) / orig_peak <= 0.05, (
         f"clustered load peak {clustered_peak:.1f} vs original {orig_peak:.1f}"
     )
+
+
+# ── U8 step 4: validation must compare sized MW, not delivery share ──────────
+
+def _sizing_scenario(**overrides):
+    """Cheap-capex toy scenario so the LP actually builds something."""
+    import dataclasses
+
+    from ppa.scenario import Scenario
+
+    base = dict(
+        name="tsam-validate toy", optimise_capacity=True,
+        onsw_mw=50.0, pv_mw=50.0, include_bess=True, bess_mw=20.0, bess_mwh=80.0,
+        max_build_wind_mw=2000.0, max_build_pv_mw=2000.0, max_build_bess_mw=2000.0,
+        wind_capex_per_kw=100.0, pv_capex_per_kw=100.0, bess_capex_per_kwh=50.0,
+        simulation_years=1, sizing_resolution_h=1,
+    )
+    base.update(overrides)
+    return Scenario(**base)
+
+
+def test_validate_sizing_representation_compares_sized_mw(hourly_year):
+    """The clustering check must measure the sizing decision itself.
+
+    W14's original metric compared the sizing LP's delivery share against the
+    full simulation's, but that stayed within 2-4 pp even when the sized fleet
+    was ~19% wrong (docs/sizing_experiments.md E2) — delivery share is simply
+    not sensitive to the sizing decision. This compares sized MW per technology
+    against the exact hourly LP.
+    """
+    from ppa.sizing import validate_sizing_representation
+
+    ts = hourly_year
+    scn = _sizing_scenario(sizing_method="tsam", sizing_n_periods=8)
+    report = validate_sizing_representation(ts, scn, tolerance=0.05)
+
+    assert {r["Technology"] for r in report["rows"]} == {"Wind", "Solar", "BESS"}
+    assert report["method"] == "tsam"
+    assert report["exact_status"] == "ok" and report["chosen_status"] == "ok"
+    assert report["reference_seconds"] > 0
+    assert isinstance(report["within_tolerance"], bool)
+    # within_tolerance must follow max_abs_delta against the stated tolerance.
+    assert report["within_tolerance"] == (report["max_abs_delta"] <= report["tolerance"])
+
+
+def test_validate_sizing_representation_exact_method_matches_itself(hourly_year):
+    """full_hourly against full_hourly must be a perfect match."""
+    from ppa.sizing import validate_sizing_representation
+
+    ts = hourly_year
+    scn = _sizing_scenario(sizing_method="full_hourly")
+    report = validate_sizing_representation(ts, scn)
+
+    assert report["max_abs_delta"] == pytest.approx(0.0, abs=1e-6)
+    assert report["within_tolerance"]
+
+
+def test_validate_handles_zero_build_without_dividing_by_zero(hourly_year):
+    """A technology the exact LP does not build reports None, not inf/NaN."""
+    from ppa.sizing import validate_sizing_representation
+
+    ts = hourly_year
+    # No BESS allowed, so the exact LP builds 0 MW of it.
+    scn = _sizing_scenario(
+        sizing_method="full_hourly", include_bess=False,
+        bess_mw=0.0, bess_mwh=0.0, max_build_bess_mw=0.0,
+    )
+    report = validate_sizing_representation(ts, scn)
+    bess = next(r for r in report["rows"] if r["Technology"] == "BESS")
+    assert bess["Difference"] is None
+    assert report["max_abs_delta"] == report["max_abs_delta"]  # not NaN

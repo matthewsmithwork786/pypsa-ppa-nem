@@ -290,3 +290,139 @@ combination of poor sites and a delivery requirement that was only ever a price 
 `enforce_min_delivery` is off by default (it changes the contract's meaning), but it is the
 right setting whenever the penalty is cheaper than building — which, at GenCost capex, it
 almost always is.
+
+---
+
+## E7 — U8: why tsam sizes storage to zero (the W14 diagnosis was wrong)
+
+### What was measured
+
+Corporate PPA, 1-year sizing LP. **BESS capex is the confounder** — at GenCost's
+385 A$/kWh storage is uneconomic in every representation, so the defect is invisible.
+Holding everything else fixed and varying only BESS capex:
+
+| BESS capex | method | wind | PV | **BESS** |
+|---|---|---|---|---|
+| 276.5 (old) | full hourly | 70 | 132 | **22** |
+| 276.5 (old) | tsam 12 | 72 | 114 | **0** |
+| 385 (GenCost) | full hourly | 64 | 120 | 0 |
+| 385 (GenCost) | tsam 12 | 72 | 114 | 0 |
+
+**Clustering zeroes a battery the exact LP builds.** The defect is real but *latent* at
+current capex. E1 shows BESS reaching 251 MW at merchant share 1.0, so the regime where it
+bites is well within normal use.
+
+### The W14 diagnosis and its proposed fix are both wrong
+
+W14 attributed this to `cyclic_state_of_charge=True` forcing the battery back to its
+starting SoC within each representative day, and proposed `hours_per_period=168` (typical
+weeks). Tested at the capex where BESS is economic (exact LP = 22 MW):
+
+| representation | BESS | vs exact |
+|---|---|---|
+| tsam 8 / 12 / 24 × **day** | 0 / 0 / 0 | −100% |
+| tsam 4 / 8 / 12 × **week** (168 h) | 0 / 0 / 0 | **−100%** |
+
+Typical weeks do not help at all. The cyclic-SoC explanation is therefore not the cause.
+
+### The actual cause: clustering destroys intraday price volatility
+
+| | mean intraday price spread | vs original |
+|---|---|---|
+| Original 365 days | A$431.8/MWh | — |
+| tsam 8 days | A$202.9/MWh | −53% |
+| tsam 12 days | A$201.6/MWh | −53% |
+| tsam 24 days | A$255.4/MWh | −41% |
+
+Battery arbitrage revenue scales with the intraday spread. Halving the spread removes most
+of the revenue that justifies storage, so the LP builds none. **Energy, the annual mean and
+the load peak are all preserved exactly** — which is why the standard aggregation checks
+(and the W14 item-6 delivery-share metric) all pass while the storage decision is destroyed.
+
+Neither of tsam's representation options fixes it:
+
+| representation | spread loss | negative-price hours retained |
+|---|---|---|
+| `mean` (centroid) | −33% | 2.7% (of 12.3%) |
+| `medoid` (real day, the hierarchical default in use) | −53% | 9.3% (of 12.3%) |
+
+`mean` retains more spread but destroys the negative-price hours; `medoid` retains
+negative hours but less spread. Neither is close. This is inherent to representing 365
+distinct daily price shapes with 12–26 — not a configuration mistake.
+
+### Actions taken
+
+- Default stays `full_hourly` (U8 step 1, already landed).
+- `ui/scenario_form.py` warns when `tsam` is selected with a BESS in play. A warning, not
+  a block — tsam's ~85× speed-up is still worth having for a generation-only screen.
+- `ppa/sizing_tsam.py` module docstring rewritten: it previously stated the wrong cause and
+  recommended a fix that does not work.
+- `ppa.sizing.validate_sizing_representation()` (U8 step 4) compares **sized MW per
+  technology** against the exact LP, since the delivery-share metric provably cannot detect
+  this (2–4 pp gap even when the fleet was 19% wrong).
+
+### Correction to E2
+
+E2's other two headline claims do **not** survive re-measurement under GenCost capex:
+
+- *"Fleet 11.2% low, degrading monotonically (−5.3/−11.2/−19.1%)"* — now non-monotonic and
+  within roughly ±5% (+4.9%, +1.4%, −7.5% at 8/12/24; −5.8%, −3.6% at 48/96). Ordinary
+  clustering error, not systematic bias. **tsam 12 is the most accurate setting at +1.4%.**
+- The extreme-period weighting hypothesis is disproven outright: weights sum to exactly
+  8760 h, PV and wind energy are preserved to 0.00%, and the load peak is retained at every
+  period count.
+
+The storage finding is the one that survives.
+
+---
+
+## E8 — U4: unconstrained (UIGF) capacity factors
+
+**Acquired.** `scripts/fetch_nem_availability.py` pulls `DISPATCHLOAD.AVAILABILITY` and
+`SEMIDISPATCHCAP` via `nemosis`, month by month, into
+`data/cache/nem/availability/<DUID>_2025.parquet`. 179 DUIDs written, 171 at >99% coverage,
+221 MB.
+
+Curtailment = `1 − constrained CF / unconstrained CF`, over 175 plants matched to the
+registry:
+
+| | constrained (SCADA) | unconstrained (UIGF) | curtailment | SEMIDISPATCHCAP=1 |
+|---|---|---|---|---|
+| **Wind** (n=84) | 27.7% | **30.7%** | **9.7%** | 15.1% |
+| **Solar** (n=90) | 16.9% | **20.4%** | **17.3%** | 19.5% |
+
+Per-plant, solar curtailment has a median of 21.6%, p90 of 38.1% and a **maximum of 71.3%**:
+
+| DUID | cap | constrained | unconstrained | curtailed |
+|---|---|---|---|---|
+| `MANSLR1` | 50 MW | 6.1% | 21.3% | **71.3%** |
+| `MOLNGSF1` | 36 MW | 8.9% | 21.7% | 59.0% |
+| `MUWAWF1` (wind) | 232 MW | 22.9% | 36.2% | 36.8% |
+
+### Findings
+
+1. **This confirms curtailment is contract- and location-specific, not a fleet-wide
+   factor.** The spread from ~0% to 71% is why a uniform uplift would have been wrong.
+2. **AC CUF remains the dominant explanation for low solar CFs, not curtailment.** Even
+   unconstrained, fleet solar is only 20.4%. Curtailment explains ~3.5 points of the gap.
+3. **The case study's own plants are barely curtailed**, so this lever changes little for
+   them specifically:
+
+   | DUID | constrained | unconstrained | curtailed |
+   |---|---|---|---|
+   | `COLWF01` | 28.4% | 28.6% | 0.9% |
+   | `GULLRWF2` | 39.6% | 40.4% | 2.1% |
+   | `MOREESF1` | 26.8% | 26.9% | 0.4% |
+   | `SUNRSF1` | 20.0% | 22.0% | 9.1% |
+
+   The value of U4 is in modelling *other* plants honestly — a 71%-curtailed site looks
+   uninvestable on SCADA and reasonable on UIGF.
+
+**These numbers supersede the two bad curtailment estimates flagged in E4.** Both were
+inferred; these are measured against AEMO's own unconstrained forecast.
+
+### Wiring
+
+`Scenario.use_unconstrained_cf` (default **off**) selects the UIGF trace. It falls back to
+SCADA per DUID when the cache is missing, so installs without it are unaffected. Exposed as
+a toggle in Case Setup next to the NEM region/year selectors.

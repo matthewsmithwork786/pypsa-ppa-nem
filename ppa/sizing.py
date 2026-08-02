@@ -336,6 +336,63 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
     )
 
 
+def validate_sizing_representation(
+    ts: pd.DataFrame, scenario: Scenario, tolerance: float = 0.05
+) -> dict:
+    """Re-solve the sizing LP exactly and compare it against the chosen method.
+
+    U8 step 4. The W14 validation metric compared the sizing LP's own delivery
+    share against the full simulation's, but that is far too weak: measured
+    across every representation the delivery gap sat at 2-4 pp even when the
+    sized fleet was 19% wrong (docs/sizing_experiments.md E2). Delivery share
+    is simply not sensitive to the sizing decision.
+
+    This compares the thing that actually matters -- **sized MW per
+    technology** -- against the exact full-hourly LP. Costs a full-hourly
+    solve, so it is an opt-in check, not something to run on every solve.
+
+    Returns a dict with `rows` (per technology: chosen MW, exact MW, delta),
+    `max_abs_delta`, `within_tolerance` and `reference_seconds`.
+    """
+    import time as _time
+
+    exact_scn = dataclasses.replace(scenario, sizing_method="full_hourly")
+    t0 = _time.monotonic()
+    exact = optimise_capacities(ts, exact_scn)
+    reference_seconds = _time.monotonic() - t0
+    chosen = optimise_capacities(ts, scenario)
+
+    rows = []
+    max_abs = 0.0
+    for label, got, want in (
+        ("Wind", chosen.onsw_mw, exact.onsw_mw),
+        ("Solar", chosen.pv_mw, exact.pv_mw),
+        ("BESS", chosen.bess_mw, exact.bess_mw),
+    ):
+        # Relative error is undefined when the exact LP builds nothing; report
+        # None rather than dividing by zero or silently scoring it as perfect.
+        delta = (got - want) / want if want > 1e-6 else None
+        if delta is not None:
+            max_abs = max(max_abs, abs(delta))
+        rows.append({
+            "Technology": label,
+            f"{scenario.sizing_method} (MW)": round(float(got), 1),
+            "Exact hourly (MW)": round(float(want), 1),
+            "Difference": None if delta is None else round(100.0 * delta, 1),
+        })
+
+    return {
+        "rows": rows,
+        "method": scenario.sizing_method,
+        "max_abs_delta": max_abs,
+        "within_tolerance": max_abs <= tolerance,
+        "tolerance": tolerance,
+        "reference_seconds": reference_seconds,
+        "exact_status": exact.status,
+        "chosen_status": chosen.status,
+    }
+
+
 def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFrame) -> dict:
     """Per-technology economics + binding constraints for the sizing run.
 
