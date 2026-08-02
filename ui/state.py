@@ -69,7 +69,7 @@ _SCENARIO_FORM_KEYS = [
 
 
 def get_effective_scenario() -> "Scenario | None":
-    """The scenario as actually simulated — optimized capacities applied.
+    """The scenario as actually simulated — optimised capacities applied.
 
     After a capacity-sizing run the session scenario deliberately keeps the
     user's slider values and `optimize_capacity=True` (so re-runs re-size),

@@ -22,12 +22,12 @@ Navigate through the tabs to manage different aspects of your project (economic 
     * *PPA contract encoding*: Flat offtake loads, delivery obligations, shortfall caps, penalty multipliers.
     * *Market interaction*: Spot market buy/sell with configurable caps and bid-offer spreads.
     * *Financial assumptions*: CAPEX, LCOE, IRR, NPV, and breakeven PPA price discovery.
-    * *Optimization details:* Years of optimization, price escalation, and technology degradation.
+    * *Optimisation details:* Years of optimisation, price escalation, and technology degradation.
 
 2. 📡 **Get Data** — pick real Australian NEM wind/solar plants on the map, and
    download / cache the underlying data via the acquisition scripts.
 
-3. ⚙️ **Optimization** — review the scenario summary and run the optimization to solve
+3. ⚙️ **Optimisation** — review the scenario summary and run the optimisation to solve
    the model. This typically takes 5–15 seconds.
 
 4. 🔍 **Results** — examine the full financial model (CAPEX, IRR, NPV, breakeven

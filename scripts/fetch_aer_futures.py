@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 One-time acquisition script: pull AER's free quarterly "base futures price"
-chart-data CSV and normalize it into this repo's hedge-price cache schema.
+chart-data CSV and normalise it into this repo's hedge-price cache schema.
 
 *** NOT PART OF THE STREAMLIT APP. NEVER IMPORTED BY `ppa/` OR `ui/`. ***
 
@@ -113,7 +113,7 @@ def download_raw_csv(url: str = CSV_URL, timeout: int = 60) -> bytes:
 
 
 def parse_raw_csv(raw_bytes: bytes, year: int) -> pd.DataFrame:
-    """Parse the raw AER CSV into the normalized hedge-cache schema for a given year.
+    """Parse the raw AER CSV into the normalised hedge-cache schema for a given year.
 
     Raises AerFetchError with a clear message (rather than silently writing bad
     data) if the expected columns can't be located.

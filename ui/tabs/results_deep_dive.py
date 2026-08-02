@@ -201,7 +201,7 @@ def _render_multi_year_counterfactuals(results, fin, s) -> None:
         yearly_cfs.append((yf.year, cf, cal_price))
 
     if not yearly_cfs:
-        st.info("Re-run the optimization to see counterfactual data.")
+        st.info("Re-run the optimisation to see counterfactual data.")
         return
 
     years = [y for y, _, _ in yearly_cfs]
@@ -240,7 +240,7 @@ def _render_multi_year_counterfactuals(results, fin, s) -> None:
 def _render_multi_year_deep_dive() -> None:
     results = state.get_multi_year_results()
     fin = state.get_multi_year_financial()
-    # Effective scenario: after a sizing run this carries the optimized
+    # Effective scenario: after a sizing run this carries the optimised
     # capacities the results were actually produced with, not the slider values.
     s = state.get_effective_scenario()
 
@@ -283,7 +283,7 @@ def _render_multi_year_deep_dive() -> None:
     # ── Year + day selectors ──────────────────────────────────────────────────
     year_options = [y.year for y in fin.yearly]
     cols = st.columns(4)
-    selected_year = cols[0].selectbox("**Year to analyze:**", year_options, key="dd_year")
+    selected_year = cols[0].selectbox("**Year to analyse:**", year_options, key="dd_year")
     year_idx = year_options.index(selected_year)
     result = results[year_idx]
 
@@ -447,7 +447,7 @@ def render() -> None:
 
     if state.has_multi_year_results() and state.has_multi_year_financial():
         n = len(state.get_multi_year_financial().yearly)
-        st.caption(f"Showing results from last optimization run ({n} year(s)).")
+        st.caption(f"Showing results from last optimisation run ({n} year(s)).")
         _render_multi_year_deep_dive()
 
         if state.has_result():
@@ -461,7 +461,7 @@ def render() -> None:
 
     else:
         st.info(
-            "No results yet. Run the **Run optimization** in the **Optimization** tab "
+            "No results yet. Run the **Run optimisation** in the **Optimisation** tab "
             "to explore hourly dispatch for any day in any simulated year.",
             icon="⚙️",
         )

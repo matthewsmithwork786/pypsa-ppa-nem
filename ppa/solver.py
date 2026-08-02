@@ -38,9 +38,9 @@ def solve(
     load = n.loads.dynamic.p_set["Load_PPAOfftake"]
 
     # In a multi-year sizing LP the caps must bind per calendar year — one
-    # aggregate constraint over 25 years would let the optimizer concentrate all
+    # aggregate constraint over 25 years would let the optimiser concentrate all
     # shortfall/buys into the worst weather years. Single-year runs keep the
-    # original single aggregate constraint (identical behavior).
+    # original single aggregate constraint (identical behaviour).
     years = pd.Index(ts.index.year)
     if s.optimize_capacity and years.nunique() > 1:
         snapshot_groups = [(f"_{y}", ts.index[years == y]) for y in years.unique()]

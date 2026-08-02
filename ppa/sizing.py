@@ -1,6 +1,6 @@
-"""Capacity co-optimization: size wind/PV/BESS with a single multi-year investment LP.
+"""Capacity co-optimisation: size wind/PV/BESS with a single multi-year investment LP.
 
-Two-stage flow: the sizing LP here optimizes capacities + dispatch over the
+Two-stage flow: the sizing LP here optimises capacities + dispatch over the
 concatenated simulation horizon (least-cost-to-serve-the-PPA, see
 `ppa.network.build_network` sizing mode) at a coarse, configurable time
 resolution (`scenario.sizing_resolution_h`, default 3h), then `apply_sizing`
@@ -448,7 +448,7 @@ def run_sizing_subprocess(
 
 
 def apply_sizing(scenario: Scenario, sized: SizedCapacities) -> Scenario:
-    """Write optimized capacities into a fixed-capacity Scenario for simulation."""
+    """Write optimised capacities into a fixed-capacity Scenario for simulation."""
     bess_built = sized.bess_mw > 0.1  # ignore solver noise below 0.1 MW
     return dataclasses.replace(
         scenario,

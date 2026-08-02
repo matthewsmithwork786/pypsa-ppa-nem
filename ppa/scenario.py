@@ -48,7 +48,7 @@ class Scenario:
     cal_forward_source: str = "manual"   # "manual" | "aer_indicative"
     cal_forward_note: str = ""
 
-    # Capacity co-optimization (ignores the fixed MW values below when enabled)
+    # Capacity co-optimisation (ignores the fixed MW values below when enabled)
     optimize_capacity: bool = False
     max_build_wind_mw: float = 1000.0
     max_build_pv_mw: float = 1000.0

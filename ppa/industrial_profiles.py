@@ -1,7 +1,7 @@
 """Reference industrial load profiles for PPA offtakers.
 
 Each profile function accepts a pd.DatetimeIndex and returns a pd.Series of
-normalized load values in [0, 1]. Multiply by scenario.ppaload_mw to get MW.
+normalised load values in [0, 1]. Multiply by scenario.ppaload_mw to get MW.
 
 Profiles for cement and steel are derived from real measured data published by
 the Forschungsstelle für Energiewirtschaft (FfE) via their open data API
@@ -65,11 +65,11 @@ def _load_ffe_df() -> pd.DataFrame:
 
 
 def _ffe_profile(sector_id: int, index: pd.DatetimeIndex) -> pd.Series:
-    """Return a normalized (0–1) FfE sector profile mapped to *index*.
+    """Return a normalised (0–1) FfE sector profile mapped to *index*.
 
     The 2017 reference data is averaged by (month, dayofweek, hour) and then
     looked up for every hour in *index*, preserving seasonal and weekday
-    patterns regardless of the target year. Values are normalized so max = 1.
+    patterns regardless of the target year. Values are normalised so max = 1.
     """
     df = _load_ffe_df()
     name = _FFE_ID_TO_NAME[sector_id]
@@ -165,7 +165,7 @@ PROFILE_KEYS: list[str] = list(PROFILE_INFO.keys())
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def get_load_series(profile_name: str, index: pd.DatetimeIndex) -> pd.Series:
-    """Return normalized load profile (0–1) for *profile_name* over *index*."""
+    """Return normalised load profile (0–1) for *profile_name* over *index*."""
     fn = _REGISTRY.get(profile_name, _flat)
     return fn(index)
 

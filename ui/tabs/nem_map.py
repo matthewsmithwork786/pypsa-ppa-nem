@@ -1,4 +1,4 @@
-"""Get Data (NEM Plant Map) — pick a real wind/solar plant to drive the optimizer.
+"""Get Data (NEM Plant Map) — pick a real wind/solar plant to drive the optimiser.
 
 Pure helper functions (no Streamlit calls) live at module level so they're
 independently unit-testable; `render()` wires them into the Streamlit UI,
@@ -190,7 +190,7 @@ def render() -> None:
     st.title("📡 Get Data")
     st.markdown(
         "Pick real Australian wind and/or solar plants (2025 5-minute AEMO SCADA) "
-        "to drive the optimizer."
+        "to drive the optimiser."
     )
 
     year = nem_data.DEFAULT_YEAR

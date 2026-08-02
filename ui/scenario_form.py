@@ -13,7 +13,7 @@ max_cap_per_technology = 500
 max_bes_hours = 8
 
 # PPA offtake load (MW) number_input bounds. Raised well above
-# max_cap_per_technology-scale single-tech limits since a co-optimized
+    # max_cap_per_technology-scale single-tech limits since a co-optimised
 # wind+solar+BESS portfolio (each individually up to several thousand MW via
 # the sizing max-build inputs) can plausibly serve a load in the same range,
 # and a custom-CSV upload's peak MW must always fit under this ceiling or the
@@ -134,7 +134,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
     enable_penalty = cols[0].toggle("Enable penalty regime", value=initial.enable_penalty, key="sf_enable_penalty")
     run_financial_analysis = cols[1].toggle("Run financial analysis", value=initial.run_financial_analysis, key="sf_run_financial_analysis")
     optimize_capacity = cols[2].toggle(
-        "Co-optimize capacities & dispatch",
+                "Co-optimise capacities & dispatch",
         value=initial.optimize_capacity,
         key="sf_optimize_capacity",
         help=(
@@ -147,8 +147,8 @@ def render_scenario_form(initial: Scenario) -> Scenario:
     with st.expander("Portfolio assets", expanded=True):
         if optimize_capacity:
             st.info(
-                "⚡ **Capacity co-optimization is ON** — the sliders below are ignored. "
-                "The optimizer sizes each technology up to its max build limit; "
+                "⚡ **Capacity co-optimisation is ON** — the sliders below are ignored. "
+                "The optimiser sizes each technology up to its max build limit; "
                 "BESS duration is fixed at the MWh/MW ratio below."
             )
             cols = st.columns(4)
@@ -266,7 +266,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         bess_mwh = cols[3].slider(
             "BESS energy (MWh)", 0, max_cap_per_technology*max_bes_hours, int(initial.bess_mwh), step=20,
             key="sf_bess_mwh",
-            help="With co-optimization on, only the MWh/MW ratio (duration) is used." if optimize_capacity else None,
+                            help="With co-optimisation on, only the MWh/MW ratio (duration) is used." if optimize_capacity else  None,
         )
 
     with st.expander("PPA contract terms", expanded=True):

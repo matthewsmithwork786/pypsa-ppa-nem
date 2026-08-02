@@ -40,7 +40,7 @@ tabs = st.tabs([
     "| 1. 🔬 Case Setup",
     "| 2. 📡 Get Data",
     "| 2b. 📤 Custom Data",
-    "| 3. ⚙️ Optimization",
+    "| 3. ⚙️ Optimisation",
     "| 4. 🔍 Results",
     "| 5. 🏦 Financial Model",
     "| 6. 📊 Sensitivity Analysis",

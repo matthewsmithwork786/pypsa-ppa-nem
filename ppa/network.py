@@ -79,7 +79,7 @@ def build_network(
     # p_nom_opt is pinned to its realised peak flow instead of degenerating.
     link_cc = s.connection_cost_aud_mw * (crf + s.opex_rate) * horizon_years
     grid_connection_cap = float(s.grid_connection_max_mw) if s.grid_connection_max_mw is not None else float("inf")
-    # Generous transport bound so links never constrain optimized builds
+    # Generous transport bound so links never constrain optimised builds
     build_cap_sum = s.max_build_wind_mw + s.max_build_pv_mw + s.max_build_bess_mw
 
     # ── Carriers ─────────────────────────────────────────────────────────────────
@@ -186,8 +186,8 @@ def build_network(
     )
 
     # ── Storage ───────────────────────────────────────────────────────────────
-    # In sizing mode BESS power is optimized at fixed duration (max_hours);
-    # energy = optimized MW × max_hours, priced via bess_cc (A$/kWh × hours).
+    # In sizing mode BESS power is optimised at fixed duration (max_hours);
+    # energy = optimised MW × max_hours, priced via bess_cc (A$/kWh × hours).
     n.add(
         "StorageUnit",
         "SU_BESS",

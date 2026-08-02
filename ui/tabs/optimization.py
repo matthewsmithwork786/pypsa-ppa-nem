@@ -1,4 +1,4 @@
-"""Optimization tab — run simulation or single-day reference optimization."""
+"""Optimisation tab — run simulation or single-day reference optimisation."""
 from __future__ import annotations
 
 import dataclasses
@@ -134,7 +134,7 @@ def _render_nem_period_controls(s) -> tuple[pd.Timestamp, pd.Timestamp, int]:
     with cols[1]:
         if mode == "Calendar month":
             month = st.selectbox(
-                "Month", options=list(range(1, 13)), index=2,  # default March, matches prior behavior
+                "Month", options=list(range(1, 13)), index=2,  # default March, matches prior behaviour
                 format_func=lambda m: _NEM_MONTH_NAMES[m - 1], key="opt_nem_month",
             )
             start_ts = pd.Timestamp(year=year, month=month, day=1)
@@ -172,7 +172,7 @@ def _get_timeseries(scenario):
     if scenario.data_source == "custom_csv":
         upload = state.get_custom_upload()
         if upload is None:
-            # Mirror the multi-year path's error handling (ppa.tabs.optimization
+            # Mirror the multi-year path's error handling (ppa.tabs.optimisation
             # ._run_simulation): don't silently fall through to the NEM reference
             # cache below -- that would run the LP against the
             # wrong data source with no indication anything is amiss.
@@ -199,7 +199,7 @@ def _render_scenario_summary(s) -> None:
         with cols[0]:
             st.markdown("**Portfolio**")
             if s.optimize_capacity:
-                st.markdown("- Mode: **co-optimized sizing** ⚡")
+                st.markdown("- Mode: **co-optimised sizing** ⚡")
                 st.markdown(
                     f"- Max build: wind **{s.max_build_wind_mw:.0f}** / "
                     f"solar **{s.max_build_pv_mw:.0f}** / "
@@ -355,10 +355,10 @@ def _run_simulation(scenario, max_workers: int) -> None:
             f"Unknown data source '{scenario.data_source}' for the simulation runner."
         )
 
-    progress_bar = st.progress(0, text="Starting optimization ...")
+    progress_bar = st.progress(0, text="Starting optimisation ...")
     status_text = st.empty()
 
-    # ── Capacity co-optimization pre-step ─────────────────────────────────────
+    # ── Capacity co-optimisation pre-step ─────────────────────────────────────
     sizing_seconds = None
     if scenario.optimize_capacity:
         from ppa.sizing import (
@@ -383,7 +383,7 @@ def _run_simulation(scenario, max_workers: int) -> None:
         progress_bar.progress(
             0.0,
             text=(
-                f"Sizing portfolio (co-optimizing capacities, {n_sizing_years}-year LP "
+                f"Sizing portfolio (co-optimising capacities, {n_sizing_years}-year LP "
                 f"at {scenario.sizing_resolution_h}h resolution)..."
             ),
         )
@@ -407,7 +407,7 @@ def _run_simulation(scenario, max_workers: int) -> None:
                 f"Capacity sizing LP failed: {sized.status} / {sized.condition}"
             )
         # Keep the sized scenario local to this run: the user's scenario keeps
-        # optimize_capacity=True so re-runs re-size; the optimized fleet is
+        # optimize_capacity=True so re-runs re-size; the optimised fleet is
         # surfaced via state.set_optimized_sizes.
         scenario = apply_sizing(scenario, sized)
         state.set_optimized_sizes(sized)
@@ -645,10 +645,10 @@ def render() -> None:
             _render_sizing_diagnostics()
         _render_results(state.get_multi_year_financial(), s.simulation_years)
 
-    # ── Single-day reference optimization ──────────────────────────────────────
+    # ── Single-day reference optimisation ──────────────────────────────────────
     # st.markdown("---")
     if s.data_source == "custom_csv":
-        _single_day_title = "Single-day reference optimization (custom CSV upload)"
+        _single_day_title = "Single-day reference optimisation (custom CSV upload)"
         _single_day_caption = (
             "Runs the LP over the active **custom CSV upload** (prepared to hourly, "
             "with the uploaded `ts_LoadMW` driving the offtake load directly). Pick "
@@ -656,7 +656,7 @@ def render() -> None:
             "Results, and Analysis tabs."
         )
     else:
-        _single_day_title = "Period reference optimization (NEM data)"
+        _single_day_title = "Period reference optimisation (NEM data)"
         _single_day_caption = (
             f"Runs the LP over the selected NEM plants/prices (region {s.nem_price_region}, "
             f"{s.nem_year}) for any month or custom date range you pick below, at hourly, "
@@ -736,7 +736,7 @@ def render() -> None:
 
                             ts_prep = prepare_timeseries(ts, s)
 
-                            # Capacity co-optimization pre-step (reference period → fast;
+                            # Capacity co-optimisation pre-step (reference period → fast;
                             # optimize_capacities coarsens internally via
                             # scenario.sizing_resolution_h regardless of ts_prep's own
                             # resolution, so it needs no resolution_h argument here).

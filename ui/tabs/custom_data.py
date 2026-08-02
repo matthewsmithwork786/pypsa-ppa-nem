@@ -1,4 +1,4 @@
-"""Custom Data — upload a user-supplied CSV timeseries to drive the optimizer.
+"""Custom Data — upload a user-supplied CSV timeseries to drive the optimiser.
 
 Pure helper functions (no Streamlit calls) live at module level so they're
 independently unit-testable; `render()` wires them into the Streamlit UI,
@@ -93,7 +93,7 @@ def _warnings_for(diag: dict) -> list[tuple[str, str]]:
 def render() -> None:
     st.title("📤 Custom Data")
     st.markdown(
-        "Upload your own timeseries to drive the optimizer instead of the default "
+        "Upload your own timeseries to drive the optimiser instead of the default "
         "NEM plant data. Required columns:\n\n"
         "- `timestamp` — hourly (or finer) datetime\n"
         "- `ts_PVGen`, `ts_WindGen` — capacity factors in **[0, 1]**\n"
@@ -217,7 +217,7 @@ def render() -> None:
                 st.warning(
                     f"Uploaded peak load ({peak_mw:,.0f} MW) exceeds the maximum "
                     f"supported PPA offtake load ({PPALOAD_MW_MAX:,.0f} MW). "
-                    "Clamping to the maximum — the optimization may become "
+                    "Clamping to the maximum — the optimisation may become "
                     "infeasible at some hours if actual load exceeds this cap."
                 )
                 peak_mw = PPALOAD_MW_MAX

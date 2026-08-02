@@ -175,7 +175,7 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
             "Escalate merchant prices over the project life",
             key=esc_key,
             help=(
-                "Leave OFF when the energy inputs come from a multi-year optimization that "
+                "Leave OFF when the energy inputs come from a multi-year optimisation that "
                 "already escalates market prices each year (avoids double-counting price "
                 "growth). Turn ON for a single base-year snapshot. The solar-hour / non-solar "
                 "price inflation rates above only apply when this is ON."
@@ -337,7 +337,7 @@ def render() -> None:
     energy, results_list, multi_year = _energy_source()
     if energy is None:
         st.info(
-            "No energy results yet. Run an optimization in the **Optimization** tab first — "
+            "No energy results yet. Run an optimisation in the **Optimisation** tab first — "
             "its generation, PPA delivery and merchant volumes feed this model.",
             icon="⚙️",
         )

@@ -10,7 +10,7 @@ from ui.charts import make_supply_mix_24h_chart, make_revenue_breakdown_chart
 
 
 def _render_multi_year_overview(fin) -> None:
-    # Effective scenario: after a sizing run this carries the optimized
+    # Effective scenario: after a sizing run this carries the optimised
     # capacities the results were actually produced with, not the slider values.
     s = state.get_effective_scenario()
 
@@ -302,7 +302,7 @@ def render() -> None:
 
     if state.has_multi_year_financial():
         n = len(state.get_multi_year_financial().yearly)
-        mode = f"{n}-year optimization" if n > 1 else "single-year optimization"
+        mode = f"{n}-year optimisation" if n > 1 else "single-year optimisation"
         st.caption(f"Showing results from last run: **{mode}**.")
         _render_multi_year_overview(state.get_multi_year_financial())
 
@@ -317,7 +317,7 @@ def render() -> None:
 
     else:
         st.info(
-            "No results yet. Do **Run optimization** in the **Optimization** tab "
+            "No results yet. Do **Run optimisation** in the **Optimisation** tab "
             "to see lifetime financial results here.",
             icon="⚙️",
         )

@@ -72,7 +72,7 @@ def list_cached_futures_years(cache_dir: Path = NEM_CACHE_DIR) -> list:
 # ── Loader ───────────────────────────────────────────────────────────────────
 
 def load_aer_base_futures(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> pd.DataFrame:
-    """Read + normalize the AER hedge cache parquet for `year`.
+    """Read + normalise the AER hedge cache parquet for `year`.
 
     Normalizes region (strip/upper + alias map), quarter_label (strip),
     product (strip/title), price_aud_mwh (numeric, NaN rows dropped),
