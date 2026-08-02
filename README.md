@@ -133,5 +133,14 @@ All managed by pixi from conda-forge:
 | plotly | Interactive charts |
 | scipy | Financial analysis (IRR via Brent's method) |
 | pypsatopo* | Network topology diagrams (notebook) |
+| tsam* | Optional: typical-day clustering for the capacity-sizing LP (falls back to coarse/full-hourly if absent) |
 
 \* Installed from PyPI via pixi's `[pypi-dependencies]`.
+
+**Optional solver extras:** HiGHS's HiPO interior-point solver needs the separate
+`highspy-extras` wheel (`pip install highspy-extras`; Apache-2.0, HiGHS core is MIT).
+It is not required — the app always solves on the default dual simplex, which the
+sizing benchmarks in `scripts/bench_solver.py` show is fastest for this LP size —
+but it lets you re-run that comparison yourself. Note that `tsam` pins
+`highspy<=1.15.0`, so installing `highspy-extras` (1.15.1) alongside tsam requires
+allowing a newer highspy at runtime; both work in practice.

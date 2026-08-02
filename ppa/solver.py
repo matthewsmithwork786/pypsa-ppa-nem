@@ -18,8 +18,13 @@ def solve(
     scenario: Scenario,
     ts: pd.DataFrame,
     solver_name: str = "highs",
+    solver_options: dict | None = None,
 ) -> tuple[str, str]:
-    """Add custom Linopy constraints and solve the network. Returns (status, condition)."""
+    """Add custom Linopy constraints and solve the network. Returns (status, condition).
+
+    `solver_options` is passed through to `solve_model` (e.g. `{"solver": "ipm"}`
+    or `{"solver": "hipo"}`). Default `{}` keeps the stock dual-simplex HiGHS.
+    """
     s = scenario
 
     # Two-step workflow: create_model() → inject constraints → solve_model()
@@ -65,12 +70,20 @@ def solve(
     # (~1000 → ~735 MB per solve) and faster — matters on the ~1 GB Streamlit
     # Cloud tier. assign_all_duals is left at its default (False): duals are never
     # consumed anywhere in the app, so materialising 300k+ of them is dead work.
-    # Solver algorithm note: parallel interior point ("solver": "ipm") was
-    # benchmarked on the 6-year 3h sizing LP and lost to the default dual
-    # simplex (~180 s vs ~80 s incl. model build), so no sizing-specific
-    # algorithm override is applied.
+    # Solver algorithm note (W15, measured with scripts/bench_solver.py):
+    #   full-year hourly sizing LP (306,611 rows × 122,646 cols, 1-yr synthetic):
+    #     dual simplex       15.9 s   ← fastest
+    #     ipm                26.1 s   (24.6 s without crossover)
+    #     hipo               26.3 s   (25.6 s without crossover)
+    #   tsam typical-days sizing LP (11,771 rows × 4,710 cols, 12 periods):
+    #     dual simplex        1.4 s   ← fastest
+    #     ipm / hipo         ~1.5 s
+    #   Both IPM variants lose, so no sizing-specific algorithm override is
+    #   applied: HiPO (highspy-extras) is left optional, and dispatch solves
+    #   (small, re-solved many times) stay on the default simplex too.
     status, condition = n.optimize.solve_model(
         solver_name=solver_name,
         io_api="direct",
+        **(solver_options or {}),
     )
     return status, condition
