@@ -167,23 +167,65 @@ def test_generator_capital_cost_includes_devex_and_target_irr():
 
 def test_merchant_negative_price_hours_undiscounted():
     """`sizing_merchant_value_share` haircuts positive prices only; negative
-    hours keep their full disincentive so the LP curtails rather than sells."""
+    hours keep their full disincentive so the LP curtails rather than sells.
+
+    Surplus also earns an LGC (U2). The certificate is added at full value in
+    both regimes: the haircut represents capture-price/MLF/curtailment risk in
+    the *energy* market and does not apply to the certificate market.
+    """
     ts = _toy_ts()
-    scn = dataclasses.replace(_toy_scenario(), sizing_merchant_value_share=0.5)
+    scn = dataclasses.replace(
+        _toy_scenario(), sizing_merchant_value_share=0.5, lgc_price_aud_mwh=5.0
+    )
     n = build_network(ts, scn)
     mc = n.generators.dynamic.marginal_cost["Gen_SellToMarket"]
     prices = ts["ts_MktPrice"]
     neg_mask = prices < 0
     assert neg_mask.any(), "test requires negative-price hours in the fixture"
 
-    # Positive-price hours: revenue credited at 50 % of (price - spread).
+    # Positive-price hours: energy credited at 50 % of price, LGC at full value.
     pos = ~neg_mask
-    expected_pos = -(prices[pos] * 0.5 - scn.market_spread)
+    expected_pos = -(prices[pos] * 0.5 + scn.lgc_price_aud_mwh - scn.market_spread)
     np.testing.assert_allclose(mc[pos].to_numpy(), expected_pos.to_numpy(), rtol=1e-9)
 
-    # Negative-price hours: full (un-halved) cost, so selling is never subsidised.
-    expected_neg = -(prices[neg_mask] - scn.market_spread)
+    # Negative-price hours: full (un-halved) energy cost, so selling is never
+    # subsidised -- the LGC credit must not flip that into a subsidy.
+    expected_neg = -(prices[neg_mask] + scn.lgc_price_aud_mwh - scn.market_spread)
     np.testing.assert_allclose(mc[neg_mask].to_numpy(), expected_neg.to_numpy(), rtol=1e-9)
+
+    # The property that matters: deeply negative hours stay a genuine cost to
+    # sell into, LGC notwithstanding.
+    deep = prices < -scn.lgc_price_aud_mwh
+    if deep.any():
+        assert (mc[deep] > 0).all(), (
+            "selling into deeply negative prices must remain costly even with "
+            "the LGC credit"
+        )
+
+
+def test_lgc_credited_on_surplus_not_on_delivery():
+    """LGC revenue attaches to market sales only.
+
+    The PPA is bundled, so certificates on delivered MWh transfer to the
+    offtaker inside `ppa_price`. Crediting them on the offtake link as well
+    would double-count the tariff.
+    """
+    ts = _toy_ts()
+    base = dataclasses.replace(_toy_scenario(), lgc_price_aud_mwh=0.0)
+    with_lgc = dataclasses.replace(base, lgc_price_aud_mwh=30.0)
+
+    n0, n1 = build_network(ts, base), build_network(ts, with_lgc)
+
+    # Market-sell generator gains exactly the LGC price in revenue per MWh.
+    mc0 = n0.generators.dynamic.marginal_cost["Gen_SellToMarket"]
+    mc1 = n1.generators.dynamic.marginal_cost["Gen_SellToMarket"]
+    np.testing.assert_allclose((mc0 - mc1).to_numpy(), 30.0, rtol=1e-9)
+
+    # The PPA offtake link is untouched -- no certificate revenue on delivery.
+    assert (
+        float(n0.links.static.marginal_cost["IPPGen_to_PPAOfftake"])
+        == float(n1.links.static.marginal_cost["IPPGen_to_PPAOfftake"])
+    )
 
 
 # ── Acceptance: the toy LP must build MORE than the (disabled) slider values ─
@@ -257,3 +299,67 @@ def test_sizing_diagnostics_reports_costs_and_binding():
     assert diag["avg_spot"] is not None
     # Binding flags: with max_build_wind_mw=2000 and cheap capex the wind cap binds.
     assert any(r["Max-build cap binding"] == "Yes" for r in diag["tech_rows"])
+
+
+# ── U3: hard minimum-delivery constraint ─────────────────────────────────────
+
+def test_hard_min_delivery_raises_delivery_share():
+    """With the constraint on, the sizing LP must actually meet the SLA.
+
+    Off, the delivery requirement is only a price signal — the LP compares the
+    penalty against the cost of building and buys out of the SLA when that is
+    cheaper. On, it becomes binding.
+    """
+    ts = _toy_ts()
+    # Expensive build so the penalty is the cheaper escape valve, which is the
+    # regime where the constraint changes the answer.
+    scn = dataclasses.replace(
+        _toy_scenario(),
+        wind_capex_per_kw=6000.0,
+        pv_capex_per_kw=4000.0,
+        required_delivery_share=0.9,
+        enable_shortfall=True,
+    )
+
+    soft = optimise_capacities(ts, dataclasses.replace(scn, enforce_min_delivery=False))
+    hard = optimise_capacities(ts, dataclasses.replace(scn, enforce_min_delivery=True))
+
+    assert soft.status == "ok" and hard.status == "ok"
+    assert hard.sizing_delivery_share >= 0.9 - 1e-6, (
+        f"hard constraint must reach the required share, got "
+        f"{hard.sizing_delivery_share:.3%}"
+    )
+    assert hard.sizing_delivery_share > soft.sizing_delivery_share
+    assert (hard.onsw_mw + hard.pv_mw) > (soft.onsw_mw + soft.pv_mw), (
+        "meeting the SLA must require a larger build"
+    )
+
+
+def test_hard_min_delivery_infeasible_reports_why():
+    """An unreachable SLA must say which limit is blocking, not just fail."""
+    ts = _toy_ts()
+    scn = dataclasses.replace(
+        _toy_scenario(),
+        enforce_min_delivery=True,
+        required_delivery_share=0.9,
+        max_build_wind_mw=1.0,      # nowhere near enough to serve the load
+        max_build_pv_mw=1.0,
+        max_build_bess_mw=0.0,
+        enable_market_buy=False,
+    )
+    sized = optimise_capacities(ts, scn)
+    assert sized.status != "ok"
+    assert "minimum-delivery" in sized.condition, (
+        f"infeasibility should name the blocking constraint, got: {sized.condition!r}"
+    )
+
+
+def test_hard_min_delivery_is_sizing_only():
+    """The constraint must not appear in a fixed-capacity dispatch solve."""
+    ts = _toy_ts()
+    scn = dataclasses.replace(
+        _toy_scenario(), optimise_capacity=False, enforce_min_delivery=True
+    )
+    n = build_network(ts, scn)
+    solve(n, scn, ts)
+    assert not any("MinDelivery" in str(name) for name in n.model.constraints)

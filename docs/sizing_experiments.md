@@ -179,3 +179,114 @@ now accounts for.
 
 Covered by `tests/test_multi_year_memory.py` (7 tests), including a simulated
 `BrokenProcessPool` that asserts every year is still solved via the serial fallback.
+
+---
+
+## E4 — Are the low capacity factors a trace-model error? (No.)
+
+**Question raised:** Collector 28.4% and Sunraysia 20.0% look low. Is the generation
+trace model wrong?
+
+**Answer: no defect.** `load_scada -> capacity_factor_series -> to_hourly` was read and
+checked against raw SCADA. `capacity_factor_series` is `(scada / capacity).clip(0, 1)` and
+`to_hourly` is a resample mean onto a canonical index — both correct, and the 5-min and
+hourly means agree exactly. Data quality is clean: 0.000% NaN across all 184 cached plants,
+negligible negative values, and 105,119 of 105,120 expected intervals.
+
+### 2025 fleet capacity factors (cached NEM plants, non-operational plants excluded)
+
+| | n | capacity-weighted | min | p25 | median | p75 | max |
+|---|---|---|---|---|---|---|---|
+| **Wind** | 89 | **27.9%** | 6.4% | 24.6% | 30.6% | 35.0% | 40.5% |
+| **Solar** | 91 | **16.8%** | 6.1% | 13.4% | 16.3% | 19.2% | 26.8% |
+
+Four plants were excluded as non-operational/commissioning (CF < 5%): `CRWARP1`, `CUSF1`,
+`GOESF1`, `GUSF1`. `GOESF1` in particular is 348.6 MW registered with a 0.04% CF.
+
+### Why the numbers look low
+
+1. **These are AC CUFs** — output against *registered AC* capacity, not DC panel rating.
+   Utility PV is routinely quoted on DC, which is materially higher. Solar daylight-only
+   (07:00-17:00) CF has a median of **35.8%**, which is the more intuitive figure.
+2. **Curtailment is widespread and real.** 62 of 91 solar plants show >8% zero-output
+   intervals *during daylight*. Sunraysia is a heavy case (14.9% daylight zeros, West
+   Murray constraints); Moree (1.6%) and Western Downs (2.3%) are not.
+3. **Curtailment is contract-dependent.** Whether a plant curtails into negative prices
+   depends on its own PPA — some are incentivised to, some are not. So a uniform
+   "unconstrained uplift" factor would be wrong.
+
+> **Method note / correction.** An earlier pass in this session tried to infer curtailment
+> two ways, and both were wrong. (a) Comparing CF in negative-price hours against
+> positive-price hours showed *higher* output when prices are negative — but that is
+> confounded, because high solar output is what *causes* NEM midday negative prices.
+> (b) A "p95 CF by time-of-day" clear-sky proxy implied 40-53% curtailment, but that
+> proxy mostly measures seasonal and cloud variation, not curtailment. Neither number
+> should be used. The daylight-zero-share metric above is the defensible one.
+
+**Consequence for U4.** The right data source is AEMO's `DISPATCHLOAD.AVAILABILITY`
+(the UIGF for semi-scheduled units) — physical unconstrained potential, independent of any
+plant's contractual curtailment incentives. It is reachable via `nemosis`, the same path
+`scripts/fetch_nem_scada_prices.py` already uses for `DISPATCH_UNIT_SCADA`. Do not
+substitute a heuristic uplift.
+
+**Consequence for plant choice.** Sunraysia at 20.0% is the **79th percentile** of solar —
+it is above the fleet median. The whole solar fleet reads low; Sunraysia is not an outlier.
+Collector at 28.4% is the 36th percentile of wind, so there is real headroom there.
+
+---
+
+## E5 — U5: capex benchmarked against CSIRO GenCost 2025-26
+
+**Source:** `GenCost_2025-26_Final_Report_20260715.pdf` (CSIRO, 15 July 2026), Apx Table
+B.1 (generation, "Current policies" scenario, 2025 row) and Apx Table B.5 (storage,
+4-hour, total cost basis). Real 2025 A$.
+
+| | repo (before) | **GenCost 2025-26** | change |
+|---|---|---|---|
+| Onshore wind | 2900 A$/kW | **3248 A$/kW** | **+12%** |
+| Large-scale solar PV | 1718.6 A$/kW | **1621 A$/kW** | −6% |
+| BESS (4 h) | 276.5 A$/kWh | **385 A$/kWh** | **+39%** |
+
+**Basis check — no double-count.** GenCost p.96 lists "Connection costs" and "Marginal
+loss factors" among the parameters it explicitly **excludes**, and p.97 confirms the
+figures are *overnight* capital costs (interest during construction excluded). The repo
+charges connection separately (`connection_cost_aud_mw` in the LP,
+`onsw/pv/bess_connection_cost` in the financial model) and applies construction timing in
+the financial model, so both are compatible with GenCost's basis.
+
+**Finding: U5 makes the under-build worse, not better.** The plan hypothesised that the
+repo's capex was above benchmark and that correcting it would help. The opposite is true
+for two of three technologies — wind is 12% cheap and BESS 39% cheap in the repo. Adopting
+GenCost lowers the baseline sized fleet from 228 MW to 189 MW and drops BESS to zero.
+
+---
+
+## E6 — Combined effect of U1 + U3 + U5 (+ U2)
+
+Corporate PPA, 1-year coarse-3h sizing LP, GenCost capex applied throughout.
+
+| variant | wind | PV | BESS | total | LP delivery |
+|---|---|---|---|---|---|
+| GenCost capex, original plants | 64 | 126 | 0 | 189 | 47.1% |
+| + better NSW1 plants (`GULLRWF2` + `MOREESF1`) | 90 | 116 | 10 | 216 | **68.3%** |
+| + hard 90% SLA (`enforce_min_delivery`) | 103 | 243 | 155 | **501** | **90.0%** |
+
+### Findings
+
+1. **Plant selection is worth ~21 pp of delivery on its own** (47.1% → 68.3%) at almost no
+   extra capacity — a better site converts the same MW into far more delivered energy.
+2. **The hard SLA constraint does what the penalty price could not.** Delivery goes to
+   exactly the contracted 90%, and the fleet grows to 501 MW. Under the price-based
+   formulation no merchant share reached even 66% (E1).
+3. **Better plants make the SLA much cheaper to meet.** On the pre-GenCost capex with the
+   original plants, the hard constraint needed 773 MW (161/364/248) to reach 90%. With
+   better plants and *more expensive* GenCost capex it needs 501 MW — a 35% smaller fleet
+   despite higher unit costs.
+
+### Verdict
+
+The under-build is now explained and addressable without weakening the model: it was a
+combination of poor sites and a delivery requirement that was only ever a price signal.
+`enforce_min_delivery` is off by default (it changes the contract's meaning), but it is the
+right setting whenever the penalty is cheaper than building — which, at GenCost capex, it
+almost always is.

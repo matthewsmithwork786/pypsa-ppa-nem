@@ -70,6 +70,29 @@ class Scenario:
     sizing_method: str = "full_hourly"
     # Number of typical periods for the tsam method (4-36).
     sizing_n_periods: int = 12
+    # Green-certificate (LGC) revenue on SURPLUS generation only, A$/MWh.
+    #
+    # The PPA is treated as bundled: certificates attached to contracted energy
+    # transfer to the offtaker inside `ppa_price`, so crediting LGCs on
+    # delivered MWh would double-count the tariff. Only energy sold to market
+    # carries a separately monetisable certificate. This mirrors
+    # ProjectFinanceInputs.lgc_price ("green-certificate revenue on excess") and
+    # exists so the sizing LP and the financial model score the same revenue
+    # stack — previously the LP credited no certificate revenue at all.
+    #
+    # The 5.0 default is inherited from ProjectFinanceInputs, NOT a market
+    # quote. Set it from current LGC market data before relying on it; the RET
+    # winds down to 2030, so the forward curve matters more than spot here.
+    lgc_price_aud_mwh: float = 5.0
+    # Enforce `required_delivery_share` as a HARD constraint in the sizing LP
+    # rather than leaving it to the penalty price. Off by default (the penalty/
+    # shortfall merit order is the original design), but essential whenever the
+    # penalty is cheaper than building: at the Corporate PPA defaults penalty
+    # energy is A$126/MWh against a wind LCOE of A$162/MWh, so the LP buys out
+    # of the SLA and delivery settles at 50-65% (docs/sizing_experiments.md E1).
+    # May make the LP infeasible when the build caps bind — that is a real
+    # answer ("this SLA is unreachable within these caps"), not a failure.
+    enforce_min_delivery: bool = False
     # Merchant sales earn revenue in the sizing LP at this fraction of historic
     # spot (a haircut for capture-price cannibalisation, MLF and curtailment).
     # Applied to positive prices only — negative hours keep their full
@@ -129,9 +152,19 @@ class Scenario:
     nem_year: int = 2025
 
     # Financial — Australian NEM benchmarks (AUD)
-    wind_capex_per_kw: float = 2900.0   # A$/kW, NEM onshore wind
-    pv_capex_per_kw: float = 1718.6     # A$/kW, NEM utility-scale PV
-    bess_capex_per_kwh: float = 276.5   # A$/kWh, NEM BESS
+    # Capital costs from CSIRO GenCost 2025-26 Final Report (15 July 2026),
+    # Apx Table B.1 (generation) and Apx Table B.5 (storage), "Current policies"
+    # scenario, 2025 row, real 2025 A$.
+    #
+    # Basis check (GenCost p.96-97): these are *overnight* capital costs, and
+    # GenCost explicitly EXCLUDES connection costs and marginal loss factors.
+    # So charging `connection_cost_aud_mw` separately in the sizing LP and
+    # `onsw/pv/bess_connection_cost` in the financial model is correct and does
+    # not double-count. Overnight also means interest during construction is
+    # excluded, which the financial model applies via its own build schedule.
+    wind_capex_per_kw: float = 3248.0   # A$/kW, GenCost 2025-26 T.B1 "Wind" 2025
+    pv_capex_per_kw: float = 1621.0     # A$/kW, GenCost 2025-26 T.B1 "Large scale solar PV" 2025
+    bess_capex_per_kwh: float = 385.0   # A$/kWh, GenCost 2025-26 T.B5 4-hour total (battery 265 + BOP 120)
     opex_rate: float = 0.02
     devex_pct_of_capex: float = 0.10    # development cost as a share of build capex
     project_life_yrs: int = 30
@@ -372,6 +405,13 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
             errors.append("Grid connection limit must be ≥ 0 MW (blank = unlimited).")
         if not (0.0 <= s.sizing_merchant_value_share <= 1.0):
             errors.append("Merchant value share must be between 0 and 1.")
+        if s.enforce_min_delivery and not (0.0 < s.required_delivery_share <= 1.0):
+            errors.append(
+                "A hard minimum-delivery constraint needs a required delivery share "
+                "in (0, 1]."
+            )
+    if s.lgc_price_aud_mwh < 0:
+        errors.append("LGC price must be ≥ 0 A$/MWh.")
     else:
         if s.onsw_mw < 0:
             errors.append("Onshore wind capacity must be ≥ 0 MW.")

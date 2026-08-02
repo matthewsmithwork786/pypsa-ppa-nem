@@ -262,6 +262,35 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
     else:
         wind_link_mw = pvbess_link_mw = sell_link_mw = 0.0
 
+    def _infeasibility_hint(scenario: Scenario, condition: str) -> str:
+        """Explain the most likely cause of an infeasible sizing LP.
+
+        The hard minimum-delivery constraint is by far the most common way to
+        make this problem infeasible, and an unexplained "infeasible" is a
+        dead end for the user, so name the constraint and what to change.
+        """
+        if "infeasible" not in str(condition).lower():
+            return ""
+        if scenario.enforce_min_delivery:
+            return (
+                f" The hard minimum-delivery constraint requires "
+                f"{scenario.required_delivery_share:.0%} of load to be delivered, "
+                f"which cannot be met within the current build caps (wind "
+                f"{scenario.max_build_wind_mw:.0f} / PV {scenario.max_build_pv_mw:.0f} / "
+                f"BESS {scenario.max_build_bess_mw:.0f} MW"
+                + (
+                    f", grid connection {scenario.grid_connection_max_mw:.0f} MW"
+                    if scenario.grid_connection_max_mw != float("inf") else ""
+                )
+                + "). Raise the caps, lower the required delivery share, allow more "
+                "market buy, or turn the hard constraint off to let the penalty "
+                "price decide."
+            )
+        return (
+            " Check the build caps, the grid connection limit and the market-buy "
+            "share — one of them is too tight to serve the load."
+        )
+
     def _at_cap(opt: float, cap: float, tol: float = 1e-6) -> bool:
         if cap is None or cap == float("inf"):
             return False
@@ -289,7 +318,7 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         bess_mw=bess_mw,
         bess_mwh=bess_mwh,
         status=status,
-        condition=condition,
+        condition=condition + _infeasibility_hint(scenario, condition),
         sizing_years_used=n_years,
         horizon_clamped=n_years < scenario.simulation_years,
         resolution_h=resolution_h,

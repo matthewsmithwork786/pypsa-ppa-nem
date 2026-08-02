@@ -164,6 +164,23 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 "Max BESS build (MW)", 0.0, 10_000.0, float(initial.max_build_bess_mw),
                 50.0, key="sf_max_build_bess",
             )
+            enforce_min_delivery = st.checkbox(
+                f"Enforce the {initial.required_delivery_share:.0%} delivery share as a "
+                "hard constraint",
+                value=bool(initial.enforce_min_delivery),
+                key="sf_enforce_min_delivery",
+                help=(
+                    "By default the delivery requirement is only a *price* signal: the "
+                    "sizing LP weighs the penalty (PPA price x penalty multiplier) "
+                    "against the cost of building, and buys its way out of the SLA "
+                    "whenever the penalty is cheaper. At current NEM costs it usually "
+                    "is — penalty A$126/MWh against a wind LCOE near A$162/MWh — so "
+                    "sized portfolios settle around 50-65% delivery. Tick this to make "
+                    "the contractual share binding, so the LP must build enough to meet "
+                    "it. If no portfolio within the build caps can, the LP reports "
+                    "infeasible and says which limit is blocking."
+                ),
+            )
             _method_labels = {
                 "full_hourly": "Full year hourly",
                 "coarse": "Coarse resolution (legacy)",
@@ -257,6 +274,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             sizing_n_periods = initial.sizing_n_periods
             grid_connection = "" if initial.grid_connection_max_mw == float("inf") else str(initial.grid_connection_max_mw)
             merchant_share = float(initial.sizing_merchant_value_share)
+            enforce_min_delivery = bool(initial.enforce_min_delivery)
 
         cols = st.columns(4)
         onsw_mw = cols[0].slider("Onshore wind (MW)", 0, max_cap_per_technology, int(initial.onsw_mw), step=10, key="sf_onsw_mw",
@@ -556,6 +574,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             float("inf") if not str(grid_connection).strip() else float(str(grid_connection).strip())
         ),
         sizing_merchant_value_share=float(merchant_share),
+        enforce_min_delivery=bool(enforce_min_delivery),
         include_bess=include_bess,
         enable_market_buy=enable_market_buy,
         enable_market_sell=enable_market_sell,

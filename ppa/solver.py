@@ -56,6 +56,30 @@ def solve(
             name=f"AllowedShortfall_Limit{suffix}",
         )
 
+        # Constraint 3 — hard minimum PPA delivery (sizing only, opt-in).
+        #
+        # Without this the delivery requirement is only a *price* signal: the LP
+        # compares the penalty (ppa_price x pen_mult) against the cost of
+        # building, and where the penalty is cheaper it rationally buys its way
+        # out of the SLA. On the Corporate PPA defaults the penalty is
+        # A$126/MWh against a wind LCOE of A$162, so delivery settles around
+        # 50-65% however much merchant value is credited (see
+        # docs/sizing_experiments.md E1).
+        #
+        # Enabling this makes the contractual share a genuine constraint, so the
+        # LP must build (or buy, within market_buy_share) enough to meet it. It
+        # can render the problem infeasible when the build caps bind — that is
+        # informative, not a failure, and `solve` reports it as such.
+        #
+        # Matches ppa.results.fulfilled_share exactly: delivered MWh is the flow
+        # on IPPGen_to_PPAOfftake (efficiency 1.0), over total load.
+        if s.optimise_capacity and s.enforce_min_delivery:
+            delivered_expr = link_p.loc[snaps, "IPPGen_to_PPAOfftake"].sum()
+            m.add_constraints(
+                delivered_expr >= s.required_delivery_share * period_load_mwh,
+                name=f"MinDelivery_Limit{suffix}",
+            )
+
         # Constraint 2 — market buy cap relative to PPA delivery (only when enabled)
         if s.enable_market_buy and s.market_buy_share > 0:
             buy_expr = gen_p.loc[snaps, "Gen_BuyFromMarket"].sum()

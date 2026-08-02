@@ -150,13 +150,20 @@ def build_network(
     # them (plan W12b). The old code zeroed merchant revenue entirely, which made
     # the sizing LP optimise a strictly poorer objective than the IRR later
     # measures and caused systematic under-build.
+    # Surplus energy also carries a green certificate (plan U2). The PPA is
+    # bundled, so certificates on *delivered* MWh transfer to the offtaker
+    # inside ppa_price — only market sales monetise one separately, which is
+    # why the credit sits here and not on the generators. The LGC price is NOT
+    # haircut by sizing_merchant_value_share: the haircut represents capture-
+    # price/MLF/curtailment risk in the *energy* market, which does not apply
+    # to the certificate market.
     if sizing:
         merch_price = ts["ts_MktPrice"].where(
             ts["ts_MktPrice"] <= 0, ts["ts_MktPrice"] * s.sizing_merchant_value_share
         )
-        sell_marginal_cost = -(merch_price - s.market_spread)
+        sell_marginal_cost = -(merch_price + s.lgc_price_aud_mwh - s.market_spread)
     else:
-        sell_marginal_cost = -(ts["ts_MktPrice"] - s.market_spread)
+        sell_marginal_cost = -(ts["ts_MktPrice"] + s.lgc_price_aud_mwh - s.market_spread)
     n.add(
         "Generator",
         "Gen_SellToMarket",
