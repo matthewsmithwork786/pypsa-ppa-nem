@@ -34,6 +34,21 @@ def _sizing_method_label(sized) -> str:
     return labels.get(getattr(sized, "sizing_method", "coarse"), "sizing LP")
 
 
+def _sizing_method_caption(scenario) -> str:
+    """Describe the sizing representation actually in use.
+
+    The status line previously reported `sizing_resolution_h` regardless of
+    method, so a tsam run announced "3h resolution" -- the legacy coarse
+    setting, which it was not using.
+    """
+    method = getattr(scenario, "sizing_method", "tsam")
+    if method == "tsam":
+        return f"{scenario.sizing_n_periods} typical weeks"
+    if method == "full_hourly":
+        return "full hourly"
+    return f"{scenario.sizing_resolution_h}h blocks"
+
+
 def _render_sizing_diagnostics() -> None:
     """Sizing diagnostics expander (plan W12e): per-technology economics and
     which caps bind, so "strange sizing results" become an explainable answer."""
@@ -390,8 +405,8 @@ def _run_simulation(scenario, max_workers: int) -> None:
         progress_bar.progress(
             0.0,
             text=(
-                f"Sizing portfolio (co-optimising capacities, {n_sizing_years}-year LP "
-                f"at {scenario.sizing_resolution_h}h resolution)..."
+                f"Sizing portfolio (co-optimising capacities, {n_sizing_years}-year LP, "
+                f"{_sizing_method_caption(scenario)})..."
             ),
         )
         sizing_ts = build_sizing_timeseries(

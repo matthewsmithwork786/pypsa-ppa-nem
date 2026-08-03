@@ -7,7 +7,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-from ui import progress_strip
 from ui.tabs import (
     welcome,
     introduction,
@@ -35,8 +34,6 @@ with st.popover("Disclaimer", width="stretch", icon="⚠️"):
         **Open Energy Transition** is not liable to third parties for the completeness and accuracy of the information provided therein.
         """
     )
-
-progress_strip.render()
 
 # Six tabs, ordered by the ACTUAL dependency: plants must be chosen before a
 # scenario means anything, so Get Data comes first. Custom Data folded into

@@ -121,6 +121,26 @@ def _default_aer_seed_for_scenario(scenario, cache_dir=None):
 
 def render_scenario_form(initial: Scenario) -> Scenario:
     """Render all scenario controls and return a new Scenario from widget values."""
+    # The single most consequential choice in the app, so it is asked first and
+    # in plain language rather than buried among the feature toggles. Whether
+    # the optimiser sizes the fleet decides what every control below means.
+    st.subheader("Portfolio capacity")
+    _capacity_mode = st.radio(
+        "How should the fleet be sized?",
+        ["🔍 Find optimal capacity", "✏️ Set capacity manually"],
+        index=0 if initial.optimise_capacity else 1,
+        key="sf_capacity_mode",
+        horizontal=True,
+        label_visibility="collapsed",
+        help=(
+            "**Find optimal capacity** lets the optimiser choose the least-cost "
+            "wind, solar and storage mix that serves the PPA, within the build "
+            "limits you set. **Set capacity manually** simulates a fleet you "
+            "specify."
+        ),
+    )
+    optimise_capacity = _capacity_mode.startswith("🔍")
+
     st.subheader("Feature toggles")
 
     cols = st.columns(4)
@@ -133,23 +153,11 @@ def render_scenario_form(initial: Scenario) -> Scenario:
     cols = st.columns(4)
     enable_penalty = cols[0].toggle("Enable penalty regime", value=initial.enable_penalty, key="sf_enable_penalty")
     run_financial_analysis = cols[1].toggle("Run financial analysis", value=initial.run_financial_analysis, key="sf_run_financial_analysis")
-    optimise_capacity = cols[2].toggle(
-                "Co-optimise capacities & dispatch",
-        value=initial.optimise_capacity,
-        key="sf_optimise_capacity",
-        help=(
-            "Let PyPSA size wind, solar and BESS together with dispatch "
-            "(least-cost portfolio to serve the PPA). The fixed MW values below "
-            "are ignored; set per-technology max build limits instead."
-        ),
-    )
 
     with st.expander("Portfolio assets", expanded=True):
         if optimise_capacity:
-            st.info(
-                "⚡ **Capacity co-optimisation is ON** — the sliders below are ignored. "
-                "The optimiser sizes each technology up to its max build limit; "
-                "BESS duration is fixed at the MWh/MW ratio below."
+            st.caption(
+                "The optimiser sizes each technology up to the limits below."
             )
             cols = st.columns(4)
             max_build_wind_mw = cols[0].number_input(
