@@ -78,41 +78,40 @@ def test_duid_from_tooltip_roundtrips_new_format():
 def test_no_stale_scada_labels_in_map_ui():
     """User-facing map text must say UIGF, not SCADA.
 
-    The shipped cache carries UIGF only; SCADA labels would name a data source
-    the app no longer has. The explainer deliberately mentions SCADA to draw the
-    contrast, so it is excluded.
+    The shipped cache carries UIGF only, so a SCADA label names a data source
+    the app no longer has. Real code identifiers and script names are exempt:
+    scada_summary is a function, and fetch_nem_scada_prices.py still fetches
+    the regional PRICE series, which has nothing to do with generation.
     """
     import re
     from pathlib import Path
 
     src = Path(__file__).resolve().parents[1] / "ui" / "tabs" / "nem_map.py"
-    text = src.read_text()
-    explainer = re.search(r'UIGF_EXPLAINER = """.*?"""', text, re.S)
-    assert explainer, "UIGF_EXPLAINER should exist"
-    body = text.replace(explainer.group(0), "")
-
-    # Real code identifiers and script names are not user-facing terminology:
-    # scada_summary is a function, and fetch_nem_scada_prices.py still fetches
-    # the regional PRICE series, which has nothing to do with generation.
     allowed = ("no_scada", "n_scada_cached", "scada_summary", "fetch_nem_scada_prices")
     hits = [
         f"{i}: {ln.strip()}"
-        for i, ln in enumerate(body.splitlines(), 1)
+        for i, ln in enumerate(src.read_text().splitlines(), 1)
         if re.search(r"scada", ln, re.I) and not any(a in ln for a in allowed)
     ]
-    assert not hits, "stale SCADA wording outside the explainer:\n" + "\n".join(hits)
+    assert not hits, "stale SCADA wording in user-facing map text:\n" + "\n".join(hits)
 
 
-def test_uigf_explainer_covers_the_essentials():
-    """The ? popup has to answer 'what is this and can I trust it'."""
+def test_uigf_explainer_states_what_it_is_and_where_it_comes_from():
+    """Deliberately one factual line, not an essay.
+
+    It has to answer "what is this" at the point of confusion: the expansion of
+    the acronym, that it is AEMO's, the table it is recorded in, the interval,
+    and that it precedes network constraints.
+    """
     from ui.tabs.nem_map import UIGF_EXPLAINER
 
     lower = UIGF_EXPLAINER.lower()
     assert "unconstrained intermittent generation forecast" in lower
-    assert "dispatchload" in lower          # where it comes from
-    assert "forecast, not a measurement" in lower  # the honest caveat
-    assert "71%" in UIGF_EXPLAINER          # why no flat uplift works
-    assert "ac" in lower                    # capacity-factor basis
+    assert "aemo" in lower
+    assert "dispatchload" in lower
+    assert "5-minute" in lower
+    assert "before any network constraint" in lower
+    assert len(UIGF_EXPLAINER) < 400, "explainer should stay a single line"
 
 
 def test_plants_without_uigf_are_not_simulation_ready():

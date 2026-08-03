@@ -32,40 +32,12 @@ STATUS_LABELS = {
     "unchecked": "Not checked",
 }
 
-UIGF_EXPLAINER = """
-**UIGF — Unconstrained Intermittent Generation Forecast**
-
-AEMO's estimate, for every 5-minute dispatch interval, of how much a wind or solar
-farm **could** have produced given the weather at the time — *before* any network
-constraint is applied. It is published per unit in AEMO's `DISPATCHLOAD` table and
-is the ceiling AEMO uses when setting that unit's dispatch target.
-
-**Why not just use metered output (SCADA)?**
-
-SCADA is what the plant actually *sent out*, which is already reduced twice over:
-by network constraints, and by whatever curtailment that plant's own offtake
-contract gave it a reason to do. Using it to size a **new** project would charge
-that curtailment twice — once baked into the profile, and again when the optimiser
-makes its own curtailment decisions.
-
-It also cannot be corrected with a rule of thumb. Measured across the 2025 cache,
-curtailment ranges from about **0% to 71%** depending on where a plant sits in the
-network and what contract it holds.
-
-| 2025 fleet, capacity-weighted | metered (SCADA) | **UIGF** |
-|---|---|---|
-| Wind | 27.7% | **30.7%** |
-| Solar | 16.9% | **20.4%** |
-
-**How much should you trust it?** It is a forecast, not a measurement. Checked
-against actual output in intervals where nothing was binding, the median
-actual/forecast ratio is **1.000–1.004** — unbiased — with the dispersion you would
-expect of a 5-minute cloud-cover forecast. The caveat is that this check cannot
-reach heavily curtailed plants, because there is no actual output to compare
-against in exactly the intervals that matter most.
-
-*Capacity factors shown here are AC, against registered capacity.*
-"""
+UIGF_EXPLAINER = (
+    "**UIGF — Unconstrained Intermittent Generation Forecast.** AEMO's estimate, "
+    "recorded per semi-scheduled unit in the `DISPATCHLOAD` table for every "
+    "5-minute dispatch interval, of the output that unit could produce given the "
+    "prevailing weather, before any network constraint is applied."
+)
 
 
 # ── Pure helpers (no Streamlit) ──────────────────────────────────────────────

@@ -482,53 +482,6 @@ def _run_simulation(scenario, max_workers: int) -> None:
 
 # ── multi-year results display ────────────────────────────────────────────────
 
-def _render_economics_verdict(fin) -> None:
-    """Say in one line WHY the returns are what they are.
-
-    A user who sees a 4.9% IRR and an LCOE above the tariff has no way to tell
-    whether the model is broken or the project simply loses money. The sizing
-    diagnostics explain this, but they live in an expander on another tab. The
-    comparison that decides it -- cost per MWh against what the contract pays --
-    belongs next to the number it explains.
-    """
-    scn = state.get_scenario() if state.has_scenario() else None
-    if scn is None or fin.lcoe != fin.lcoe:
-        return
-
-    tariff = float(scn.ppa_price)
-    lcoe = float(fin.lcoe)
-    if tariff <= 0:
-        return
-    gap = (lcoe - tariff) / tariff
-
-    penalty = tariff * float(scn.pen_mult)
-    penalty_note = (
-        f" Penalty energy costs A${penalty:,.0f}/MWh, which is **cheaper than "
-        f"building**, so the optimiser will under-deliver rather than build to "
-        f"the {scn.required_delivery_share:.0%} obligation unless you tick "
-        f"*Enforce delivery* in Advanced sizing settings."
-        if penalty < lcoe else ""
-    )
-
-    if gap > 0.02:
-        st.warning(
-            f"**The portfolio costs more per MWh than the PPA pays.** "
-            f"LCOE A${lcoe:,.1f}/MWh vs a tariff of A${tariff:,.0f}/MWh "
-            f"(**{gap:+.0%}**). That gap, not a modelling error, is why the IRR "
-            f"sits below the {scn.target_irr:.0%} target." + penalty_note
-        )
-    elif gap > -0.10:
-        st.info(
-            f"LCOE A${lcoe:,.1f}/MWh against a tariff of A${tariff:,.0f}/MWh "
-            f"({gap:+.0%}) — the project is marginal at these assumptions."
-        )
-    else:
-        st.success(
-            f"LCOE A${lcoe:,.1f}/MWh sits **{-gap:.0%} below** the "
-            f"A${tariff:,.0f}/MWh tariff, which is what carries the returns."
-        )
-
-
 def _render_results(fin, n_years: int) -> None:
     with st.expander("Optimisation results", expanded=True):
         cols = st.columns(5)
@@ -540,8 +493,6 @@ def _render_results(fin, n_years: int) -> None:
         cols[2].metric("LCOE", lcoe_str)
         cols[3].metric("Simple Payback", payback_str)
         cols[4].metric("Lifetime Net Revenue", f"A${fin.total_lifetime_revenue/1e6:.1f}M")
-
-        _render_economics_verdict(fin)
 
         if n_years == 1:
             y = fin.yearly[0]
