@@ -60,15 +60,18 @@ class Scenario:
     # Sizing representation: "full_hourly" (exact hourly, default), "tsam"
     # (typical days) or "coarse" (legacy block-averaged resolution).
     #
-    # Default is the exact hourly LP. tsam is ~85x faster (1.6 s vs 137 s) and
-    # is a reasonable screening tool, but it carries ordinary clustering error
-    # in both generation (about +-5%) and storage (207 vs 299 MW of BESS on the
-    # Corporate PPA under a hard SLA). Use validate_sizing_representation() to
-    # measure the error for a given scenario before relying on a tsam result.
+    # Typical weeks (tsam) is the default: 11x faster than the exact hourly LP
+    # (18 s vs 200 s), lands the fleet within ~10% and the BESS within 3%
+    # (docs/sizing_experiments.md E11), and -- decisively for the deployed app --
+    # the exact LP peaks at ~1,143 MB, which does not fit a 1 GB container.
     #
-    # It formerly sized storage to exactly zero -- a units error in the storage
-    # timestep, not a clustering limit; see docs/sizing_experiments.md E9.
-    sizing_method: str = "full_hourly"
+    # It was briefly defaulted to full_hourly while clustered sizing was sizing
+    # storage to ZERO. That turned out to be a units bug (the occurrence count
+    # was being used as the storage timestep) rather than a clustering limit,
+    # and is fixed. Use validate_sizing_representation() to check the error for
+    # a specific scenario, or switch to Full year hourly locally where memory
+    # allows.
+    sizing_method: str = "tsam"
     # Number of typical periods for the tsam method. Periods are WEEKS (168 h),
     # not days -- measured against the exact LP, 16 typical weeks with mean
     # representation lands the fleet within ~10% and the BESS within 4%, where
