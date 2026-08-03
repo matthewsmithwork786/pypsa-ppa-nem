@@ -181,70 +181,71 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                     "infeasible and says which limit is blocking."
                 ),
             )
-            _method_labels = {
-                "full_hourly": "Full year hourly",
-                "coarse": "Coarse resolution (legacy)",
-                "tsam": "Typical weeks (tsam)",
-            }
-            _method_idx = list(_method_labels).index(
-                initial.sizing_method if initial.sizing_method in _method_labels
-                else "full_hourly"
-            )
-            sizing_method = st.radio(
-                "Sizing representation",
-                list(_method_labels.values()),
-                index=_method_idx,
-                key="sf_sizing_method",
-                help=(
-                    "How the sizing LP represents the year. **Full year hourly** is "
-                    "exact and the default, but slowest. **Coarse resolution** "
-                    "block-averages to the legacy 1-6 h resolution (~4% smaller fleet, "
-                    "~8x faster). **Typical weeks (tsam)** clusters the year into "
-                    "representative 168-hour weeks and is ~11x faster, landing the fleet "
-                    "within ~10% and the BESS within a few percent of the exact answer. "
-                    "The sized portfolio is always re-simulated at hourly resolution "
-                    "afterwards."
-                ),
-                horizontal=True,
-            )
-            sizing_method = {v: k for k, v in _method_labels.items()}[sizing_method]
-            if sizing_method == "tsam":
-                _n_periods_idx = max(4, min(40, int(initial.sizing_n_periods)))
-                sizing_n_periods = st.slider(
-                    "Typical weeks (tsam)", 4, 40, _n_periods_idx,
-                    key="sf_sizing_n_periods",
-                    help=(
-                        "Number of representative **weeks** (168 h each) to cluster the "
-                        "year into. Measured against the exact hourly LP: 16 weeks lands "
-                        "the fleet within ~10% and the BESS within ~4% in about 15 s; "
-                        "26 weeks is more accurate (RMSE 7.2 vs 11.8) but takes ~47 s. "
-                        "Weeks beat days because a 168 h period keeps the real "
-                        "day-to-day sequence, so the optimiser sees consecutive "
-                        "poor-resource days rather than stitched-together fragments."
-                    ),
-                )
-                sizing_resolution_h = initial.sizing_resolution_h
-            elif sizing_method == "full_hourly":
-                sizing_n_periods = initial.sizing_n_periods
-                sizing_resolution_h = 1
-            else:  # coarse
-                _res_options = [1, 2, 3, 4, 6]
-                _res_idx = (
-                    _res_options.index(int(initial.sizing_resolution_h))
-                    if int(initial.sizing_resolution_h) in _res_options
-                    else _res_options.index(3)
-                )
-                sizing_n_periods = initial.sizing_n_periods
-                sizing_resolution_h = st.selectbox(
-                    "Sizing LP resolution (h)", _res_options, index=_res_idx,
-                    key="sf_sizing_resolution",
-                    help=(
-                        "Block-average resolution of the capacity-sizing LP only. "
-                        "Coarser blocks (e.g. 3h) solve faster and use less memory; "
-                        "the sized portfolio is then always re-simulated at hourly "
-                        "resolution for dispatch and financials."
-                    ),
-                )
+            with st.expander("⚙️ Advanced sizing settings", expanded=False):
+              _method_labels = {
+                  "full_hourly": "Full year hourly",
+                  "coarse": "Coarse resolution (legacy)",
+                  "tsam": "Typical weeks (tsam)",
+              }
+              _method_idx = list(_method_labels).index(
+                  initial.sizing_method if initial.sizing_method in _method_labels
+                  else "full_hourly"
+              )
+              sizing_method = st.radio(
+                  "Sizing representation",
+                  list(_method_labels.values()),
+                  index=_method_idx,
+                  key="sf_sizing_method",
+                  help=(
+                      "How the sizing LP represents the year. **Full year hourly** is "
+                      "exact and the default, but slowest. **Coarse resolution** "
+                      "block-averages to the legacy 1-6 h resolution (~4% smaller fleet, "
+                      "~8x faster). **Typical weeks (tsam)** clusters the year into "
+                      "representative 168-hour weeks and is ~11x faster, landing the fleet "
+                      "within ~10% and the BESS within a few percent of the exact answer. "
+                      "The sized portfolio is always re-simulated at hourly resolution "
+                      "afterwards."
+                  ),
+                  horizontal=True,
+              )
+              sizing_method = {v: k for k, v in _method_labels.items()}[sizing_method]
+              if sizing_method == "tsam":
+                  _n_periods_idx = max(4, min(40, int(initial.sizing_n_periods)))
+                  sizing_n_periods = st.slider(
+                      "Typical weeks (tsam)", 4, 40, _n_periods_idx,
+                      key="sf_sizing_n_periods",
+                      help=(
+                          "Number of representative **weeks** (168 h each) to cluster the "
+                          "year into. Measured against the exact hourly LP: 16 weeks lands "
+                          "the fleet within ~10% and the BESS within ~4% in about 15 s; "
+                          "26 weeks is more accurate (RMSE 7.2 vs 11.8) but takes ~47 s. "
+                          "Weeks beat days because a 168 h period keeps the real "
+                          "day-to-day sequence, so the optimiser sees consecutive "
+                          "poor-resource days rather than stitched-together fragments."
+                      ),
+                  )
+                  sizing_resolution_h = initial.sizing_resolution_h
+              elif sizing_method == "full_hourly":
+                  sizing_n_periods = initial.sizing_n_periods
+                  sizing_resolution_h = 1
+              else:  # coarse
+                  _res_options = [1, 2, 3, 4, 6]
+                  _res_idx = (
+                      _res_options.index(int(initial.sizing_resolution_h))
+                      if int(initial.sizing_resolution_h) in _res_options
+                      else _res_options.index(3)
+                  )
+                  sizing_n_periods = initial.sizing_n_periods
+                  sizing_resolution_h = st.selectbox(
+                      "Sizing LP resolution (h)", _res_options, index=_res_idx,
+                      key="sf_sizing_resolution",
+                      help=(
+                          "Block-average resolution of the capacity-sizing LP only. "
+                          "Coarser blocks (e.g. 3h) solve faster and use less memory; "
+                          "the sized portfolio is then always re-simulated at hourly "
+                          "resolution for dispatch and financials."
+                      ),
+                  )
             cols = st.columns(4)
             grid_connection = cols[0].text_input(
                 "Grid connection limit (MW)",
@@ -278,20 +279,32 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             merchant_share = float(initial.sizing_merchant_value_share)
             enforce_min_delivery = bool(initial.enforce_min_delivery)
 
-        cols = st.columns(4)
-        onsw_mw = cols[0].slider("Onshore wind (MW)", 0, max_cap_per_technology, int(initial.onsw_mw), step=10, key="sf_onsw_mw",
-                                 disabled=optimise_capacity)
-        pv_mw = cols[1].slider("Solar PV (MWac)", 0, max_cap_per_technology, int(initial.pv_mw), step=10, key="sf_pv_mw",
-                               disabled=optimise_capacity)
-        bess_mw = cols[2].slider(
-            "BESS power (MW)", 0, max_cap_per_technology, int(initial.bess_mw), step=10,
-            key="sf_bess_mw", disabled=optimise_capacity,
-        )
-        bess_mwh = cols[3].slider(
-            "BESS energy (MWh)", 0, max_cap_per_technology*max_bes_hours, int(initial.bess_mwh), step=20,
-            key="sf_bess_mwh",
-                            help="With co-optimisation on, only the MWh/MW ratio (duration) is used." if optimise_capacity else  None,
-        )
+        # When capacity co-optimisation is on the MW values are ignored entirely,
+        # so the sliders are hidden rather than greyed out -- a disabled control
+        # that still shows a number invites the reader to believe it matters.
+        # Only the BESS duration (MWh/MW) survives, because the sizing LP holds
+        # duration fixed and sizes power.
+        if optimise_capacity:
+            onsw_mw, pv_mw, bess_mw = initial.onsw_mw, initial.pv_mw, initial.bess_mw
+            _hours = st.slider(
+                "BESS duration (hours)", 1, max_bes_hours, int(round(initial.bess_max_hours)),
+                key="sf_bess_hours",
+                help="The optimiser sizes BESS power; duration is held fixed at this "
+                     "many hours of storage per MW.",
+            )
+            bess_mwh = float(bess_mw) * _hours if bess_mw else float(_hours)
+        else:
+            cols = st.columns(4)
+            onsw_mw = cols[0].slider("Onshore wind (MW)", 0, max_cap_per_technology, int(initial.onsw_mw), step=10, key="sf_onsw_mw")
+            pv_mw = cols[1].slider("Solar PV (MWac)", 0, max_cap_per_technology, int(initial.pv_mw), step=10, key="sf_pv_mw")
+            bess_mw = cols[2].slider(
+                "BESS power (MW)", 0, max_cap_per_technology, int(initial.bess_mw), step=10,
+                key="sf_bess_mw",
+            )
+            bess_mwh = cols[3].slider(
+                "BESS energy (MWh)", 0, max_cap_per_technology*max_bes_hours, int(initial.bess_mwh), step=20,
+                key="sf_bess_mwh",
+            )
 
     with st.expander("PPA contract terms", expanded=True):
         cols = st.columns(4)

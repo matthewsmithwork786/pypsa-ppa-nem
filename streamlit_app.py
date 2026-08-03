@@ -7,6 +7,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+from ui import progress_strip
 from ui.tabs import (
     welcome,
     introduction,
@@ -35,19 +36,19 @@ with st.popover("Disclaimer", width="stretch", icon="⚠️"):
         """
     )
 
+progress_strip.render()
+
+# Six tabs, ordered by the ACTUAL dependency: plants must be chosen before a
+# scenario means anything, so Get Data comes first. Custom Data folded into
+# Get Data and Sensitivity Analysis into Results -- both are downstream of a
+# result rather than peers of it.
 tabs = st.tabs([
     "| 👋 Welcome",
-    "| 1. 🔬 Case Setup",
-    "| 2. 📡 Get Data",
-    "| 2b. 📤 Custom Data",
-    "| 3. ⚙️ Optimisation",
-    "| 4. 🔍 Results",
-    "| 5. 🏦 Financial Model",
-    "| 6. 📊 Sensitivity Analysis",
-    "| 7. 📖 HELP",
-    # "📊 Results Overview",
-    # "Scenario Analysis",
-    # "Excel Import",
+    "| ① 📡 Pick Plants",
+    "| ② 🔬 Set Terms",
+    "| ③ ⚙️ Run",
+    "| 📊 Results",
+    "| 📖 Help",
 ], on_change="rerun")
 
 i = 0
@@ -58,17 +59,15 @@ if tabs[i].open:
 i += 1
 if tabs[i].open:
     with tabs[i]:
-        case_study.render()
-
-i += 1
-if tabs[i].open:
-    with tabs[i]:
         nem_map.render()
+        st.divider()
+        with st.expander("📤 Advanced: upload your own timeseries instead", expanded=False):
+            custom_data.render()
 
 i += 1
 if tabs[i].open:
     with tabs[i]:
-        custom_data.render()
+        case_study.render()
 
 i += 1
 if tabs[i].open:
@@ -78,17 +77,15 @@ if tabs[i].open:
 i += 1
 if tabs[i].open:
     with tabs[i]:
-        results_deep_dive.render()
-
-i += 1
-if tabs[i].open:
-    with tabs[i]:
-        financial_model.render()
-
-i += 1
-if tabs[i].open:
-    with tabs[i]:
-        sensitivity_analysis.render()
+        _res, _fin, _sens = st.tabs(
+            ["| Dispatch & delivery", "| Financial model", "| Sensitivity"]
+        )
+        with _res:
+            results_deep_dive.render()
+        with _fin:
+            financial_model.render()
+        with _sens:
+            sensitivity_analysis.render()
 
 i += 1
 if tabs[i].open:

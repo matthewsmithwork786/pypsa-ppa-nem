@@ -33,7 +33,10 @@ class Scenario:
     enable_shortfall: bool = True
     enable_penalty: bool = True
     run_financial_analysis: bool = True
-    enable_counterfactual: bool = True
+    # Off by default: the counterfactual answers "what would the offtaker have
+    # paid otherwise", which is a comparison users want AFTER they have a
+    # result, not five controls to configure before getting one.
+    enable_counterfactual: bool = False
 
     # Counterfactual sourcing
     cal_forward_price: float = 85.0
