@@ -148,3 +148,56 @@ def test_generation_series_falls_back_per_duid(fake_cache):
     _write_5min(fake_cache / "scada" / "SCADAONLY_2025.parquet", "scadavalue", 33.0)
     got = nem_data._generation_series("SCADAONLY", 2025, fake_cache, unconstrained=True)
     assert float(got.mean()) == pytest.approx(33.0)
+
+
+# ── Compact values-only cache format ─────────────────────────────────────────
+
+def test_canonical_index_is_interval_ending():
+    """AEMO stamps intervals by their END, so a year runs 00:05 -> next 00:00.
+
+    Getting this backwards silently drops the final interval of the year and
+    shifts every value by 5 minutes.
+    """
+    idx = nem_data.canonical_5min_index(2025)
+    assert len(idx) == nem_data.expected_intervals(2025)
+    assert idx[0] == pd.Timestamp("2025-01-01 00:05")
+    assert idx[-1] == pd.Timestamp("2026-01-01 00:00")
+
+
+def test_compact_format_round_trips_exactly(tmp_path):
+    """Values-only storage must reproduce the timestamped series exactly.
+
+    The timestamp index is ~64% of a naive per-interval parquet and is fully
+    redundant on a fixed 5-minute grid; dropping it took the shipped cache from
+    206 MB to 45 MB. That is only safe if the round-trip is lossless.
+    """
+    year = 2025
+    idx = nem_data.canonical_5min_index(year)
+    rng = np.random.default_rng(0)
+    values = rng.random(len(idx)).astype("float32") * 100.0
+    values[5:9] = np.nan          # gaps must survive as gaps, not be filled
+
+    d = tmp_path / "availability"
+    d.mkdir(parents=True)
+    path = d / f"TESTWF1_{year}.parquet"
+    pd.DataFrame({"availability": values}).to_parquet(path, index=False)
+
+    got = nem_data.load_availability("TESTWF1", year, tmp_path)
+    # Loader shifts to interval-beginning for modelling.
+    assert len(got) == len(idx)
+    assert got.index[0] == pd.Timestamp(f"{year}-01-01 00:00")
+    np.testing.assert_allclose(got.to_numpy(), values, equal_nan=True)
+    assert int(got.isna().sum()) == 4, "gaps must remain NaN, not be filled"
+
+
+def test_legacy_timestamped_format_still_loads(tmp_path):
+    """Caches written before the compact format must keep working."""
+    year = 2025
+    d = tmp_path / "availability"
+    d.mkdir(parents=True)
+    idx = pd.date_range(f"{year}-01-01 00:05", periods=288, freq="5min")
+    pd.DataFrame({"availability": np.full(len(idx), 7.0)}, index=idx).to_parquet(
+        d / f"LEGACY1_{year}.parquet"
+    )
+    got = nem_data.load_availability("LEGACY1", year, tmp_path)
+    assert float(got.mean()) == pytest.approx(7.0)

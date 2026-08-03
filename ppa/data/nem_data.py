@@ -191,6 +191,37 @@ def has_availability(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_
     return availability_path(duid, year, cache_dir).exists()
 
 
+def canonical_5min_index(year: int) -> pd.DatetimeIndex:
+    """AEMO's 5-minute dispatch intervals for `year`, interval-ENDING.
+
+    AEMO stamps an interval by its end, so a year runs 00:05 on 1 Jan through
+    00:00 on 1 Jan of the following year. `_to_interval_beginning` shifts this
+    to interval-beginning for modelling; this helper describes the raw
+    convention, which is what the compact cache format relies on.
+    """
+    return pd.date_range(
+        f"{year}-01-01 00:05", periods=expected_intervals(year), freq="5min"
+    )
+
+
+def _read_5min_values(path: Path, column: str, year: int) -> "pd.Series | None":
+    """Read the compact values-only cache format, or None if not that format.
+
+    The timestamp index is ~64% of a naive per-interval parquet and is entirely
+    redundant: the intervals are a fixed 5-minute grid. Storing values alone
+    against `canonical_5min_index(year)` cut the shipped availability cache
+    from 197 MB to ~71 MB with an exact round-trip. Gaps are stored as NaN
+    rather than filled, so `whole_year_check`'s coverage test still sees them.
+    """
+    df = pd.read_parquet(path)
+    if column not in df.columns or not isinstance(df.index, pd.RangeIndex):
+        return None
+    idx = canonical_5min_index(year)
+    if len(df) != len(idx):
+        return None
+    return pd.Series(df[column].to_numpy(), index=idx, name=column)
+
+
 def load_availability(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> pd.Series:
     """5-min UNCONSTRAINED availability (MW) from AEMO DISPATCHLOAD.
 
@@ -212,11 +243,18 @@ def load_availability(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM
     """
     duid = duid.strip().upper()
     path = availability_path(duid, year, cache_dir)
-    msg = (
-        f"No cached availability data for DUID '{duid}' at {path}. Run "
-        f"`python scripts/fetch_nem_availability.py --year {year}` in a "
-        "non-sandboxed environment and copy the output into this cache."
-    )
+    if not path.exists():
+        raise FileNotFoundError(
+            f"No cached availability data for DUID '{duid}' at {path}. Run "
+            f"`python scripts/fetch_nem_availability.py --year {year}` in a "
+            "non-sandboxed environment and copy the output into this cache."
+        )
+    compact = _read_5min_values(path, "availability", year)
+    if compact is not None:
+        # Stored on the interval-ENDING grid, same as the raw AEMO series.
+        compact.index = _to_interval_beginning(compact.index, year)
+        return compact.rename("availability")
+    msg = f"Could not read availability data for DUID '{duid}' at {path}."
     return _load_5min_series(path, ["availability"], "availability", year, msg)
 
 
