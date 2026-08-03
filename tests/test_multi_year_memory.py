@@ -10,6 +10,9 @@ sends SIGKILL with no traceback, so the process just vanishes.
 """
 from __future__ import annotations
 
+import dataclasses
+
+import pandas as pd
 import pytest
 
 from ppa import multi_year
@@ -205,3 +208,59 @@ def test_sizing_memory_advice_silent_when_memory_unreadable(monkeypatch):
     assert sizing.sizing_memory_advice(
         dataclasses.replace(Scenario(), sizing_method="full_hourly")
     ) is None
+
+
+# ── Serial-path memory release (the production OOM) ──────────────────────────
+
+def test_release_free_memory_never_raises():
+    """Cleanup must never be able to fail a solve.
+
+    It is a no-op off glibc and best-effort everywhere; a raise here would turn
+    a successful optimisation into a crash.
+    """
+    from ppa import multi_year
+
+    multi_year._release_free_memory()
+    multi_year._release_free_memory()  # idempotent
+
+
+def test_solve_one_year_releases_the_network_and_model(monkeypatch):
+    """The serial in-process path must not retain each year's network.
+
+    A forked worker exits and the OS reclaims everything; the serial path --
+    which is exactly what a memory-constrained container is forced onto -- has
+    to release explicitly. Measured before the fix: RSS climbed ~300 MB/year to
+    2,162 MB by year 8 and killed the deployed app mid-run. After: +45 MB total.
+    """
+    from ppa import multi_year
+    from ppa.scenario import Scenario
+
+    held = {}
+
+    class _FakeNet:
+        def __init__(self):
+            self._model = object()   # stands in for the linopy model
+
+    def _fake_build(ts, scenario, **kw):
+        held["net"] = _FakeNet()
+        return held["net"]
+
+    monkeypatch.setattr(multi_year, "build_network", _fake_build)
+    monkeypatch.setattr(multi_year, "solve", lambda *a, **k: ("ok", "optimal"))
+    monkeypatch.setattr(multi_year, "extract_results", lambda *a, **k: "RESULT")
+
+    trimmed = []
+    monkeypatch.setattr(multi_year, "_release_free_memory", lambda: trimmed.append(1))
+
+    idx = pd.date_range("2025-01-01", periods=24, freq="h")
+    ts = pd.DataFrame(
+        {"ts_PVGen": 0.5, "ts_WindGen": 0.5, "ts_MktPrice": 50.0, "ppaload_mw": 10.0},
+        index=idx,
+    )
+    year_idx, result = multi_year._solve_one_year(
+        0, 2025, ts, dataclasses.asdict(Scenario(name="mem"))
+    )
+
+    assert (year_idx, result) == (0, "RESULT")
+    assert held["net"]._model is None, "linopy model must be dropped before returning"
+    assert trimmed, "must ask the allocator to return freed arenas"

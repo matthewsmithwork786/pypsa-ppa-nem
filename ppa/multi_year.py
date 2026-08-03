@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import gc
 import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -141,6 +142,25 @@ def _degraded_scenario(scenario: Scenario, year_idx: int) -> Scenario:
     )
 
 
+def _release_free_memory() -> None:
+    """Ask glibc to return free heap arenas to the OS.
+
+    gc.collect() frees the Python objects, but glibc's allocator keeps the
+    arenas for reuse, so RSS stays high and a container's memory limit still
+    sees it. Measured on the serial path: clearing the networks alone took
+    year-8 RSS from 2,162 MB to 1,305 MB, but the remainder was held arenas --
+    the accumulated results are only ~3.4 MB each.
+
+    No-op on platforms without glibc; never raises.
+    """
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:  # noqa: BLE001 - best effort only
+        pass
+
+
 def _solve_one_year(
     sim_year_idx: int,
     sim_year: int,
@@ -161,6 +181,28 @@ def _solve_one_year(
     n = build_network(ts, scenario)
     status, condition = solve(n, scenario, ts)
     result = extract_results(n, scenario, ts, status, condition)
+
+    # Release the network and its linopy model before returning.
+    #
+    # A forked worker exits after one year and the OS reclaims everything for
+    # free, so this only matters on the SERIAL in-process path -- which is
+    # exactly the path a memory-constrained container takes. Measured there,
+    # RSS climbed ~300 MB per year and reached 2,162 MB by year 8, killing the
+    # deployed app partway through a 15-year run (the "Oh no. Error running
+    # app." crash). The extracted result holds its own pandas objects and does
+    # not reference the network.
+    #
+    # `Network.model` is a read-only property, so the private backing attribute
+    # is cleared directly; guarded with getattr/try so a pypsa release that
+    # renames it degrades to the plain del rather than raising.
+    try:
+        if hasattr(n, "_model"):
+            n._model = None
+    except Exception:  # noqa: BLE001 - never fail a solve over cleanup
+        pass
+    del n
+    gc.collect()
+    _release_free_memory()
     return sim_year_idx, result
 
 
