@@ -26,11 +26,46 @@ DEFAULT_COLOR = "#757575"
 
 STATUS_LABELS = {
     "ready": "Simulation-ready ✓",
-    "incomplete": "SCADA cached but incomplete",
-    "no_scada": "No SCADA cached",
-    "unreadable": "SCADA cache unreadable",
+    "incomplete": "UIGF cached but incomplete year",
+    "no_scada": "No UIGF data available",
+    "unreadable": "UIGF cache unreadable",
     "unchecked": "Not checked",
 }
+
+UIGF_EXPLAINER = """
+**UIGF — Unconstrained Intermittent Generation Forecast**
+
+AEMO's estimate, for every 5-minute dispatch interval, of how much a wind or solar
+farm **could** have produced given the weather at the time — *before* any network
+constraint is applied. It is published per unit in AEMO's `DISPATCHLOAD` table and
+is the ceiling AEMO uses when setting that unit's dispatch target.
+
+**Why not just use metered output (SCADA)?**
+
+SCADA is what the plant actually *sent out*, which is already reduced twice over:
+by network constraints, and by whatever curtailment that plant's own offtake
+contract gave it a reason to do. Using it to size a **new** project would charge
+that curtailment twice — once baked into the profile, and again when the optimiser
+makes its own curtailment decisions.
+
+It also cannot be corrected with a rule of thumb. Measured across the 2025 cache,
+curtailment ranges from about **0% to 71%** depending on where a plant sits in the
+network and what contract it holds.
+
+| 2025 fleet, capacity-weighted | metered (SCADA) | **UIGF** |
+|---|---|---|
+| Wind | 27.7% | **30.7%** |
+| Solar | 16.9% | **20.4%** |
+
+**How much should you trust it?** It is a forecast, not a measurement. Checked
+against actual output in intervals where nothing was binding, the median
+actual/forecast ratio is **1.000–1.004** — unbiased — with the dispersion you would
+expect of a 5-minute cloud-cover forecast. The caveat is that this check cannot
+reach heavily curtailed plants, because there is no actual output to compare
+against in exactly the intervals that matter most.
+
+*Capacity factors shown here are AC, against registered capacity.*
+"""
 
 
 # ── Pure helpers (no Streamlit) ──────────────────────────────────────────────
@@ -75,7 +110,7 @@ def _tooltip(row) -> str:
     CUF prefers the strict `cuf` field (energy ÷ nameplate × hours-in-year)
     from `nem_data.scada_summary`, falling back to `mean_cf` (mean of the
     clipped 5-min CF series). First power prefers the registry's
-    `first_power_date` (labelled "1st power"); a SCADA-derived date (2025-only
+    `first_power_date` (labelled "1st power"); a generation-derived date (2025-only
     cache) is labelled "first 2025 output" per the plan. Either shows '—' when
     unknown.
     """
@@ -110,7 +145,7 @@ def _first_power_parts(row) -> "tuple[str, str]":
     """Return (label, formatted-date) for the first-power portion of the tooltip.
 
     The registry's `first_power_date` is true first power ("1st power"); the
-    SCADA-derived `first_output_date` is 2025-only and therefore labelled
+    The generation-derived `first_output_date` is 2025-only and therefore labelled
     "first 2025 output". Falls back to ('1st power', '—') when neither exists.
     """
     registry_date = row.get("first_power_date")
@@ -118,11 +153,11 @@ def _first_power_parts(row) -> "tuple[str, str]":
         registry_date is not None and str(registry_date).lower() not in {"nan", "nat", "none", "na", ""}
     ):
         return "1st power", _format_first_power(registry_date)
-    scada_date = row.get("first_output_date")
-    if _finite_value(scada_date) or (
-        scada_date is not None and str(scada_date).lower() not in {"nan", "nat", "none", "na", ""}
+    output_date = row.get("first_output_date")
+    if _finite_value(output_date) or (
+        output_date is not None and str(output_date).lower() not in {"nan", "nat", "none", "na", ""}
     ):
-        return "first 2025 output", _format_first_power(scada_date)
+        return "first 2025 output", _format_first_power(output_date)
     return "1st power", CUF_FALLBACK
 
 
@@ -139,7 +174,7 @@ def _duid_from_tooltip(tooltip: str, plants_df: "pd.DataFrame") -> "str | None":
 def _marker_style(row) -> dict:
     """Color/fill_opacity/weight by data_status: solid tech-color for "ready",
     hollow/dashed tech-color outline for "incomplete", gray hollow dashed for
-    "no_scada"/"unreadable"/"unchecked".
+    "no_scada" (no UIGF)/"unreadable"/"unchecked".
     """
     color = FUEL_COLORS.get(str(row.get("fuel_tech", "")), DEFAULT_COLOR)
     status = row.get("data_status", "unchecked")
@@ -188,10 +223,16 @@ def _label_for_duid(duid: str, plants_df: "pd.DataFrame") -> str:
 
 def render() -> None:
     st.title("📡 Get Data")
-    st.markdown(
-        "Pick real Australian wind and/or solar plants (2025 5-minute AEMO SCADA) "
-        "to drive the optimiser."
-    )
+    head = st.columns([6, 1])
+    with head[0]:
+        st.markdown(
+            "Pick real Australian wind and/or solar plants to drive the optimiser. "
+            "Generation profiles are 2025 5-minute **AEMO UIGF** (unconstrained "
+            "availability)."
+        )
+    with head[1]:
+        with st.popover("❓ UIGF", width="stretch"):
+            st.markdown(UIGF_EXPLAINER)
 
     year = nem_data.DEFAULT_YEAR
 
@@ -217,7 +258,7 @@ def render() -> None:
     with st.expander("**NEM cache status**", expanded=(status["n_simulation_ready"] == 0)):
         c = st.columns(4)
         c[0].metric("Registry plants", status["n_registry_plants"])
-        c[1].metric("SCADA cached", status["n_scada_cached"])
+        c[1].metric("UIGF cached", status["n_scada_cached"])
         c[2].metric("Simulation-ready", status["n_simulation_ready"])
         c[3].metric("Price regions cached", f"{len(status['price_regions_cached'])}/{len(nem_data.NEM_REGIONS)}")
 
@@ -226,11 +267,15 @@ def render() -> None:
 
         if status["n_scada_cached"] == 0:
             st.warning(
-                "No SCADA/price data cached yet. Run the acquisition script in a "
+                "No generation/price data cached yet. Run the acquisition scripts in a "
                 "non-sandboxed environment with network access, then copy the output "
-                "into `data/cache/nem/{scada,price}/`:"
+                "into `data/cache/nem/{availability,price}/`:"
             )
-            st.code(f"python scripts/fetch_nem_scada_prices.py --year {year}", language="bash")
+            st.code(
+                f"python scripts/fetch_nem_availability.py --year {year}\n"
+                f"python scripts/fetch_nem_scada_prices.py --year {year}  # prices",
+                language="bash",
+            )
 
     if plants_df.empty:
         st.info("No plants match the current filters.")
@@ -242,7 +287,7 @@ def render() -> None:
         "Region filter", options=regions_present, default=regions_present, key="nm_region_filter",
     )
     allow_unready = st.toggle(
-        "Allow selecting plants without complete SCADA (not simulation-ready)",
+        "Allow selecting plants without a complete year of UIGF (not simulation-ready)",
         value=False, key="nm_allow_unready",
     )
 
@@ -325,13 +370,13 @@ def render() -> None:
             key="nm_map", returned_objects=["last_object_clicked_tooltip"],
         )
         st.caption(
-            "🟢 Wind · 🟡 Solar · solid = simulation-ready · dashed outline = incomplete/no SCADA. "
+            "🟢 Wind · 🟡 Solar · solid = simulation-ready · dashed outline = incomplete/no UIGF. "
             "Click a marker or use the selectboxes above (selectboxes are authoritative)."
         )
         st.caption(
-            "Marker tooltip: CUF = energy ÷ (nameplate × hours-in-year, 2025 SCADA); "
+            "Marker tooltip: CUF = energy ÷ (nameplate × hours-in-year, 2025 UIGF, AC); "
             "“1st power” = registry commissioning date, “first 2025 output” = first sustained "
-            "SCADA output, “—” = not available."
+            "UIGF availability, “—” = not available."
         )
 
     # ── Native 5-min CF inspection for the selected plants ──────────────────────

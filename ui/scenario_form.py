@@ -458,10 +458,10 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 "offtake contract incentivised, so using it would count curtailment "
                 "twice — and per-plant curtailment ranges from ~0% to 71%, so it cannot "
                 "be corrected with a flat factor.\n\n"
-                "Switch off only to reproduce pre-U4 results, or to model taking offtake "
-                "from a specific **existing** plant, where its actual sent-out energy is "
-                "what you would receive. Falls back to SCADA for plants with no UIGF "
-                "(older wind farms predating semi-scheduling)."
+                "Switch off only to reproduce older results, or to model taking offtake from "
+                "a specific **existing** plant, where its actual metered energy is what "
+                "you would receive — this needs a local SCADA cache, which the shipped "
+                "app does not carry. See the ❓ UIGF explainer on the Get Data tab."
             ),
         )
 

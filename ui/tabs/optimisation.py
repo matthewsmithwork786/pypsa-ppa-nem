@@ -72,8 +72,8 @@ def _render_sizing_diagnostics() -> None:
         st.caption(
             "“Max-build cap binding / Connection limit binding = Yes” means that cap is what "
             "stopped the LP building more — the binding constraint is the real sizing decision. "
-            "A single cached weather year (2025 SCADA) means the sized fleet is tuned to 2025 "
-            "weather; multi-year SCADA is a TODO (see README)."
+            "A single cached weather year (2025) means the sized fleet is tuned to 2025 "
+            "weather; multi-year data is a TODO (see README)."
         )
 
 # ── timeseries loader (NEM period path) ───────────────────────────────────────
@@ -273,10 +273,10 @@ def _render_nem_data_status(s) -> tuple[bool, bool]:
     cols = st.columns(2)
     with cols[0]:
         if status["n_simulation_ready"] > 0:
-            st.success(f"NEM SCADA: {status['n_simulation_ready']} simulation-ready plant(s) cached ✓")
+            st.success(f"NEM UIGF: {status['n_simulation_ready']} simulation-ready plant(s) cached ✓")
         else:
             st.warning(
-                "No simulation-ready NEM SCADA cached — go to **Get Data** tab "
+                "No simulation-ready NEM generation data cached — go to **Get Data** tab "
                 f"(`python scripts/fetch_nem_scada_prices.py --year {s.nem_year}`)."
             )
     prices_ok = s.nem_price_region in status["price_regions_cached"]

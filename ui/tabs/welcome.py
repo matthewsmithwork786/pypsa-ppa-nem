@@ -50,7 +50,7 @@ Navigate through the tabs to manage different aspects of your project (economic 
 - [Streamlit](https://streamlit.io) — web UI
 - [Plotly](https://plotly.com) — interactive charts
 - and using *historical* Australian data from
-  - AEMO NEM SCADA (5-minute) for wind & solar plant output, and
+  - AEMO NEM UIGF (5-minute unconstrained availability) for wind & solar output, and
   - AEMO NEM regional spot prices (the AER base-futures series for hedges).
             """
         )
