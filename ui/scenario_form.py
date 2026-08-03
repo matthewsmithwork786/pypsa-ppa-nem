@@ -426,7 +426,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         def _region_label(r):
             return f"{r} ✓" if r in _status.get("price_regions_cached", []) else r
 
-        cols = st.columns(2)
+        cols = st.columns(3)
         _region_options = nem_data.NEM_REGIONS
         _region_idx = (
             _region_options.index(initial.nem_price_region)
