@@ -184,7 +184,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             _method_labels = {
                 "full_hourly": "Full year hourly",
                 "coarse": "Coarse resolution (legacy)",
-                "tsam": "Typical days (tsam)",
+                "tsam": "Typical weeks (tsam)",
             }
             _method_idx = list(_method_labels).index(
                 initial.sizing_method if initial.sizing_method in _method_labels
@@ -199,36 +199,28 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                     "How the sizing LP represents the year. **Full year hourly** is "
                     "exact and the default, but slowest. **Coarse resolution** "
                     "block-averages to the legacy 1-6 h resolution (~4% smaller fleet, "
-                    "~8x faster). **Typical days (tsam)** clusters the year into "
-                    "representative days and is ~85x faster, but currently sizes the "
-                    "fleet ~11% low and the BESS to zero — see docs/sizing_experiments.md. "
+                    "~8x faster). **Typical weeks (tsam)** clusters the year into "
+                    "representative 168-hour weeks and is ~11x faster, landing the fleet "
+                    "within ~10% and the BESS within a few percent of the exact answer. "
                     "The sized portfolio is always re-simulated at hourly resolution "
                     "afterwards."
                 ),
                 horizontal=True,
             )
             sizing_method = {v: k for k, v in _method_labels.items()}[sizing_method]
-            if sizing_method == "tsam" and include_bess and max_build_bess_mw > 0:
-                # Measured, not theoretical (docs/sizing_experiments.md E7).
-                # A warning rather than a block: tsam's ~85x speed-up is still
-                # worth having for a generation-only screen.
-                st.caption(
-                    "⚠️ Typical days under-size storage relative to the exact LP "
-                    "(measured: 207 vs 299 MW of BESS on the Corporate PPA under a hard "
-                    "SLA). Good for a fast screen; confirm anything you rely on against "
-                    "**Full year hourly**."
-                )
             if sizing_method == "tsam":
-                _n_periods_idx = max(4, min(36, int(initial.sizing_n_periods)))
+                _n_periods_idx = max(4, min(40, int(initial.sizing_n_periods)))
                 sizing_n_periods = st.slider(
-                    "Typical periods (tsam)", 4, 36, _n_periods_idx,
+                    "Typical weeks (tsam)", 4, 40, _n_periods_idx,
                     key="sf_sizing_n_periods",
                     help=(
-                        "Number of representative days to cluster into. In principle "
-                        "more periods capture more of the year's variability, but "
-                        "measured accuracy currently gets *worse* as the count rises "
-                        "(-5.3% fleet at 8 days, -11.2% at 12, -19.1% at 24), so treat "
-                        "high counts with suspicion until that is fixed."
+                        "Number of representative **weeks** (168 h each) to cluster the "
+                        "year into. Measured against the exact hourly LP: 16 weeks lands "
+                        "the fleet within ~10% and the BESS within ~4% in about 15 s; "
+                        "26 weeks is more accurate (RMSE 7.2 vs 11.8) but takes ~47 s. "
+                        "Weeks beat days because a 168 h period keeps the real "
+                        "day-to-day sequence, so the optimiser sees consecutive "
+                        "poor-resource days rather than stitched-together fragments."
                     ),
                 )
                 sizing_resolution_h = initial.sizing_resolution_h

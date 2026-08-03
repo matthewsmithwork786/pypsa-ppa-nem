@@ -598,3 +598,65 @@ The filter is applied at the eligibility layer (`scada_summary` → `list_eligib
 `list_simulation_ready_plants`), so these plants no longer appear in the map or the
 selectors. The cached parquets are deliberately **not** deleted: they are valid data for
 their operating months, and a plant excluded for 2025 will qualify for 2026.
+
+---
+
+## E11 — Making tsam match the exact LP: typical WEEKS with MEAN representation
+
+Goal: get the clustered sizing LP to reproduce the full-hourly capacity build. Reference
+(Corporate PPA, 1 year, BESS capex 276.5 so storage is economic): **wind 57, PV 139,
+BESS 35, total 231 MW** in ~180 s.
+
+Two settings dominate, and they interact:
+
+| config | s | wind | PV | BESS | total | Δ total | Δ BESS | **RMSE** |
+|---|---|---|---|---|---|---|---|---|
+| **26 weeks, mean** | 46.8 | 66 | 147 | 39 | 251 | +8.8% | +10% | **7.2** |
+| **16 weeks, mean** | 15.1 | 76 | 145 | 34 | 255 | +10.5% | **−4%** | **11.8** |
+| 8 weeks, mean | 4.2 | 72 | 157 | 38 | 267 | +15.7% | +7% | 13.9 |
+| 6 × 4-week periods (672 h) | 32.2 | 51 | 140 | 13 | 204 | −11.5% | −62% | 13.2 |
+| 4 weeks, medoid | 2.2 | 76 | 154 | 19 | 249 | +7.9% | −47% | 17.2 |
+| 8 weeks, medoid | 3.7 | 55 | 142 | 6 | 204 | −11.8% | −82% | 16.9 |
+| 20 weeks, medoid | 22.3 | 46 | 132 | 3 | 182 | −21.2% | −90% | 19.8 |
+| 12 days, medoid *(old default)* | 1.9 | 85 | 158 | 94 | 337 | +46.0% | +164% | 39.0 |
+| 48 days, medoid | 3.8 | 51 | 163 | 82 | 296 | +28.0% | +130% | 30.2 |
+| 24 days, mean | 2.3 | 64 | 168 | 84 | 316 | +37.0% | +136% | 32.9 |
+
+### Findings
+
+1. **Period length matters far more than period count.** Every typical-*day* variant sits
+   at RMSE 30–39 regardless of count or representation; every typical-*week* variant is
+   7–20. A 168 h period contains the real day-to-day sequence, so the LP sees consecutive
+   poor-resource days rather than 24 h fragments stitched together by cyclic state of
+   charge. Storage and firming are sized against runs of bad days, not against average
+   days.
+2. **Representation decides whether storage survives — and the right choice inverts with
+   period length.** With weeks, `medoid` under-sizes the BESS by 47–90% while `mean` lands
+   within ±10%. A single real week is a poor proxy for storage stress; averaging the
+   cluster keeps the weekly shape while smoothing the period-to-period noise the battery
+   is not sized against. (With *days*, medoid was the better of two bad options.)
+3. **More periods does not monotonically help.** Medoid weeks get *worse* from 8 to 20
+   (RMSE 16.9 → 19.8). Only the mean-representation series improves with count
+   (13.9 → 11.8 → 7.2 at 8/16/26).
+4. **Longer than a week over-smooths.** 4-week periods (672 h) drop the BESS 62%.
+5. Neither excluding extreme periods nor down-weighting price in the clustering distance
+   moved the result materially (RMSE 15.8 and 17.0 vs 16.9 baseline at 8 weeks) — the
+   representation and period length are doing all the work.
+
+### Adopted defaults
+
+`hours_per_period=168`, `representation="mean"`, `n_periods=16`. Verified end-to-end
+through `run_sizing_subprocess`:
+
+| method | time | wind | PV | BESS | total |
+|---|---|---|---|---|---|
+| full hourly | 199.8 s | 57 | 139 | 35 | 231 |
+| **tsam (new defaults)** | **18.0 s** | 76 | 145 | **34** | 255 |
+
+**11× faster, BESS within 3%, fleet within 10.4%** — against the old default's +46% fleet
+and +164% BESS. 26 weeks remains available for a more accurate, slower run.
+
+Residual error is concentrated in **wind** (76 vs 57). Wind is the most day-to-day variable
+input, so it is the hardest to represent in any aggregation; the total and the storage
+decision are both good. Use `validate_sizing_representation()` to check a specific scenario
+before relying on a clustered result.

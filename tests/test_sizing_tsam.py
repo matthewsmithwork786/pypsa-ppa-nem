@@ -35,13 +35,19 @@ def hourly_year() -> pd.DataFrame:
     )
 
 
-def test_cluster_returns_typical_days_and_weightings(hourly_year):
+def test_cluster_returns_typical_weeks_and_weightings(hourly_year):
+    """Periods are WEEKS (168 h) by default, not days.
+
+    Measured against the exact LP, typical weeks with mean representation land
+    the fleet within ~10% and the BESS within ~4%, where typical days were +46%
+    and +164% (docs/sizing_experiments.md E11).
+    """
     clustered, weights = cluster_typical_periods(hourly_year, n_periods=12)
-    # Representative days are hourly rows (12 periods × 24 h, plus any extreme
-    # periods tsam appends) over the same columns.
+    # 12 periods x 168 h, plus any extreme periods tsam appends.
     assert len(weights) == len(clustered)
     assert {"ts_PVGen", "ts_WindGen", "ts_MktPrice", "ppaload_mw"}.issubset(clustered.columns)
-    assert 12 * 24 <= len(clustered) <= 40 * 24
+    assert 12 * 168 <= len(clustered) <= 20 * 168
+    assert len(clustered) % 168 == 0, "clustered length must be a whole number of weeks"
     # Weightings sum to the total hours modelled (one year).
     assert abs(float(weights.sum()) - 8760.0) <= 1.0
 

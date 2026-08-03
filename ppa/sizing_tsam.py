@@ -37,9 +37,10 @@ def tsam_available() -> bool:
 
 def cluster_typical_periods(
     ts: pd.DataFrame,
-    n_periods: int = 12,
-    hours_per_period: int = 24,
+    n_periods: int = 16,
+    hours_per_period: int = 168,
     extreme_periods: bool = True,
+    representation: str = "mean",
 ) -> tuple[pd.DataFrame, pd.Series]:
     """Cluster the sizing timeseries into representative typical periods.
 
@@ -70,7 +71,23 @@ def cluster_typical_periods(
     cols = ["ts_PVGen", "ts_WindGen", "ts_MktPrice", "ppaload_mw"]
     data = ts[cols]
 
-    cluster = ClusterConfig(method="hierarchical")
+    # Typical WEEKS with MEAN representation, measured against the exact hourly
+    # LP (docs/sizing_experiments.md E11). The two settings matter jointly:
+    #
+    #   16 weeks, mean     RMSE 11.8   fleet +10.5%   BESS  -4%    15 s
+    #   26 weeks, mean     RMSE  7.2   fleet  +8.8%   BESS +10%    47 s
+    #    8 weeks, medoid   RMSE 16.9   fleet -11.8%   BESS -82%     4 s
+    #   12 days,  medoid   RMSE 39.0   fleet +46.0%   BESS +164%    2 s   (old default)
+    #
+    # Medoid picks one real period per cluster, and a single real week is a poor
+    # proxy for storage stress -- it under-sizes the BESS by 47-90%. Averaging
+    # the cluster keeps the weekly load/generation shape while smoothing the
+    # period-to-period noise the battery is not sized against.
+    #
+    # Weeks beat days because a 168 h period contains the real day-to-day
+    # sequence, so the LP sees consecutive poor-resource days rather than
+    # 24 h fragments stitched together by cyclic state of charge.
+    cluster = ClusterConfig(method="hierarchical", representation=representation)
     extremes = (
         ExtremeConfig(
             method="new_cluster",

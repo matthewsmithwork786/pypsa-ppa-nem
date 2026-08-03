@@ -40,7 +40,7 @@ class SizedCapacities:
     # Sizing representation used ("tsam" / "full_hourly" / "coarse")
     sizing_method: str = "coarse"
     # PPA delivery share the sizing LP itself achieves on its representation
-    # (clustered typical days / coarse blocks / full hourly) — compared against
+    # (clustered typical weeks / coarse blocks / full hourly) — compared against
     # the full hourly simulation of the sized portfolio to catch clustering
     # losses (plan W14 item 6).
     sizing_delivery_share: float = 0.0
@@ -117,7 +117,7 @@ def sizing_memory_advice(scenario: Scenario) -> "str | None":
     cheaper = [m for m in ("coarse", "tsam") if SIZING_PEAK_MB[m] <= mem_mb]
     suggestion = (
         f" Switch the sizing representation to "
-        f"{' or '.join('Coarse resolution' if m == 'coarse' else 'Typical days' for m in cheaper)}"
+        f"{' or '.join('Coarse resolution' if m == 'coarse' else 'Typical weeks' for m in cheaper)}"
         ", or reduce the max-build caps and simulation years."
         if cheaper else
         " Reduce the max-build caps and the simulation years, or run this locally."
@@ -231,7 +231,7 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
     """Solve the investment LP at coarse resolution and extract optimal capacities.
 
     `ts` is the hourly timeseries. How it is represented before the solve is
-    chosen by `scenario.sizing_method`: "tsam" clusters it into typical days at
+    chosen by `scenario.sizing_method`: "tsam" clusters it into typical weeks at
     hourly resolution (best fidelity for the size; W14), "full_hourly" keeps the
     exact hourly year (slowest), and "coarse" block-averages to
     `scenario.sizing_resolution_h`-hour blocks (legacy, fastest per snapshot).

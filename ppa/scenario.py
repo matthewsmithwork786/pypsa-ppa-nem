@@ -69,8 +69,11 @@ class Scenario:
     # It formerly sized storage to exactly zero -- a units error in the storage
     # timestep, not a clustering limit; see docs/sizing_experiments.md E9.
     sizing_method: str = "full_hourly"
-    # Number of typical periods for the tsam method (4-36).
-    sizing_n_periods: int = 12
+    # Number of typical periods for the tsam method. Periods are WEEKS (168 h),
+    # not days -- measured against the exact LP, 16 typical weeks with mean
+    # representation lands the fleet within ~10% and the BESS within 4%, where
+    # 12 typical days was +46% and +164% (docs/sizing_experiments.md E11).
+    sizing_n_periods: int = 16
     # Model each plant's UNCONSTRAINED output (AEMO UIGF from DISPATCHLOAD)
     # rather than its historical sent-out SCADA. ON by default: this is the
     # correct input, not a variant.
@@ -412,7 +415,7 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
             errors.append(
                 "Unknown sizing method. Valid options: tsam, full_hourly, coarse."
             )
-        if s.sizing_method == "tsam" and not (4 <= s.sizing_n_periods <= 36):
+        if s.sizing_method == "tsam" and not (4 <= s.sizing_n_periods <= 40):
             errors.append("Typical-period count must be between 4 and 36.")
         if s.sizing_method == "tsam" and not _tsam_available():
             errors.append(
