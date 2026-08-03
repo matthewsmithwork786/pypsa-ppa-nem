@@ -1,5 +1,5 @@
 pypsa==1.2.4
-highspy==1.15.1
+highspy==1.15.0
 linopy==0.8.0
 pandas==2.3.3
 numpy==2.4.6
@@ -17,3 +17,9 @@ shapely==2.1.2
 pyogrio==0.12.1
 folium==0.20.0
 streamlit-folium==0.27.2
+# Typical-day clustering for the capacity-sizing LP (guarded import; the app
+# runs without it). Requires highspy<=1.15.0 -- which is why highspy is pinned
+# to 1.15.0 above rather than 1.15.1. 1.15.1 was only ever needed for the HiPO
+# solver, which W15 benchmarked and rejected (dual simplex won), so nothing is
+# lost. See docs/DEPLOYMENT.md.
+tsam==3.4.2

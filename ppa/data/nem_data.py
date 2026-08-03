@@ -442,15 +442,19 @@ class ScadaSummary:
 def scada_summary(
     duid: str, capacity_mw: float, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR
 ) -> ScadaSummary:
+    """Eligibility summary for a DUID, assessed on the series it is modelled
+    with (UIGF availability; SCADA only if that is what is cached)."""
     duid = duid.strip().upper()
-    path = scada_path(duid, year, cache_dir)
+    path = availability_path(duid, year, cache_dir)
+    if not path.exists():
+        path = scada_path(duid, year, cache_dir)
     if not path.exists():
         return ScadaSummary(
             duid=duid, year=year, status="no_scada", check=None, mean_cf=None,
             reject_reasons="",
         )
     try:
-        scada = load_scada(duid, year, cache_dir)
+        scada = _generation_series(duid, year, cache_dir)
         cf = capacity_factor_series(scada, capacity_mw)
         check = whole_year_check(scada, capacity_mw, year, duid=duid)
         mean_cf = float(cf.mean())
@@ -459,16 +463,10 @@ def scada_summary(
         # 5-min MW series; each interval is 5 minutes = 5/60 h.
         energy_mwh = float(scada.sum() * (INTERVAL_MINUTES / 60.0))
         cuf = energy_mwh / (float(capacity_mw) * expected_hours(year)) if capacity_mw > 0 else None
-        # Prefer UIGF for the ramp check: it reflects available capacity, so a
-        # plant heavily curtailed early in the year is not mistaken for one
-        # still being commissioned.
-        ramp_series = scada
-        if has_availability(duid, year, cache_dir):
-            try:
-                ramp_series = load_availability(duid, year, cache_dir)
-            except Exception:  # noqa: BLE001 - fall back to SCADA
-                ramp_series = scada
-        fully_operational, early_peak_ratio = commissioning_ramp_check(ramp_series, year)
+        # The ramp check runs on the same series the plant is modelled with
+        # (UIGF), so a heavily curtailed plant is not mistaken for one still
+        # being commissioned.
+        fully_operational, early_peak_ratio = commissioning_ramp_check(scada, year)
 
         reasons_list = list(check.reject_reasons)
         if not fully_operational:
@@ -604,8 +602,10 @@ def list_eligible_plants(
         for _, row in df.iterrows():
             duid = row["duid"]
             capacity_mw = float(row["capacity_registered_mw"])
-            path = scada_path(duid, year, cache_dir)
-            has_scada = path.exists()
+            has_scada = (
+                availability_path(duid, year, cache_dir).exists()
+                or scada_path(duid, year, cache_dir).exists()
+            )
             summary = scada_summary(duid, capacity_mw, year, cache_dir)
             has_scada_list.append(has_scada)
             sim_ready_list.append(summary.status == "ready")
@@ -730,16 +730,28 @@ def cache_status(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> d
 # ── Optimiser-facing adapters ────────────────────────────────────────────────
 
 def _generation_series(
-    duid: str, year: int, cache_dir: Path, unconstrained: bool
+    duid: str, year: int, cache_dir: Path, unconstrained: bool = True
 ) -> pd.Series:
-    """The 5-min generation series to model this DUID with.
+    """The 5-min generation series to model and assess this DUID with.
 
-    Single source of truth for the UIGF-vs-SCADA choice, so every path that
-    builds capacity factors makes the same one. Falls back to SCADA per DUID
-    when no availability cache exists.
+    Single source of truth, so every path that builds capacity factors or
+    checks eligibility uses the same series.
+
+    The shipped cache carries **UIGF availability only** — the constrained
+    SCADA traces were removed to halve the deployed payload. Availability is
+    also the correct input for a new build: the LP treats the profile as an
+    upper bound and applies its own curtailment, so a constrained trace would
+    double-count someone else's network limits and contractual curtailment.
+
+    `unconstrained=False` still reads SCADA when a local cache is present (for
+    reproducing pre-U4 results, or for modelling offtake from a specific
+    existing plant); it raises the usual FileNotFoundError otherwise.
     """
     if unconstrained and has_availability(duid, year, cache_dir):
         return load_availability(duid, year, cache_dir)
+    # Either SCADA was asked for explicitly, or no availability is cached for
+    # this DUID. Both fall through to SCADA, which raises with acquisition
+    # instructions if it is absent too.
     return load_scada(duid, year, cache_dir)
 
 

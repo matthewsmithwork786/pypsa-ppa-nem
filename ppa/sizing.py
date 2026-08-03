@@ -280,6 +280,9 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         sizing_scn = dataclasses.replace(sizing_scn, max_build_bess_mw=0.0)
 
     if method == "tsam":
+        # intra_period_hours=1.0 (the default): the occurrence weight is NOT the
+        # elapsed time between snapshots, and conflating them sizes storage to
+        # zero (docs/sizing_experiments.md E9).
         n = build_network(ts, sizing_scn, snapshot_weightings=weights)
     elif method == "full_hourly":
         n = build_network(ts, sizing_scn, resolution_h=1.0)
