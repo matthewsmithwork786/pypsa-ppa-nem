@@ -19,6 +19,22 @@ _POSITIVE_COLS = ["Wind", "PV (direct)", "BESS discharge", "Buy from market"]
 _NEGATIVE_COL = "BESS charging"
 
 
+def year_axis(years) -> dict:
+    """Plotly x-axis config for a calendar-year axis.
+
+    Left to itself Plotly treats years as plain numbers and, over a short
+    horizon, lays ticks on fractional steps — a two-year run renders
+    "2,025.2 / 2,025.4". Force whole-year ticks with no thousands separator.
+    """
+    years = list(years)
+    return dict(
+        tickmode="linear",
+        tick0=min(years) if years else 0,
+        dtick=max(1, round(max(1, len(years)) / 12)),
+        tickformat="d",
+    )
+
+
 def _dual_axis_supply_mix(
     df: pd.DataFrame,
     x_col: str,

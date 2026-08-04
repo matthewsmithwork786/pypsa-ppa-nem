@@ -11,6 +11,7 @@ import streamlit as st
 
 from ppa.scenario import BASE_SCENARIO, validate_scenario
 from ui import state
+from ui.charts import year_axis
 from ui.constants import NEM_RESOLUTION_MINUTES
 
 
@@ -56,13 +57,15 @@ def _render_sizing_diagnostics() -> None:
         return
     diag = state.get_sizing_diagnostics()
     avg_spot = diag.get("avg_spot")
-    avg_spot_text = f"A${avg_spot:.1f}/MWh" if avg_spot is not None else "n/a"
+    avg_spot_text = rf"A\${avg_spot:.1f}/MWh" if avg_spot is not None else "n/a"
     with st.expander("🔎 Sizing diagnostics", expanded=False):
+        # Dollar signs are escaped: two unescaped `$` in one markdown string make
+        # Streamlit render everything between them as LaTeX.
         st.caption(
             "LP cost basis: annualised at **target_IRR** incl. devex; merchant revenue "
-            f"credited at **{float(diag.get('sizing_merchant_value_share', 0.5)):.0%}** of "
-            f"positive spot. Reference prices: PPA **A${diag['ppa_price']:.0f}/MWh** · "
-            f"penalty **A${diag['penalty_price']:.0f}/MWh** · avg spot **{avg_spot_text}**."
+            rf"credited at **{float(diag.get('sizing_merchant_value_share', 0.5)):.0%}** of "
+            rf"positive spot. Reference prices: PPA **A\${diag['ppa_price']:.0f}/MWh** · "
+            rf"penalty **A\${diag['penalty_price']:.0f}/MWh** · avg spot **{avg_spot_text}**."
         )
         st.markdown("**Per technology**")
         st.dataframe(diag["tech_rows"], width="stretch")
@@ -512,10 +515,10 @@ def _render_results(fin, n_years: int) -> None:
         if n_years == 1:
             y = fin.yearly[0]
             st.caption(
-                f"Year {y.year} — PPA revenue A${y.ppa_revenue/1e6:.2f}M | "
-                f"Merchant A${y.merch_revenue/1e6:.2f}M | "
-                f"Delivery {y.fulfilled_share:.1%} | "
-                f"Net CF A${y.net_cashflow/1e6:.2f}M"
+                rf"Year {y.year} — PPA revenue A\${y.ppa_revenue/1e6:.2f}M | "
+                rf"Merchant A\${y.merch_revenue/1e6:.2f}M | "
+                rf"Delivery {y.fulfilled_share:.1%} | "
+                rf"Net CF A\${y.net_cashflow/1e6:.2f}M"
             )
             return
 
@@ -554,6 +557,7 @@ def _render_npv_chart(fin) -> None:
     fig.update_layout(
         title="Cumulative NPV over Project Life",
         xaxis_title="Year", yaxis_title="NPV (A$M)", height=400,
+        xaxis=year_axis(years),
     )
     st.plotly_chart(fig, width="stretch")
 
@@ -570,6 +574,7 @@ def _render_revenue_chart(fin) -> None:
     fig.update_layout(
         barmode="relative", title="Annual Revenue Breakdown",
         xaxis_title="Year", yaxis_title="A$M", height=400,
+        xaxis=year_axis(years),
     )
     st.plotly_chart(fig, width="stretch")
 
@@ -586,6 +591,7 @@ def _render_delivery_chart(fin) -> None:
         title="PPA Delivery Rate by Year",
         xaxis_title="Year", yaxis_title="Delivery Rate (%)",
         yaxis=dict(range=[0, 105]), height=400,
+        xaxis=year_axis(years),
     )
     st.plotly_chart(fig, width="stretch")
 

@@ -182,7 +182,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                     "sizing LP weighs the penalty (PPA price x penalty multiplier) "
                     "against the cost of building, and buys its way out of the SLA "
                     "whenever the penalty is cheaper. At current NEM costs it usually "
-                    "is — penalty A$126/MWh against a wind LCOE near A$162/MWh — so "
+                    r"is — penalty A\$126/MWh against a wind LCOE near A\$162/MWh — so "
                     "sized portfolios settle around 50-65% delivery. Tick this to make "
                     "the contractual share binding, so the LP must build enough to meet "
                     "it. If no portfolio within the build caps can, the LP reports "

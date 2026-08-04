@@ -119,11 +119,11 @@ def _what_if_panel(base_energy: EnergyInputs, base_finance: ProjectFinanceInputs
         cols = st.columns(4)
 
         with cols[0]:
-            st.markdown("**CAPEX (A$m/MW or A$m/MWh)**")
+            st.markdown(r"**CAPEX (A\$m/MW or A\$m/MWh)**")
             onsw_build = _num("Wind build", pf + "onsw_build", base_finance.onsw_build_cost, step=0.05, fmt="%.3f")
             pv_build   = _num("Solar build", pf + "pv_build",  base_finance.pv_build_cost,   step=0.05, fmt="%.3f")
             bess_build = _num("BESS build",  pf + "bess_build", base_finance.bess_build_cost, step=0.05, fmt="%.3f")
-            st.markdown("**OPEX (A$m/MW or A$m/MWh p.a.)**")
+            st.markdown(r"**OPEX (A\$m/MW or A\$m/MWh p.a.)**")
             onsw_om  = _num("Wind O&M",  pf + "onsw_om",  base_finance.onsw_fixed_om,  step=0.005, fmt="%.4f")
             pv_om    = _num("Solar O&M", pf + "pv_om",    base_finance.pv_fixed_om,    step=0.005, fmt="%.4f")
             bess_om  = _num("BESS O&M",  pf + "bess_om",  base_finance.bess_fixed_om,  step=0.005, fmt="%.4f")

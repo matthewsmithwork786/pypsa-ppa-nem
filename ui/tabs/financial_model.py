@@ -74,7 +74,7 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
         cols[3].markdown("**BESS**")
 
         cols = st.columns(4, vertical_alignment="bottom")
-        cols[0].markdown("**Investment** (A$M/MW, A$M/MWh):")
+        cols[0].markdown(r"**Investment** (A\$M/MW, A\$M/MWh):")
 
         with cols[1]:
             onsw_build = _num("**Onshore wind**", f + "onsw_build", seed.onsw_build_cost, step=0.05, fmt="%.3f", label_visibility="collapsed")
@@ -86,7 +86,7 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
             bess_build = _num("**BESS**", f + "bess_build", seed.bess_build_cost, step=0.05, fmt="%.3f", label_visibility="collapsed")
 
         cols = st.columns(4)
-        cols[0].markdown("**Connection** (A$M/MW, A$M/MWh):")
+        cols[0].markdown(r"**Connection** (A\$M/MW, A\$M/MWh):")
 
         with cols[1]:
             onsw_conn = _num("Onshore wind ", f + "onsw_conn", seed.onsw_connection_cost, step=0.01, fmt="%.3f", label_visibility="collapsed")
@@ -98,7 +98,7 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
             bess_conn = _num("BESS ", f + "bess_conn", seed.bess_connection_cost, step=0.01, fmt="%.3f", label_visibility="collapsed")
 
         cols = st.columns(4)
-        cols[0].markdown("**Devex** (A$/MW, A$M/MWh):")
+        cols[0].markdown(r"**Devex** (A\$M/MW, A\$M/MWh):")
 
         with cols[1]:
             onsw_devex = _num("Onshore wind  ", f + "onsw_devex", seed.onsw_devex, step=0.01, fmt="%.3f", label_visibility="collapsed")
@@ -110,7 +110,7 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
             bess_devex = _num("BESS  ", f + "bess_devex", seed.bess_devex, step=0.01, fmt="%.3f", label_visibility="collapsed")
 
         cols = st.columns(4)
-        cols[0].markdown("**Fixed O&M** (A$M/MW, A$M/MWh p.a.)")
+        cols[0].markdown(r"**Fixed O&M** (A\$M/MW, A\$M/MWh p.a.)")
 
         with cols[1]:
             onsw_om = _num("Onshore wind   ", f + "onsw_om", seed.onsw_fixed_om, step=0.005, fmt="%.3f", label_visibility="collapsed")
@@ -242,7 +242,7 @@ def _render_results(r) -> None:
 
         cols = st.columns(4)
         cols[0].metric("Total funding (incl. IDC)", f"A${r.total_capex:,.0f}m")
-        cols[1].metric("Debt / Equity", f"A${r.total_debt:,.0f}m / A${r.total_equity:,.0f}m")
+        cols[1].metric("Debt / Equity", rf"A\${r.total_debt:,.0f}m / A\${r.total_equity:,.0f}m")
         cols[2].metric("Min / Avg DSCR", f"{r.min_dscr:.2f} / {r.avg_dscr:.2f}")
         pb = f"{r.payback_years:.1f} yrs" if r.payback_years < 1e8 else "n/a"
         cols[3].metric("Equity payback / LCOE", f"{pb} · A${r.lcoe:,.0f}/MWh")
@@ -373,7 +373,7 @@ def render() -> None:
 
         with cols[3]:
             st.metric("Merchant capture (solar / non-solar)",
-                      f"A${energy.sell_solar_price:,.0f} / A${energy.sell_nonsolar_price:,.0f}")
+                      rf"A\${energy.sell_solar_price:,.0f} / A\${energy.sell_nonsolar_price:,.0f}")
             st.metric("Capacity (BESS)",
                       f"{energy.bess_mw:,.0f} MW / {energy.bess_mwh:,.0f} MWh")
 

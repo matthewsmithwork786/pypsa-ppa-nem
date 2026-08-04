@@ -6,7 +6,7 @@ import streamlit as st
 
 from ppa.results import build_supply_mix_df, build_24h_avg
 from ui import state
-from ui.charts import make_supply_mix_24h_chart, make_revenue_breakdown_chart
+from ui.charts import make_supply_mix_24h_chart, make_revenue_breakdown_chart, year_axis
 
 
 def _render_multi_year_overview(fin) -> None:
@@ -83,6 +83,7 @@ def _render_multi_year_overview(fin) -> None:
     fig.update_layout(
         xaxis_title="Year", yaxis_title="NPV (A$M)", height=400,
         margin=dict(t=10, b=40),
+        xaxis=year_axis(years),
     )
     st.plotly_chart(fig, width="stretch")
 
