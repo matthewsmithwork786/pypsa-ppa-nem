@@ -297,10 +297,15 @@ def capacity_factor_for_duid(
     cache_dir: Path = NEM_CACHE_DIR,
     registry: pd.DataFrame | None = None,
 ) -> pd.Series:
-    """Native 5-min CF for on-screen inspection."""
+    """Native 5-min CF for on-screen inspection.
+
+    Goes through `_generation_series` so the on-screen CF is the same series the
+    plant is modelled with; the shipped cache carries UIGF availability only, so
+    reading SCADA directly here raised FileNotFoundError for every plant.
+    """
     capacity_mw = plant_capacity_mw(duid, registry=registry, cache_dir=cache_dir)
-    scada = load_scada(duid, year, cache_dir)
-    return capacity_factor_series(scada, capacity_mw)
+    generation = _generation_series(duid, year, cache_dir)
+    return capacity_factor_series(generation, capacity_mw)
 
 
 def to_hourly(series: pd.Series, year: int) -> pd.Series:
