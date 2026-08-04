@@ -26,7 +26,8 @@ def _energy_source() -> tuple[EnergyInputs | None, list, bool]:
     """Energy inputs, the underlying per-year results, and a multi-year flag.
 
     The same result set drives both ``EnergyInputs`` (averaged) and the per-year
-    hourly sheets, so the workbook's rolled-up totals match the model exactly.
+    hourly rows stacked on the combined Hourly sheet, so the workbook's rolled-up
+    totals match the model exactly.
     The multi-year flag tells the model whether merchant prices are already
     escalated per year (so it should not escalate them again)."""
     if state.has_multi_year_results():
@@ -162,7 +163,6 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
             pen = _num("Penalty multiple (×)", f + "pen", seed.penalty_multiple, step=0.1, fmt="%.2f")
             lgc = _num("LGC / GO price (A$/MWh)", f + "lgc", seed.lgc_price, step=1.0)
         with cols[2]:
-            offset = int(_num("Indexation offset (yrs)", f + "offset", seed.indexation_offset_years, step=1))
             cost_infl = _num("Cost inflation (%/yr)", f + "cost_infl", seed.cost_inflation, step=0.1, fmt="%.2f", pct=True)
         with cols[3]:
             ppa_idx = _num("PPA & LGC indexation (%/yr)", f + "ppa_idx", seed.ppa_indexation, step=0.1, fmt="%.2f", pct=True)
@@ -217,7 +217,7 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
         onsw_constr_years=onsw_con, pv_constr_years=pv_con, bess_constr_years=bess_con,
         operating_life=life,
         ppa_tenor=tenor, ppa_tariff=tariff, penalty_multiple=pen, lgc_price=lgc,
-        indexation_offset_years=offset, cost_inflation=cost_infl, ppa_indexation=ppa_idx,
+        cost_inflation=cost_infl, ppa_indexation=ppa_idx,
         solar_price_inflation=solar_infl, nonsolar_price_inflation=nonsolar_infl,
         escalate_merchant_prices=escalate_merchant,
         debt_tenor=debt_tenor, debt_rate=debt_rate,
@@ -405,9 +405,10 @@ def render() -> None:
         # st.subheader("Export")
         n_years = len(results_list)
         st.caption(
-            "Download a streamlined, **live** Excel workbook — one **Hourly** sheet per "
-            f"simulated year ({n_years}) with full hourly dispatch, the Energy totals rolled "
-            "up from those hours, and the revenue→tax→cash-flow chain and IRRs as formulas."
+            "Download a streamlined, **live** Excel workbook — one combined **Hourly** sheet "
+            f"holding all {n_years} simulated years stacked under a Year column, the Energy "
+            "totals rolled up from those hours, and the revenue→tax→cash-flow chain and IRRs "
+            "as formulas."
         )
         if n_years > 12:
             st.caption(

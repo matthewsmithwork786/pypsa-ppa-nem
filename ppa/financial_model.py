@@ -116,7 +116,10 @@ class ProjectFinanceInputs:
     lgc_price: float = 5.0             # A$/MWh green-certificate revenue on excess
 
     # ── Indexation (% p.a.) ─────────────────────────────────────────────────
-    indexation_offset_years: int = 2   # years of escalation already elapsed at period 1
+    # Year 0 of the model is the base year: indexation multipliers are 1.0 at
+    # year 0 and compound (1 + rate)^year thereafter. The inputs (tariffs,
+    # costs, capture prices) are therefore stated in year-0 dollars, which is
+    # what retired the old `indexation_offset_years` input.
     cost_inflation: float = 0.025
     ppa_indexation: float = 0.025
     solar_price_inflation: float = 0.01
@@ -189,7 +192,7 @@ class ProjectFinanceResult:
     payback_years: float
     lcoe: float                   # A$/MWh
 
-    # Per-period schedules (length = model_duration); index 0 = period 1
+    # Per-period schedules (length = model_duration); index 0 = year 0
     periods: np.ndarray = field(repr=False, default=None)  # type: ignore
     schedule: dict[str, np.ndarray] = field(repr=False, default_factory=dict)
 
@@ -302,24 +305,25 @@ def energy_inputs_from_results(results: list) -> EnergyInputs:
 
 @dataclass
 class _Timeline:
+    """0-based year timeline: year 0 is the model's base (development) year."""
     duration: int
-    constr_start: int     # financial close / FID — construction begins immediately
-    constr_end: int       # period at which construction finishes
-    ops_start: int        # first operating period (COD)
+    constr_start: int     # financial close / FID — construction begins immediately (0-based year)
+    constr_end: int       # last construction year
+    ops_start: int        # first operating year (COD)
     ops_end: int
     ppa_end: int
     debt_end: int
 
     def tech_constr(self, constr_years: int) -> tuple[int, int]:
-        """Construction periods for a tech (back-aligned to constr_end)."""
+        """Construction years for a tech (back-aligned to constr_end)."""
         return self.constr_end - constr_years + 1, self.constr_end
 
 
 def _build_timeline(p: ProjectFinanceInputs) -> _Timeline:
     max_constr = max(p.onsw_constr_years, p.pv_constr_years, p.bess_constr_years)
-    constr_start = p.development_start          # devex bullet + construction both start at FID
+    constr_start = p.development_start - 1      # devex bullet + construction both start at FID
     constr_end = constr_start + max_constr - 1
-    ops_start = constr_end + 1                  # == development_start + max_constr
+    ops_start = constr_end + 1                  # == development_start - 1 + max_constr
     ops_end = ops_start + p.operating_life - 1
     ppa_end = ops_start + p.ppa_tenor - 1
     debt_end = ops_start + p.debt_tenor - 1
@@ -328,14 +332,14 @@ def _build_timeline(p: ProjectFinanceInputs) -> _Timeline:
 
 
 def _spread(total: float, first: int, last: int, n: int, mult: np.ndarray) -> np.ndarray:
-    """Spread ``total`` evenly across periods [first, last] (1-based, inclusive),
+    """Spread ``total`` evenly across years [first, last] (0-based, inclusive),
     indexing each instalment by the cost-inflation multiplier ``mult``."""
     out = np.zeros(n)
     if last < first:
         return out
     per = total / (last - first + 1)
-    for period in range(first, last + 1):
-        out[period - 1] = per * mult[period - 1]
+    for year in range(first, last + 1):
+        out[year] = per * mult[year]
     return out
 
 
@@ -377,7 +381,7 @@ def run_project_finance(
 ) -> ProjectFinanceResult:
     n = p.model_duration
     tl = _build_timeline(p)
-    periods = np.arange(1, n + 1)
+    periods = np.arange(0, n)  # 0-based years; year 0 is the base year
 
     def zeros() -> np.ndarray:
         return np.zeros(n)
@@ -388,9 +392,9 @@ def run_project_finance(
     nonppa_flag = ((periods > tl.ppa_end) & (periods <= tl.ops_end)).astype(float)
     debt_flag = ((periods >= tl.ops_start) & (periods <= tl.debt_end)).astype(float)
 
-    # ── Indexation multipliers (compounded from indexation start) ────────────
+    # ── Indexation multipliers (year 0 is the base: multiplier = 1.0) ────────
     def index_mult(rate: float) -> np.ndarray:
-        return (1.0 + rate) ** (periods + p.indexation_offset_years - 1)
+        return (1.0 + rate) ** periods
 
     cost_idx = index_mult(p.cost_inflation)
     ppa_idx = index_mult(p.ppa_indexation)
@@ -404,7 +408,7 @@ def run_project_finance(
         solar_idx = np.ones(n)
         nonsolar_idx = np.ones(n)
 
-    # ── Schedule 1: Capital spend ────────────────────────────────────────────
+    # ── Schedule 1: Capital spend (per technology, with subtotals) ───────────
     onsw_devex_tot = p.onsw_devex * e.onsw_mw
     pv_devex_tot = p.pv_devex * e.pv_mw
     bess_devex_tot = p.bess_devex * e.bess_mwh
@@ -412,50 +416,53 @@ def run_project_finance(
     pv_capex_tot = (p.pv_build_cost + p.pv_connection_cost) * e.pv_mw
     bess_capex_tot = (p.bess_build_cost + p.bess_connection_cost) * e.bess_mwh
 
-    # Devex is a single bullet paid at FID (= development_start), immediately
-    # before construction spend begins. Not spread over a development phase.
-    devex = np.zeros(n)
-    devex_total = onsw_devex_tot + pv_devex_tot + bess_devex_tot
+    # Devex is a single bullet per technology, paid at FID (= development_start).
+    # Because year 0 is the base year, the FID bullet carries no indexation.
+    devex_onsw = zeros()
+    devex_pv = zeros()
+    devex_bess = zeros()
     fid = tl.constr_start
-    if 1 <= fid <= n:
-        devex[fid - 1] = devex_total * cost_idx[fid - 1]
+    if 0 <= fid < n:
+        devex_onsw[fid] = onsw_devex_tot * cost_idx[fid]
+        devex_pv[fid] = pv_devex_tot * cost_idx[fid]
+        devex_bess[fid] = bess_devex_tot * cost_idx[fid]
+    devex = devex_onsw + devex_pv + devex_bess
 
     cf, cl = tl.tech_constr(p.onsw_constr_years)
-    capex = _spread(onsw_capex_tot, cf, cl, n, cost_idx)
+    capex_onsw = _spread(onsw_capex_tot, cf, cl, n, cost_idx)
     cf, cl = tl.tech_constr(p.pv_constr_years)
-    capex += _spread(pv_capex_tot, cf, cl, n, cost_idx)
+    capex_pv = _spread(pv_capex_tot, cf, cl, n, cost_idx)
     cf, cl = tl.tech_constr(p.bess_constr_years)
-    capex += _spread(bess_capex_tot, cf, cl, n, cost_idx)
+    capex_bess = _spread(bess_capex_tot, cf, cl, n, cost_idx)
+    capex = capex_onsw + capex_pv + capex_bess
 
     total_capital_spend = devex + capex  # nominal, excl. IDC
 
-    # ── Schedule 2: Generation, revenue, opex ────────────────────────────────
-    ppa_tariff = p.ppa_tariff * ppa_idx
-    penalty_tariff = p.penalty_tariff * ppa_idx
-    merch_solar = e.sell_solar_price * solar_idx
-    merch_nonsolar = e.sell_nonsolar_price * nonsolar_idx
-    lgc = p.lgc_price * ppa_idx
+    # ── Schedule 2: Volumes, prices, revenue ─────────────────────────────────
+    # Volumes & prices are broken out first; revenue is derived from them.
+    ppa_vol = ppa_flag * e.ppa_gwh                       # GWh
+    merch_solar_vol = ppa_flag * e.excess_solar_gwh + nonppa_flag * e.total_solar_gwh
+    merch_nonsolar_vol = ppa_flag * e.excess_nonsolar_gwh + nonppa_flag * e.total_nonsolar_gwh
+    merch_vol = merch_solar_vol + merch_nonsolar_vol
+    pen_vol = ppa_flag * e.penalty_gwh                   # GWh
+
+    ppa_price = ppa_idx * p.ppa_tariff                   # A$/MWh (indexed)
+    merch_solar_price = solar_idx * e.sell_solar_price
+    merch_nonsolar_price = nonsolar_idx * e.sell_nonsolar_price
+    pen_price = ppa_idx * p.penalty_tariff
+    lgc_price = ppa_idx * p.lgc_price
 
     GWh = 1000.0  # GWh → MWh
     M = 1e6       # A$/A$m
 
-    # PPA period revenue
-    ppa_rev = ppa_flag * e.ppa_gwh * GWh * ppa_tariff / M
-    penalty_cost = ppa_flag * e.penalty_gwh * GWh * penalty_tariff / M  # cost (positive A$m)
-    merch_solar_rev = ppa_flag * e.excess_solar_gwh * GWh * merch_solar / M
-    merch_nonsolar_rev = ppa_flag * e.excess_nonsolar_gwh * GWh * merch_nonsolar / M
-    lgc_rev = ppa_flag * (e.excess_solar_gwh + e.excess_nonsolar_gwh) * GWh * lgc / M
-
-    # Post-PPA period — all generation sold merchant
-    post_solar_rev = nonppa_flag * e.total_solar_gwh * GWh * merch_solar / M
-    post_nonsolar_rev = nonppa_flag * e.total_nonsolar_gwh * GWh * merch_nonsolar / M
-    post_lgc_rev = nonppa_flag * (e.total_solar_gwh + e.total_nonsolar_gwh) * GWh * lgc / M
+    ppa_rev = ppa_vol * GWh * ppa_price / M
+    merch_solar_rev = merch_solar_vol * GWh * merch_solar_price / M
+    merch_nonsolar_rev = merch_nonsolar_vol * GWh * merch_nonsolar_price / M
+    lgc_rev = merch_vol * GWh * lgc_price / M           # LGC applies to all merchant volume
+    penalty_cost = pen_vol * GWh * pen_price / M        # cost (positive A$m)
 
     net_contracted_rev = ppa_rev - penalty_cost
-    net_uncontracted_rev = (
-        merch_solar_rev + merch_nonsolar_rev + lgc_rev
-        + post_solar_rev + post_nonsolar_rev + post_lgc_rev
-    )
+    net_uncontracted_rev = merch_solar_rev + merch_nonsolar_rev + lgc_rev
     total_rev = net_contracted_rev + net_uncontracted_rev
 
     # Opex: fixed O&M (flat real) + ancillary (% of revenue)
@@ -484,8 +491,8 @@ def run_project_finance(
     # Max debt by DSCR = NPV of target debt service discounted at debt rate to ops_start
     def npv_to_ops(series: np.ndarray) -> float:
         total = 0.0
-        for period in range(tl.ops_start, tl.debt_end + 1):
-            total += series[period - 1] / (1.0 + p.debt_rate) ** (period - tl.ops_start + 1)
+        for year in range(tl.ops_start, tl.debt_end + 1):
+            total += series[year] / (1.0 + p.debt_rate) ** (year - tl.ops_start + 1)
         return total
 
     contracted_debt_cap = npv_to_ops(tgt_ds_contracted)
@@ -500,14 +507,14 @@ def run_project_finance(
 
     # ── Funding & IDC ────────────────────────────────────────────────────────
     # Funding waterfall: equity funds development spend; at financial close (the
-    # first construction period) debt is drawn and front-loaded — it refinances
+    # first construction year) debt is drawn and front-loaded — it refinances
     # the development spend and funds construction up to the debt limit, with
     # equity supplying the residual at the end. Front-loading debt makes interest
     # during construction (IDC) accrue from financial close; IDC is charged on the
     # closing balance (opening + drawdown) and capitalised at the operations
     # start. The pre-IDC debt limit is solved iteratively so drawdowns + IDC equal
     # the sized debt.
-    fc_period = tl.constr_start  # financial close = FID = first construction period
+    fc_period = tl.constr_start  # financial close = FID = first construction year
     cum_spend = np.cumsum(total_capital_spend)
     total_debt = target_debt
 
@@ -519,19 +526,19 @@ def run_project_finance(
         debt_draw = zeros()
         remaining = pre_idc_limit
         funded = 0.0
-        for period in range(fc_period, tl.constr_end + 1):
-            target = max(cum_spend[period - 1] - funded, 0.0)
+        for year in range(fc_period, tl.constr_end + 1):
+            target = max(cum_spend[year] - funded, 0.0)
             draw = min(target, remaining)
-            debt_draw[period - 1] = draw
+            debt_draw[year] = draw
             funded += draw
             remaining -= draw
         # Roll balance forward; IDC charged on closing balance (opening + draw)
         bal = 0.0
         new_idc = zeros()
-        for period in range(1, tl.ops_start):
-            draw = debt_draw[period - 1]
+        for year in range(0, tl.ops_start):
+            draw = debt_draw[year]
             interest = (bal + draw) * p.debt_rate
-            new_idc[period - 1] = interest
+            new_idc[year] = interest
             bal += draw + interest
         if abs(float(new_idc.sum()) - float(idc.sum())) < 1e-9:
             idc = new_idc
@@ -559,8 +566,8 @@ def run_project_finance(
         interest = zeros()
         repay = zeros()
         closing = zeros()
-        for period in range(tl.ops_start, tl.debt_end + 1):
-            i = period - 1
+        for year in range(tl.ops_start, tl.debt_end + 1):
+            i = year
             intr = bal * p.debt_rate
             principal = max(tgt_ds[i] - intr, 0.0)
             principal = min(principal, bal)
@@ -575,10 +582,19 @@ def run_project_finance(
     interest_exp = int_c + int_u
     loan_repay = rep_c + rep_u
 
+    # ── Debt corkscrew (opening → drawdown/IDC/repayment → closing) ──────────
+    debt_opening = zeros()
+    debt_closing = zeros()
+    bal = 0.0
+    for t in range(n):
+        debt_opening[t] = bal
+        bal += debt_draw[t] + idc[t] - loan_repay[t]
+        debt_closing[t] = bal
+
     # ── Schedule 4: Depreciation ─────────────────────────────────────────────
     book_base = nominal_capex_total + float(idc.sum())  # devex + capex + IDC capitalised
     tax_base = float(capex.sum())                       # capex only (devex expensed for tax)
-    book_dep = ops_flag * min(1.0, 1.0) * book_base * p.book_depreciation_rate
+    book_dep = ops_flag * book_base * p.book_depreciation_rate
     tax_dep = ops_flag * tax_base * p.tax_depreciation_rate
     # cap cumulative depreciation at the asset base
     book_dep = _cap_depreciation(book_dep, book_base)
@@ -620,7 +636,7 @@ def run_project_finance(
     min_dscr = float(np.min(dscr_vals)) if len(dscr_vals) else float("nan")
     avg_dscr = float(np.mean(dscr_vals)) if len(dscr_vals) else float("nan")
 
-    # Simple payback on FCFE (years from ops start to cumulative >= 0)
+    # Simple payback on FCFE (0-based year of the last sign change, fractional)
     payback = _payback(fcfe)
 
     # LCOE — annuitised capital + opex over generation
@@ -631,31 +647,78 @@ def run_project_finance(
         if annual_gen_mwh > 0 else float("nan")
     )
 
+    # ── Cash-flow statement & balance sheet ──────────────────────────────────
+    ocf = ops_flag * (ebitda - tax)
+    investing_cf = -total_capital_spend
+    financing_cf = debt_draw - interest_exp - loan_repay + equity_spend
+    net_cashflow = ocf + investing_cf + financing_cf
+    cum_net_cf = np.cumsum(net_cashflow)
+
+    gross_fixed_assets = np.cumsum(total_capital_spend + idc)
+    accum_dep = np.cumsum(book_dep)
+    net_fixed_assets = gross_fixed_assets - accum_dep
+    net_debt = debt_closing
+    net_equity = net_fixed_assets - net_debt
+
     schedule = {
         "period": periods.astype(float),
         "ops_flag": ops_flag,
         "ppa_flag": ppa_flag,
+        "devex_onsw": devex_onsw,
+        "devex_pv": devex_pv,
+        "devex_bess": devex_bess,
         "devex": devex,
+        "capex_onsw": capex_onsw,
+        "capex_pv": capex_pv,
+        "capex_bess": capex_bess,
         "capex": capex,
         "total_capital_spend": total_capital_spend,
-        "debt_draw": debt_draw,
-        "idc": idc,
+        "ppa_vol": ppa_vol,
+        "merch_solar_vol": merch_solar_vol,
+        "merch_nonsolar_vol": merch_nonsolar_vol,
+        "merch_vol": merch_vol,
+        "pen_vol": pen_vol,
+        "ppa_price": ppa_price,
+        "merch_solar_price": merch_solar_price,
+        "merch_nonsolar_price": merch_nonsolar_price,
+        "pen_price": pen_price,
+        "lgc_price": lgc_price,
+        "ppa_rev": ppa_rev,
+        "merch_solar_rev": merch_solar_rev,
+        "merch_nonsolar_rev": merch_nonsolar_rev,
+        "penalty_cost": penalty_cost,
         "net_contracted_rev": net_contracted_rev,
         "net_uncontracted_rev": net_uncontracted_rev,
         "total_rev": total_rev,
         "opex": opex,
         "ebitda": ebitda,
+        "debt_draw": debt_draw,
+        "idc": idc,
         "interest": interest_exp,
         "loan_repay": loan_repay,
+        "debt_opening": debt_opening,
+        "debt_closing": debt_closing,
+        "equity_spend": equity_spend,
         "book_dep": book_dep,
         "tax_dep": tax_dep,
         "pbt": pbt,
         "tax": tax,
         "pat": pat,
+        "ocf": ocf,
+        "investing_cf": investing_cf,
+        "financing_cf": financing_cf,
+        "net_cashflow": net_cashflow,
+        "cum_net_cf": cum_net_cf,
+        "gross_fixed_assets": gross_fixed_assets,
+        "accum_dep": accum_dep,
+        "net_fixed_assets": net_fixed_assets,
+        "net_debt": net_debt,
+        "net_equity": net_equity,
         "cfads": cfads_total,
         "dscr": dscr_series,
         "fcff": fcff,
         "fcfe": fcfe,
+        "cum_fcfe": np.cumsum(fcfe),
     }
 
     return ProjectFinanceResult(
@@ -691,14 +754,16 @@ def _cap_depreciation(dep: np.ndarray, base: float) -> np.ndarray:
 def _payback(fcfe: np.ndarray) -> float:
     """Years until cumulative equity cash flow turns — and stays — positive.
 
-    Uses the *last* sign change so that transient swings during construction
-    (e.g. development costs refinanced by debt at financial close) don't produce
-    a spuriously short payback."""
+    Returns the *0-based* fractional year of the last sign change so transient
+    swings during construction (e.g. development costs refinanced by debt at
+    financial close) don't produce a spuriously short payback. Matches the
+    Excel LOOKUP-based formula on the Model sheet.
+    """
     cum = np.cumsum(fcfe)
     crossing = None
     for i in range(1, len(cum)):
         if cum[i] >= 0 and cum[i - 1] < 0:
             prev = cum[i - 1]
             frac = (-prev) / (cum[i] - prev) if cum[i] != prev else 0.0
-            crossing = i + frac  # 1-based period of the (latest) crossing
+            crossing = (i - 1) + frac  # 0-based year of the (latest) crossing
     return float(crossing) if crossing is not None else float("inf")

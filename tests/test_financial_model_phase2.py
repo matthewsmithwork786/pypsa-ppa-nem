@@ -70,7 +70,7 @@ def test_defaults_match_aud_benchmarks():
     assert p.discount_rate == pytest.approx(0.08)
     assert p.ppa_tariff == pytest.approx(100.0)
     assert p.penalty_multiple == pytest.approx(1.5)
-    assert p.indexation_offset_years == 2
+    assert not hasattr(p, "indexation_offset_years")  # retired by the year-0 base
     assert p.escalate_merchant_prices is True
 
 
@@ -120,14 +120,14 @@ def test_devex_single_bullet_at_fid_default_start():
 
     nonzero_idx = np.flatnonzero(devex)
     assert len(nonzero_idx) == 1
-    assert nonzero_idx[0] == p.development_start - 1
+    assert nonzero_idx[0] == p.development_start - 1  # FID is the 0-based year
 
-    cost_idx_at_fid = (1.0 + p.cost_inflation) ** (
-        p.development_start + p.indexation_offset_years - 1
-    )
+    # Year 0 is the base year, so the FID bullet carries no indexation
+    # (multiplier = (1+rate)**0 = 1.0).
+    cost_idx_at_fid = (1.0 + p.cost_inflation) ** (p.development_start - 1)
     expected = 29.0 * cost_idx_at_fid
     assert devex[nonzero_idx[0]] == pytest.approx(expected)
-    assert expected == pytest.approx(29.0 * 1.025 ** 2)
+    assert expected == pytest.approx(29.0)
 
     # Un-indexed devex total recovers the raw devex input (29.0 = 0.29 * 100 MW)
     undexed_total = devex.sum() / cost_idx_at_fid
@@ -153,7 +153,8 @@ def test_construction_window_and_ops_start():
 
     ops_flag = result.schedule["ops_flag"]
     first_ops_period = int(result.periods[np.flatnonzero(ops_flag)][0])
-    assert first_ops_period == p.development_start + max_constr
+    # 0-based years: ops begin the year after construction ends.
+    assert first_ops_period == p.development_start - 1 + max_constr
 
 
 # ── 5. Non-default development_start still produces one correctly offset bullet ──
