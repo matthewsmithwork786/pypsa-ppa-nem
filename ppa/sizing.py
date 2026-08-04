@@ -480,6 +480,26 @@ def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFr
             }
         )
 
+    # BESS is sized by the same LP and `bess_cap_binding` is already computed, so
+    # leaving it out of the table meant a portfolio with (or notably without)
+    # storage had no row explaining the decision. Storage has no generation CF,
+    # so cost is annualised per MW using the fixed duration and CF/LCOE are n/a.
+    if scenario.include_bess:
+        bess_per_mw = (
+            scenario.bess_capex_per_kwh * 1_000 * scenario.bess_max_hours
+            * devex * (crf + opex)
+        )
+        tech_rows.append(
+            {
+                "Technology": f"BESS ({scenario.bess_max_hours:.1f}h)",
+                "Sized (MW)": round(sized.bess_mw, 1),
+                "Annualised cost (A$/MW/yr)": round(bess_per_mw, 0),
+                "Achieved CF": "—",
+                "Implied LCOE (A$/MWh)": None,
+                "Max-build cap binding": "Yes" if sized.bess_cap_binding else "No",
+            }
+        )
+
     link_rows = []
     for label, mw, binding in [
         ("Wind link", sized.wind_link_mw, sized.wind_link_binding),
