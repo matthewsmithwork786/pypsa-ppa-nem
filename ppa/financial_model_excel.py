@@ -73,12 +73,43 @@ def _text(cell, value):
     return cell
 
 
+def export_hourly_timeseries(year_results: list) -> bytes:
+    """The stacked hourly dispatch as its own workbook.
+
+    25 years x 8760 rows is ~219k rows of thirteen columns: slow to build and
+    heavy to move, which made the financial model itself slow to download for no
+    benefit to anyone reading the P&L. The hours ship separately so the finance
+    workbook stays small, and carry the same per-year aggregate block so they
+    remain auditable on their own.
+    """
+    if not year_results:
+        raise ValueError("export_hourly_timeseries needs at least one year of results")
+
+    wb = Workbook()
+    wb.remove(wb.active)  # drop openpyxl's default empty sheet
+    _write_hourly_sheet(wb, year_results)
+    wb.active = 0
+    wb.calculation.calcMode = "auto"
+    wb.calculation.fullCalcOnLoad = True
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def export_financial_model(
     p: ProjectFinanceInputs,
     e: EnergyInputs,
     result: ProjectFinanceResult,
     year_results: list | None = None,
 ) -> bytes:
+    """The project-finance workbook.
+
+    Passing `year_results` embeds the hourly sheet and makes the Energy totals
+    roll up from it. The app no longer does: the hours ship via
+    `export_hourly_timeseries` and the Energy tab carries hard values instead.
+    The argument is kept so a single self-contained workbook remains available.
+    """
     wb = Workbook()
     inputs_cells = _write_inputs(wb, p)
     # One combined Hourly sheet holding every simulated year stacked vertically;
@@ -439,7 +470,11 @@ def _write_energy(
     _text(ws["B2"],
           f"Scenario: {e.name}. "
           + ("Annual totals are the average of the per-year sums on the Hourly sheet."
-             if hourly_refs else "Pre-filled from the energy model."))
+             if hourly_refs else
+             "Annual totals are hard values: the average across the simulated "
+             "years of each year's hourly dispatch. They are the same numbers "
+             "the separate hourly-timeseries workbook sums to, and everything "
+             "on Model and Outputs is driven from them."))
     ws["B2"].font = Font(italic=True, color="808080")
 
     cells: dict[str, str] = {}

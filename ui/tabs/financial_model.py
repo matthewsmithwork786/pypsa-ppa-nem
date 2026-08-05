@@ -15,7 +15,7 @@ from ppa.financial_model import (
     energy_inputs_from_results,
     project_finance_inputs_from_scenario,
 )
-from ppa.financial_model_excel import export_financial_model
+from ppa.financial_model_excel import export_financial_model, export_hourly_timeseries
 from ui import state
 
 
@@ -404,26 +404,53 @@ def render() -> None:
     with st.expander("⚡ Export financial model as Excel(R) file", expanded=False):
         # st.subheader("Export")
         n_years = len(results_list)
+        _stem = (result.energy.name or "scenario").replace(" ", "_")
+        _mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         st.caption(
-            "Download a streamlined, **live** Excel workbook — one combined **Hourly** sheet "
-            f"holding all {n_years} simulated years stacked under a Year column, the Energy "
-            "totals rolled up from those hours, and the revenue→tax→cash-flow chain and IRRs "
-            "as formulas."
+            "Two separate downloads. The **financial model** is the live workbook — "
+            "revenue→tax→cash-flow chain and IRRs as formulas — with the annual energy "
+            "figures as hard values on its Energy tab. The **hourly timeseries** is the "
+            f"raw dispatch for all {n_years} simulated years, stacked under a Year column. "
+            f"The hours are a separate file because {n_years} × 8 760 rows is slow to "
+            "build and heavy to move, and the finance workbook does not need them."
         )
-        if n_years > 12:
-            st.caption(
-                f"⚠️ {n_years} years × 8 760 hours makes a quite large workbook — does take a moment "
-                "to build it to be available for download afterwards."
-            )
-        try:
-            xlsx = export_financial_model(result.inputs, result.energy, result, year_results=results_list)
-            fname = f"financial_model_{(result.energy.name or 'scenario').replace(' ', '_')}.xlsx"
-            st.download_button(
-                "⬇️ Download financial model",
-                data=xlsx,
-                file_name=fname,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                width="stretch",
-            )
-        except Exception as exc:
-            st.error(f"Excel export failed: {exc}")
+
+        _cols = st.columns(2)
+        with _cols[0]:
+            try:
+                xlsx = export_financial_model(result.inputs, result.energy, result)
+                st.download_button(
+                    "⬇️ Download financial model",
+                    data=xlsx,
+                    file_name=f"financial_model_{_stem}.xlsx",
+                    mime=_mime,
+                    width="stretch",
+                    type="primary",
+                )
+            except Exception as exc:
+                st.error(f"Excel export failed: {exc}")
+
+        with _cols[1]:
+            # Built only on demand: this is the expensive one.
+            if st.session_state.get("fm_hourly_xlsx_for") != _stem:
+                if st.button(
+                    f"🕒 Prepare hourly timeseries ({n_years} yr)",
+                    width="stretch",
+                    help="Builds the raw hourly dispatch workbook — takes a moment for "
+                         "a long horizon.",
+                ):
+                    with st.spinner(f"Building {n_years} × 8 760 hourly rows..."):
+                        try:
+                            st.session_state["fm_hourly_xlsx"] = export_hourly_timeseries(results_list)
+                            st.session_state["fm_hourly_xlsx_for"] = _stem
+                        except Exception as exc:
+                            st.error(f"Hourly export failed: {exc}")
+                    st.rerun()
+            else:
+                st.download_button(
+                    "⬇️ Download hourly timeseries",
+                    data=st.session_state["fm_hourly_xlsx"],
+                    file_name=f"hourly_timeseries_{_stem}.xlsx",
+                    mime=_mime,
+                    width="stretch",
+                )
