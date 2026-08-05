@@ -558,6 +558,14 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                     "AER region", options=_aer_regions, index=_aer_region_idx, key="sf_aer_region",
                 )
                 _aer_quarters_available = aer_futures.available_quarters(_aer_df, region=aer_region)
+                # The field this feeds is labelled "calendar year", so default to
+                # the first complete calendar year rather than the whole published
+                # strip -- AER lists ~4 years ahead, and averaging all 16 quarters
+                # is a multi-year strip price, not a calendar-year one (NSW1:
+                # A$105.76 across 2026-29 vs A$101.72 for CY2026).
+                _aer_default_quarters = aer_futures.first_full_calendar_year(
+                    _aer_quarters_available
+                )
                 _stored_quarters = st.session_state.get("sf_aer_quarters")
                 if _stored_quarters is not None and any(
                     q not in _aer_quarters_available for q in _stored_quarters
@@ -566,9 +574,9 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                     # one that doesn't have this quarter) -- reset to a fresh,
                     # valid list rather than letting it propagate into
                     # `quarterly_average`'s ValueError below.
-                    st.session_state["sf_aer_quarters"] = list(_aer_quarters_available)
+                    st.session_state["sf_aer_quarters"] = list(_aer_default_quarters)
                 else:
-                    st.session_state.setdefault("sf_aer_quarters", list(_aer_quarters_available))
+                    st.session_state.setdefault("sf_aer_quarters", list(_aer_default_quarters))
                 aer_quarters = aer_cols[1].multiselect(
                     "Quarters", options=_aer_quarters_available, key="sf_aer_quarters",
                 )

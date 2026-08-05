@@ -11,22 +11,34 @@ sandbox blocks `aer.gov.au`). Copy/commit the resulting
 that's what `ppa/data/aer_futures.py` actually reads at runtime (cache-only,
 no network imports).
 
-Background page (human-readable, chart + "export data" style controls):
-    https://www.aer.gov.au/wholesale-markets/wholesale-statistics/quarterly-base-futures-prices-and-volume-traded
+Background page (human-readable, chart + "Download CSV" link):
+    https://www.aer.gov.au/industry/registers/charts/quarterly-base-futures-prices-and-volume-traded
 
-UNVERIFIED: the exact CSV download URL/format was NOT directly fetchable from
-this sandboxed planning session (aer.gov.au is blocked here). `CSV_URL` below
-is a best-effort placeholder pointing at the human-readable page -- open that
-page in a browser, find the actual "download data"/"export CSV" link or XHR
-endpoint it calls (inspect network tab, or look for a direct .csv link), and
-update the `CSV_URL` constant accordingly before running this script for real.
-It is deliberately kept as a single clearly-labeled constant near the top so
-that's a one-line fix.
+VERIFIED 2026-08-05 against the live export. Two things to know:
+
+* aer.gov.au sits behind Akamai bot verification, so a plain `requests.get` of
+  the CSV returns a JavaScript interstitial rather than data. `download_raw_csv`
+  therefore drives the chart page in headless Chromium (Playwright) to clear
+  the check, then pulls the CSV inside that browser context.
+* The export is WIDE, not long: one row per quarter, one price and one volume
+  column per region, e.g.
+
+      Quarter,Queensland price ($ per megawatt hour),New South Wales price ...
+      2026 Q1,65.5,73.5,43,88.8,1925,2105,1338,1
+
+  Only QLD/NSW/VIC/SA are published -- ASX Energy lists no Tasmanian base
+  future, so TAS1 is legitimately absent and callers must cope with that.
+
+The quarters published are forward ones (2026 Q1..2029 Q4 as at April 2026),
+so `--year` names the cache file the app looks up by `nem_year`, not a filter
+on the quarters: the whole published strip is written and the app chooses which
+quarters to average.
 """
 from __future__ import annotations
 
 import argparse
 import io
+import re
 import logging
 import sys
 from datetime import date
@@ -38,32 +50,41 @@ import requests
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("fetch_aer_futures")
 
-# --- UPDATE THIS before running for real (see module docstring) ---
-# Best-effort placeholder; the real quarterly base-futures CSV export URL
-# should be confirmed on the live AER wholesale-charts page, since this
-# sandboxed session could not reach aer.gov.au to inspect it directly.
-CSV_URL = (
-    "https://www.aer.gov.au/wholesale-markets/wholesale-statistics/"
-    "quarterly-base-futures-prices-and-volume-traded"
-)
-# -------------------------------------------------------------------
-
 HUMAN_PAGE_URL = (
-    "https://www.aer.gov.au/wholesale-markets/wholesale-statistics/"
+    "https://www.aer.gov.au/industry/registers/charts/"
     "quarterly-base-futures-prices-and-volume-traded"
 )
+
+# The CSV filename carries a publication timestamp and changes each release, so
+# it is discovered from the "Download CSV" link on HUMAN_PAGE_URL rather than
+# hard-coded. This is the value seen on 2026-08-05, kept only as a fallback.
+CSV_URL = (
+    "https://www.aer.gov.au/sites/default/files/2026-04/"
+    "AER_Contract%20prices_Quarterly%20base%20future%20prices%20and%20"
+    "volume%20traded%20DATA_2_20260407173757.CSV"
+)
+
+# Wide-format region columns -> NEM region ids. AER publishes no Tasmanian
+# series (ASX Energy lists no TAS base future), so TAS1 is absent by design.
+_WIDE_REGION_PREFIXES = {
+    "queensland": "QLD1",
+    "new south wales": "NSW1",
+    "victoria": "VIC1",
+    "south australia": "SA1",
+}
 
 NEM_REGIONS = ["NSW1", "QLD1", "SA1", "TAS1", "VIC1"]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT_DIR = REPO_ROOT / "data" / "cache" / "nem" / "hedge"
 
-# Candidate column names the raw AER CSV might use, tried in order.
-# UNVERIFIED -- confirm against the real downloaded file and adjust.
-_REGION_COL_CANDIDATES = ["region", "Region", "NEM Region", "REGIONID"]
+DEFAULT_PRODUCT = "Base"
+
+# Publication timestamp recovered from the CSV file name by main(); the export
+# carries no trade-date column of its own.
+AS_AT_OVERRIDE: "date | None" = None
+
 _QUARTER_COL_CANDIDATES = ["quarter", "Quarter", "Delivery Quarter", "delivery_period"]
-_PRICE_COL_CANDIDATES = ["price", "Price", "Base Futures Price", "price_aud_mwh", "AUD/MWh"]
-_AS_AT_COL_CANDIDATES = ["as_at_date", "As at", "Trade Date", "date", "Date"]
 
 
 class AerFetchError(RuntimeError):
@@ -79,138 +100,161 @@ def _first_matching_column(df: pd.DataFrame, candidates: list[str]) -> str | Non
     return None
 
 
-def download_raw_csv(url: str = CSV_URL, timeout: int = 60) -> bytes:
-    """Download the raw CSV bytes from AER. Fails loudly on any HTTP error."""
-    log.info("Downloading AER base-futures data from %s", url)
+def _discover_csv_url(page_html_locator) -> str | None:
+    """Find the current 'Download CSV' href on the chart page."""
+    for a in page_html_locator.locator("a").all():
+        try:
+            href = a.get_attribute("href") or ""
+        except Exception:
+            continue
+        if href.lower().endswith(".csv"):
+            if href.startswith("/"):
+                return "https://www.aer.gov.au" + href
+            return href
+    return None
+
+
+def _stamp_as_at_from_url(url: str) -> None:
+    """Recover the publication date from the CSV file name (…_20260407173757.CSV)."""
+    global AS_AT_OVERRIDE
+    match = re.search(r"_(\d{8})\d{6}\.csv", url, flags=re.IGNORECASE)
+    if match:
+        try:
+            AS_AT_OVERRIDE = date(
+                int(match.group(1)[:4]), int(match.group(1)[4:6]), int(match.group(1)[6:8])
+            )
+            log.info("Publication date from file name: %s", AS_AT_OVERRIDE)
+            return
+        except ValueError:
+            pass
+    log.warning("No publication date in %s -- stamping today's date instead", url)
+
+
+def download_raw_csv(url: str | None = None, timeout: int = 180) -> "tuple[bytes, str]":
+    """Download the raw CSV bytes from AER via headless Chromium.
+
+    aer.gov.au is behind Akamai bot verification: a plain HTTP GET returns a
+    JavaScript interstitial, not data, so the CSV is pulled inside a browser
+    context that has cleared the check. The download link carries a publication
+    timestamp, so it is discovered from the page rather than assumed.
+    """
     try:
-        resp = requests.get(url, timeout=timeout)
-        resp.raise_for_status()
-    except requests.RequestException as exc:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:  # pragma: no cover - environment problem
         raise AerFetchError(
-            f"Failed to download AER base-futures CSV from {url}: {exc}\n"
-            f"Open {HUMAN_PAGE_URL} in a browser, find the current CSV export "
-            f"link/endpoint, and update CSV_URL at the top of this script."
+            "This script needs Playwright to get past aer.gov.au's bot check: "
+            "`pip install playwright && playwright install chromium`."
         ) from exc
 
-    content_type = resp.headers.get("Content-Type", "")
-    content_type_lower = content_type.lower()
-    if "text/html" in content_type_lower:
+    ua = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+    )
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        try:
+            ctx = browser.new_context(user_agent=ua)
+            page = ctx.new_page()
+            log.info("Opening %s to clear the bot check", HUMAN_PAGE_URL)
+            page.goto(HUMAN_PAGE_URL, wait_until="domcontentloaded", timeout=timeout * 1000)
+            page.wait_for_timeout(15000)
+
+            csv_url = url or _discover_csv_url(page) or CSV_URL
+            log.info("Downloading AER base-futures CSV from %s", csv_url)
+            resp = ctx.request.get(csv_url, timeout=timeout * 1000)
+            if resp.status != 200:
+                raise AerFetchError(
+                    f"AER returned HTTP {resp.status} for {csv_url}. Open "
+                    f"{HUMAN_PAGE_URL} and check the 'Download CSV' link."
+                )
+            body = resp.body()
+        finally:
+            browser.close()
+
+    if b"<html" in body[:2000].lower():
         raise AerFetchError(
-            f"Response Content-Type ('{content_type}') is text/html -- CSV_URL is almost "
-            f"certainly pointing at the human-readable landing page rather than a direct CSV/"
-            f"data export. Open {HUMAN_PAGE_URL} in a browser, find the actual 'download data'/"
-            f"'export CSV' link or XHR endpoint it calls, and update the CSV_URL constant at "
-            f"the top of this script."
+            "Downloaded content looks like HTML (bot check not cleared). Re-run; "
+            f"if it persists, open {HUMAN_PAGE_URL} and grab the CSV by hand."
         )
-    if "csv" not in content_type_lower and "text" not in content_type_lower and "octet-stream" not in content_type_lower:
-        log.warning(
-            "Response Content-Type ('%s') doesn't look like a CSV -- the URL may be pointing at "
-            "an unexpected resource. Will attempt to parse it anyway, but expect this to fail; "
-            "if so, update CSV_URL (see module docstring).",
-            content_type,
-        )
-    return resp.content
+    return body, csv_url
 
 
 def parse_raw_csv(raw_bytes: bytes, year: int) -> pd.DataFrame:
-    """Parse the raw AER CSV into the normalised hedge-cache schema for a given year.
+    """Normalise AER's wide export into the hedge-cache schema.
 
-    Raises AerFetchError with a clear message (rather than silently writing bad
-    data) if the expected columns can't be located.
+    Input has one row per quarter and one column per region, e.g.
+    ``Quarter, Queensland price ($ per megawatt hour), ... , Queensland volume``.
+    Output is long: region / quarter_label / product / price_aud_mwh /
+    as_at_date. Volume columns are dropped -- only the price series is in scope
+    (`cal_hedge_fraction` is a separate user input, never derived from AER).
+
+    `year` names the output cache file, it does NOT filter the quarters: AER
+    publishes forward quarters (2026..2029), while `year` is the app's NEM
+    weather year. Filtering on it would discard every row.
     """
     try:
         raw_df = pd.read_csv(io.BytesIO(raw_bytes))
     except Exception as exc:
         raise AerFetchError(
             f"Could not parse the downloaded content as CSV: {exc}\n"
-            f"This usually means CSV_URL is pointing at an HTML page instead of a raw data "
-            f"export. Open {HUMAN_PAGE_URL}, locate the real 'export'/'download' link or the "
-            f"underlying data endpoint it calls, and update CSV_URL at the top of this script."
+            f"Open {HUMAN_PAGE_URL} and confirm the 'Download CSV' link."
         ) from exc
 
     if raw_df.empty:
-        raise AerFetchError(
-            "Downloaded AER CSV parsed but contained zero rows. This usually means CSV_URL is "
-            f"pointing at the wrong resource (e.g. an empty export, or a differently-scoped "
-            f"endpoint). Open {HUMAN_PAGE_URL}, locate the real 'export'/'download' link or the "
-            f"underlying data endpoint it calls, and update CSV_URL at the top of this script."
-        )
+        raise AerFetchError("Downloaded AER CSV parsed but contained zero rows.")
 
-    region_col = _first_matching_column(raw_df, _REGION_COL_CANDIDATES)
     quarter_col = _first_matching_column(raw_df, _QUARTER_COL_CANDIDATES)
-    price_col = _first_matching_column(raw_df, _PRICE_COL_CANDIDATES)
-    as_at_col = _first_matching_column(raw_df, _AS_AT_COL_CANDIDATES)
-
-    missing = [
-        name
-        for name, col in [
-            ("region", region_col),
-            ("quarter", quarter_col),
-            ("price", price_col),
-        ]
-        if col is None
-    ]
-    if missing:
+    if quarter_col is None:
         raise AerFetchError(
-            f"Could not locate expected column(s) {missing} in the downloaded AER CSV. "
-            f"Actual columns found: {list(raw_df.columns)}. The AER export format has likely "
-            f"changed or CSV_URL is wrong -- inspect {HUMAN_PAGE_URL} manually, re-export the "
-            f"data, and either adjust the *_COL_CANDIDATES lists in this script or hand-adapt "
-            f"the export to the schema documented in this script's docstring."
+            f"No quarter column in the AER export. Columns: {list(raw_df.columns)}."
         )
 
-    df = raw_df.copy()
-    df["region"] = df[region_col].astype(str).str.strip().str.upper()
-
-    unknown_regions = sorted(set(df["region"].unique()) - set(NEM_REGIONS))
-    if unknown_regions:
-        log.warning(
-            "Parsed region value(s) %s do not match any of the known 5 NEM regions (%s). "
-            "AER's export may use a different naming convention (e.g. 'NSW' instead of "
-            "'NSW1') that will NOT join cleanly against price/rrp_{REGION}_%s.parquet "
-            "filenames downstream -- inspect the raw CSV's region column and add a mapping "
-            "here (e.g. a NSW->NSW1 style normalisation) before relying on this output.",
-            unknown_regions,
-            NEM_REGIONS,
-            year,
-        )
-
-    df["quarter_label"] = df[quarter_col].astype(str).str.strip()
-    df["price_aud_mwh"] = pd.to_numeric(df[price_col], errors="coerce")
-    df["product"] = "Base"
-    if as_at_col is not None:
-        df["as_at_date"] = pd.to_datetime(df[as_at_col], errors="coerce")
-    else:
-        log.warning(
-            "No 'as at' / trade-date column found in the AER export -- stamping as_at_date with "
-            "today's download date instead. Consider updating _AS_AT_COL_CANDIDATES if the real "
-            "column has a different header."
-        )
-        df["as_at_date"] = pd.Timestamp(date.today())
-
-    # Keep only rows plausibly belonging to the requested year (by quarter_label containing
-    # the year, e.g. "Q1-2025") -- best-effort since the raw label format is unverified.
-    year_mask = df["quarter_label"].str.contains(str(year))
-    if not year_mask.any():
+    price_cols: dict[str, str] = {}
+    for col in raw_df.columns:
+        low = str(col).strip().lower()
+        if "price" not in low:
+            continue
+        for prefix, region in _WIDE_REGION_PREFIXES.items():
+            if low.startswith(prefix):
+                price_cols[region] = col
+    if not price_cols:
         raise AerFetchError(
-            f"No rows in the downloaded AER data matched year {year} via a substring match on "
-            f"quarter_label (sample labels seen: {df['quarter_label'].unique()[:10].tolist()}). "
-            f"The quarter-label format is unverified against the live export -- inspect it and "
-            f"adjust the year filter in this script if needed."
+            "Found no '<region> price' columns in the AER export. Columns: "
+            f"{list(raw_df.columns)}. The export format has changed -- update "
+            "_WIDE_REGION_PREFIXES."
         )
-    df = df[year_mask]
 
-    result = df[["region", "quarter_label", "product", "price_aud_mwh", "as_at_date"]].reset_index(drop=True)
+    missing_regions = sorted(set(_WIDE_REGION_PREFIXES.values()) - set(price_cols))
+    if missing_regions:
+        log.warning("No price column for %s in this export", missing_regions)
+    log.info("Regions parsed: %s (AER publishes no TAS1 series)", sorted(price_cols))
 
-    if result["price_aud_mwh"].isna().all():
+    frames = []
+    for region, col in sorted(price_cols.items()):
+        part = pd.DataFrame(
+            {
+                "region": region,
+                "quarter_label": raw_df[quarter_col].astype(str).str.strip(),
+                "product": DEFAULT_PRODUCT,
+                "price_aud_mwh": pd.to_numeric(raw_df[col], errors="coerce"),
+            }
+        )
+        frames.append(part)
+    df = pd.concat(frames, ignore_index=True)
+    df = df[df["price_aud_mwh"].notna()].reset_index(drop=True)
+
+    if df.empty:
         raise AerFetchError(
-            f"All parsed price_aud_mwh values are NaN after numeric coercion (source column "
-            f"'{price_col}'). The price column likely contains formatting (e.g. '$', commas) "
-            f"that needs stripping -- inspect the raw CSV and adjust parse_raw_csv()."
+            "Every parsed price was NaN -- the price columns likely carry "
+            "formatting that needs stripping. Inspect the raw CSV."
         )
 
-    return result
+    # The export carries no trade date; the publication date lives in the file
+    # name (…_20260407173757.CSV). main() passes it in via AS_AT_OVERRIDE when
+    # it can be recovered, else today's download date is stamped.
+    df["as_at_date"] = pd.Timestamp(AS_AT_OVERRIDE or date.today())
 
+    return df[["region", "quarter_label", "product", "price_aud_mwh", "as_at_date"]]
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -240,7 +284,8 @@ def main() -> int:
         return 0
 
     try:
-        raw_bytes = download_raw_csv(CSV_URL)
+        raw_bytes, source_url = download_raw_csv()
+        _stamp_as_at_from_url(source_url)
         df = parse_raw_csv(raw_bytes, args.year)
     except AerFetchError as exc:
         log.error("%s", exc)

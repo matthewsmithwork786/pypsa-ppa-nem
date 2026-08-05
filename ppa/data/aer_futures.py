@@ -173,6 +173,26 @@ def available_quarters(df: pd.DataFrame, region: "str | None" = None, product: s
     return sorted(labels, key=_key)
 
 
+def first_full_calendar_year(quarters) -> list:
+    """The earliest calendar year in `quarters` that has all four of them.
+
+    AER publishes roughly four years of forward quarters, so averaging every
+    label gives a multi-year strip price. The app's field is a *calendar-year*
+    base-futures price, so this picks the nearest complete year. Falls back to
+    the full list when no year is complete (nothing better to offer).
+    """
+    by_year: dict = {}
+    for label in quarters:
+        parsed = parse_quarter_label(label)
+        if parsed is None:
+            continue
+        by_year.setdefault(parsed[0], []).append(label)
+    for year in sorted(by_year):
+        if len(by_year[year]) == 4:
+            return sorted(by_year[year], key=lambda l: parse_quarter_label(l)[1])
+    return list(quarters)
+
+
 def quarterly_average(
     df: pd.DataFrame, region: str = DEFAULT_REGION, quarters=None, product: str = DEFAULT_PRODUCT,
 ) -> float:
