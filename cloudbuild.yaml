@@ -55,7 +55,7 @@ images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE_NAME}:${_COMMIT_SHA}'
 
 substitutions:
-  _REGION: us-central1
+  _REGION: australia-southeast1
   _REPO: pypsa-ppa-nem
   _SERVICE_NAME: pypsa-ppa-explorer
 
