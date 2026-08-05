@@ -13,6 +13,8 @@ from __future__ import annotations
 import dataclasses
 import math
 import multiprocessing
+import os
+import time
 import traceback
 from dataclasses import dataclass
 from typing import Callable
@@ -544,11 +546,31 @@ def _sizing_worker(conn, ts: pd.DataFrame, scenario_fields: dict) -> None:
         conn.close()
 
 
+def _process_cpu_seconds(pid: int) -> float | None:
+    """CPU time (user+system) burned by `pid`, or None where /proc is absent.
+
+    Used to tell "still solving" from "wedged": a live HiGHS solve burns CPU
+    continuously, a deadlocked child burns none at all.
+    """
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            fields = fh.read().rsplit(") ", 1)[1].split()
+    except (OSError, IndexError):
+        return None
+    try:
+        ticks = os.sysconf("SC_CLK_TCK")
+        return (int(fields[11]) + int(fields[12])) / ticks
+    except (ValueError, IndexError, OSError):
+        return None
+
+
 def run_sizing_subprocess(
     ts: pd.DataFrame,
     scenario: Scenario,
     heartbeat: Callable[[], None] | None = None,
     poll_interval: float = 0.5,
+    stall_timeout: float = 180.0,
+    hard_timeout: float = 3600.0,
 ) -> SizedCapacities:
     """Run `optimise_capacities` in a killable child process.
 
@@ -559,6 +581,20 @@ def run_sizing_subprocess(
     raise (e.g. a Streamlit StopException); the child is then killed by the
     finally block. Killing the child also returns the LP's multi-GB memory to
     the OS immediately instead of leaving it in the app process.
+
+    The child is forked from a Streamlit server process that runs several
+    threads, so it can inherit a lock already held by a thread that does not
+    exist in the child and deadlock before it reaches the solver. That child
+    never exits and never sends, so waiting on it alone hangs forever behind a
+    ticking heartbeat. Two guards bound the wait: the child is killed if it
+    burns no CPU for `stall_timeout` (deadlocked, not solving), and in any case
+    after `hard_timeout`.
+
+    `fork` is kept deliberately. `forkserver` would avoid the inherited-lock
+    deadlock outright, but it needs a Unix socket (blocked on some hosts) and
+    its child shares no pages with the parent: measured peak was 748 MB via
+    fork's copy-on-write against a 1 GB Streamlit Cloud cap, so a fresh child
+    re-importing pypsa would trade a rare deadlock for a likely OOM.
     """
     try:
         mp_context = multiprocessing.get_context("fork")
@@ -574,19 +610,60 @@ def run_sizing_subprocess(
     proc.start()
     child_conn.close()
 
+    started = time.monotonic()
+    last_cpu = _process_cpu_seconds(proc.pid) or 0.0
+    last_progress = started
+
+    # A child killed mid-flight leaves the pipe readable-at-EOF, so `poll()`
+    # returns True and `recv()` raises EOFError. Surfacing that bare EOFError
+    # buried the out-of-memory diagnosis this code exists to give.
+    crashed = RuntimeError(
+        "Sizing subprocess died without returning a result "
+        "(likely killed by the OS — out of memory?). Reduce the typical-week "
+        "count or the max-build caps, or run the app locally."
+    )
+
     try:
         while True:
             if parent_conn.poll(poll_interval):
-                kind, payload = parent_conn.recv()
+                try:
+                    kind, payload = parent_conn.recv()
+                except EOFError:
+                    raise crashed from None
                 break
             if not proc.is_alive():
                 # Drain a result sent just before exit, else it truly crashed
                 if parent_conn.poll(0):
-                    kind, payload = parent_conn.recv()
+                    try:
+                        kind, payload = parent_conn.recv()
+                    except EOFError:
+                        raise crashed from None
                     break
+                raise crashed
+
+            now = time.monotonic()
+            cpu = _process_cpu_seconds(proc.pid)
+            if cpu is None:
+                last_progress = now  # cannot measure — rely on hard_timeout only
+            elif cpu - last_cpu > 0.5:
+                last_cpu, last_progress = cpu, now
+
+            if now - last_progress > stall_timeout:
                 raise RuntimeError(
-                    "Sizing subprocess died without returning a result "
-                    "(likely killed by the OS — out of memory?)."
+                    f"The capacity sizing subprocess stopped making progress: it "
+                    f"used no CPU for {stall_timeout:.0f}s, so it is wedged rather "
+                    "than solving (a child forked from the Streamlit server can "
+                    "deadlock on a lock inherited from another thread). It has "
+                    "been stopped. Try running the optimisation again — this is "
+                    "intermittent — and if it keeps happening, reduce the "
+                    "typical-week count or the max-build caps, or run the app "
+                    "locally where memory is not capped."
+                )
+            if now - started > hard_timeout:
+                raise RuntimeError(
+                    f"Capacity sizing exceeded {hard_timeout / 60:.0f} minutes and "
+                    "was stopped. Reduce the sizing horizon, the typical-week "
+                    "count, or the max-build caps, or run the app locally."
                 )
             if heartbeat is not None:
                 heartbeat()  # may raise (user cancelled) → finally kills child
