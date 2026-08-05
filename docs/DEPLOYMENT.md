@@ -142,7 +142,7 @@ gcloud artifacts repositories create pypsa-ppa-nem \
 gcloud builds submit --config cloudbuild.yaml
 ```
 
-This builds `us-central1-docker.pkg.dev/$PROJECT/pypsa-ppa-nem/pypsa-ppa-explorer:<sha>`,
+This builds `australia-southeast1-docker.pkg.dev/$PROJECT/pypsa-ppa-nem/pypsa-ppa-explorer:<build-id>`,
 pushes it, and creates/updates a Cloud Run service `pypsa-ppa-explorer` in
 `us-central1` with `--allow-unauthenticated` (public URL).
 

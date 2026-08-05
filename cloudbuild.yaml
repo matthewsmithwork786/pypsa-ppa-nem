@@ -18,13 +18,13 @@ steps:
     args:
       - 'build'
       - '-t'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE_NAME}:${SHORT_SHA}'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE_NAME}:$BUILD_ID'
       - '.'
 
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE_NAME}:${SHORT_SHA}'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE_NAME}:$BUILD_ID'
 
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:slim'
     entrypoint: gcloud
@@ -32,7 +32,7 @@ steps:
       - 'run'
       - 'deploy'
       - '${_SERVICE_NAME}'
-      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE_NAME}:${SHORT_SHA}'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE_NAME}:$BUILD_ID'
       - '--region=${_REGION}'
       - '--platform=managed'
       - '--allow-unauthenticated'
@@ -52,7 +52,7 @@ steps:
       - '--set-env-vars=PPA_WORKER_MEM_MB=1200,PPA_RESERVE_MEM_MB=800'
 
 images:
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE_NAME}:${SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE_NAME}:$BUILD_ID'
 
 substitutions:
   _REGION: australia-southeast1
