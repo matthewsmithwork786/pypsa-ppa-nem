@@ -9,6 +9,7 @@ plotly==6.6.0
 matplotlib==3.10.9
 scipy==1.17.1
 streamlit==1.57.0
+starlette>=0.40.0,<0.42
 pypsatopo==1.1.2
 xarray==2026.2.0
 netcdf4==1.7.4
