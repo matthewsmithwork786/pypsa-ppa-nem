@@ -9,8 +9,8 @@ import streamlit as st
 from ppa.financial_model import (
     EnergyInputs,
     ProjectFinanceInputs,
-    energy_inputs_from_result,
     energy_inputs_from_results,
+    per_year_energy_inputs,
     project_finance_inputs_from_scenario,
     run_project_finance,
 )
@@ -27,37 +27,36 @@ from ui import state
 # ── Base inputs ────────────────────────────────────────────────────────────────
 
 
-def _get_base() -> tuple[EnergyInputs | None, ProjectFinanceInputs | None]:
-    """Derive base energy and finance inputs from session state.
+def _get_base() -> tuple[EnergyInputs | None, ProjectFinanceInputs | None, list[EnergyInputs] | None]:
+    """Derive base energy, finance inputs, and real per-year energy from session state.
 
     Prefers an already-run Financial Model result so the user's edited
-    assumptions carry over; falls back to raw optimisation results.
+    assumptions (and the per-year data it ran with) carry over; falls back to
+    raw optimisation results. `annual_energy` (3rd element) is real per-year
+    data for a multi-year run -- see run_project_finance's `annual_energy`
+    param -- so sensitivity results perturb the same baseline the Financial
+    Model tab shows rather than a flattened averaged year.
     """
     pf = state.get_project_finance() if state.has_project_finance() else None
     if pf is not None:
-        return pf.energy, pf.inputs
+        return pf.energy, pf.inputs, pf.annual_energy
 
     energy: EnergyInputs | None = None
+    annual_energy: list[EnergyInputs] | None = None
+    results = []
     if state.has_multi_year_results():
         results = [r for r in state.get_multi_year_results() if r is not None]
         if results:
             energy = energy_inputs_from_results(results)
-    if energy is None and state.has_result():
-        energy = energy_inputs_from_result(state.get_result())
+            if len(results) > 1:
+                annual_energy = per_year_energy_inputs(results)
 
     if energy is None:
-        return None, None
+        return None, None, None
 
-    scenario = None
-    if state.has_result():
-        scenario = state.get_result().scenario
-    elif state.has_multi_year_results():
-        results = [r for r in state.get_multi_year_results() if r is not None]
-        if results:
-            scenario = results[0].scenario
-
+    scenario = results[0].scenario if results else None
     finance = project_finance_inputs_from_scenario(scenario) if scenario else ProjectFinanceInputs()
-    return energy, finance
+    return energy, finance, annual_energy
 
 
 # ── Metric helpers ─────────────────────────────────────────────────────────────
@@ -107,7 +106,11 @@ def _num(label: str, key: str, default: float, *, step: float | None = None, fmt
     return val / scale if pct else val
 
 
-def _what_if_panel(base_energy: EnergyInputs, base_finance: ProjectFinanceInputs) -> None:
+def _what_if_panel(
+    base_energy: EnergyInputs,
+    base_finance: ProjectFinanceInputs,
+    annual_energy: list[EnergyInputs] | None = None,
+) -> None:
     with st.expander("What-if analysis", expanded=False):
         st.caption(
             "Adjust any combination of financial parameters and see the result instantly. "
@@ -175,8 +178,8 @@ def _what_if_panel(base_energy: EnergyInputs, base_finance: ProjectFinanceInputs
             onsw_devex=onsw_devex, pv_devex=pv_devex, bess_devex=bess_devex,
         )
 
-    base_result = run_project_finance(base_finance, base_energy)
-    wi_result   = run_project_finance(wi_finance,   base_energy)
+    base_result = run_project_finance(base_finance, base_energy, annual_energy=annual_energy)
+    wi_result   = run_project_finance(wi_finance,   base_energy, annual_energy=annual_energy)
 
     with st.expander("Base results", expanded=True):
         cols = st.columns(6)
@@ -200,7 +203,11 @@ def _what_if_panel(base_energy: EnergyInputs, base_finance: ProjectFinanceInputs
 # ── Tornado chart ──────────────────────────────────────────────────────────────
 
 
-def _tornado_panel(base_energy: EnergyInputs, base_finance: ProjectFinanceInputs) -> None:
+def _tornado_panel(
+    base_energy: EnergyInputs,
+    base_finance: ProjectFinanceInputs,
+    annual_energy: list[EnergyInputs] | None = None,
+) -> None:
     tab_chart1, tab_chart2 = st.tabs([
         "| Tornado chart — one-at-a-time sensitivity", 
         "| Data table",
@@ -223,7 +230,8 @@ def _tornado_panel(base_energy: EnergyInputs, base_finance: ProjectFinanceInputs
 
         with st.spinner("Computing sensitivity…"):
             rows, base_val, zero_rows = run_tornado(
-                base_energy, base_finance, metric=metric_key, min_swing_fraction=0.01
+                base_energy, base_finance, metric=metric_key, min_swing_fraction=0.01,
+                annual_energy=annual_energy,
             )
 
         if zero_rows:
@@ -336,7 +344,7 @@ def render() -> None:
         "BESS round-trip efficiency) run a new optimisation in the Optimisation tab."
     )
 
-    base_energy, base_finance = _get_base()
+    base_energy, base_finance, annual_energy = _get_base()
     if base_energy is None:
         st.info(
             "Run an optimisation first (Optimisation tab), then return here. "
@@ -345,6 +353,6 @@ def render() -> None:
         )
         return
 
-    _what_if_panel(base_energy, base_finance)
+    _what_if_panel(base_energy, base_finance, annual_energy)
     # st.markdown("---")
-    _tornado_panel(base_energy, base_finance)
+    _tornado_panel(base_energy, base_finance, annual_energy)

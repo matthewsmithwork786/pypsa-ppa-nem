@@ -7,14 +7,9 @@ import streamlit as st
 if TYPE_CHECKING:
     import pandas as pd
     from ppa.scenario import Scenario
-    from ppa.results import OptimisationResult
-    from ppa.financials import FinancialResult, MultiYearFinancialResult
-    from ppa.counterfactuals import CounterfactualResult
+    from ppa.financials import MultiYearFinancialResult
 
 SCENARIO_KEY = "scenario"
-RESULT_KEY = "optimisation_result"
-FINANCIAL_KEY = "financial_result"
-COUNTERFACTUAL_KEY = "counterfactual_result"
 TIMESERIES_KEY = "timeseries"
 ACTIVE_CASE_STUDY_KEY = "active_case_study_id"
 MULTI_YEAR_RESULTS_KEY = "multi_year_results"
@@ -98,50 +93,6 @@ def set_scenario(s: "Scenario") -> None:
 
 def has_scenario() -> bool:
     return SCENARIO_KEY in st.session_state
-
-
-def get_result() -> "OptimisationResult | None":
-    return st.session_state.get(RESULT_KEY)
-
-
-def set_result(r: "OptimisationResult") -> None:
-    st.session_state[RESULT_KEY] = r
-    st.session_state.pop(FINANCIAL_KEY, None)
-    st.session_state.pop(COUNTERFACTUAL_KEY, None)
-
-
-def has_result() -> bool:
-    return RESULT_KEY in st.session_state
-
-
-def clear_result() -> None:
-    st.session_state.pop(RESULT_KEY, None)
-    st.session_state.pop(FINANCIAL_KEY, None)
-    st.session_state.pop(COUNTERFACTUAL_KEY, None)
-
-
-def get_financial() -> "FinancialResult | None":
-    return st.session_state.get(FINANCIAL_KEY)
-
-
-def set_financial(f: "FinancialResult") -> None:
-    st.session_state[FINANCIAL_KEY] = f
-
-
-def has_financial() -> bool:
-    return FINANCIAL_KEY in st.session_state
-
-
-def get_counterfactual() -> "CounterfactualResult | None":
-    return st.session_state.get(COUNTERFACTUAL_KEY)
-
-
-def set_counterfactual(cf: "CounterfactualResult") -> None:
-    st.session_state[COUNTERFACTUAL_KEY] = cf
-
-
-def has_counterfactual() -> bool:
-    return COUNTERFACTUAL_KEY in st.session_state
 
 
 def get_timeseries() -> "pd.DataFrame | None":
@@ -258,11 +209,9 @@ def clear_custom_upload() -> None:
 
 def clear_run_outputs() -> None:
     """Invalidate every derived result -- factors out the repeated cache-invalidation
-    pattern already used in ui/tabs/case_study.py (clear_result + the three
-    session-state pops it repeats at every scenario-change site), plus the cached
-    timeseries (relevant once a NEM/custom-CSV selection changes the data source).
+    pattern used at every scenario-change site, plus the cached timeseries (relevant
+    once a NEM/custom-CSV selection changes the data source).
     """
-    clear_result()
     for key in (MULTI_YEAR_RESULTS_KEY, MULTI_YEAR_FINANCIAL_KEY, OPTIMISED_SIZES_KEY,
                 SIZING_DIAGNOSTICS_KEY, TIMESERIES_KEY):
         st.session_state.pop(key, None)

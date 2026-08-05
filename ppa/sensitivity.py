@@ -74,15 +74,20 @@ PARAM_BY_FIELD: dict[str, SensParam] = {p.field: p for p in PARAMS}
 def run_what_if(
     base_energy: EnergyInputs,
     base_finance: ProjectFinanceInputs,
+    annual_energy: list[EnergyInputs] | None = None,
     **overrides: Any,
 ) -> ProjectFinanceResult:
     """Run the financial model with *overrides* applied to *base_finance*.
 
     Keys of *overrides* must be valid field names on :class:`ProjectFinanceInputs`.
     No PyPSA re-run is required — only financial parameters are modified.
+    `annual_energy`, if given, is passed straight through to
+    `run_project_finance` so sensitivity results are perturbations around the
+    same real per-year baseline the Financial Model tab shows, not a
+    different (averaged-year) one.
     """
     finance = dataclasses.replace(base_finance, **overrides)
-    return run_project_finance(finance, base_energy)
+    return run_project_finance(finance, base_energy, annual_energy=annual_energy)
 
 
 @dataclass
@@ -107,6 +112,7 @@ def run_tornado(
     params: list[SensParam] | None = None,
     metric: str = "project_irr",
     min_swing_fraction: float = 0.001,
+    annual_energy: list[EnergyInputs] | None = None,
 ) -> tuple[list[TornadoRow], float, list[TornadoRow]]:
     """Vary each parameter independently and collect *metric* at low and high.
 
@@ -119,7 +125,7 @@ def run_tornado(
     if params is None:
         params = PARAMS
 
-    base_result = run_project_finance(base_finance, base_energy)
+    base_result = run_project_finance(base_finance, base_energy, annual_energy=annual_energy)
     base_val = float(getattr(base_result, metric))
     threshold = abs(base_val) * min_swing_fraction
 
@@ -136,8 +142,8 @@ def run_tornado(
             lo = max(int(round(lo)), 1)
             hi = int(round(hi))
 
-        r_lo = run_what_if(base_energy, base_finance, **{p.field: lo})
-        r_hi = run_what_if(base_energy, base_finance, **{p.field: hi})
+        r_lo = run_what_if(base_energy, base_finance, annual_energy, **{p.field: lo})
+        r_hi = run_what_if(base_energy, base_finance, annual_energy, **{p.field: hi})
         row = TornadoRow(
             param=p.label,
             field=p.field,

@@ -21,6 +21,8 @@ from ui.tabs import (
     financial_model,
 )
 
+optimisation.restore_from_query_params()
+
 st.markdown(
     """
     # PyPSA-based PPA Explorer

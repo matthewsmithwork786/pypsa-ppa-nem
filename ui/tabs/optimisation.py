@@ -1,7 +1,6 @@
-"""Optimisation tab — run simulation or single-day reference optimisation."""
+"""Optimisation tab — run the multi-year simulation."""
 from __future__ import annotations
 
-import dataclasses
 import gc
 
 import numpy as np
@@ -9,10 +8,45 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from ppa.scenario import BASE_SCENARIO, validate_scenario
+from ppa.scenario import BASE_SCENARIO
 from ui import state
 from ui.charts import year_axis
-from ui.constants import NEM_RESOLUTION_MINUTES
+
+
+def restore_from_query_params() -> None:
+    """Reload a completed run after a page refresh wipes session state.
+
+    Streamlit gives every full-page reload a brand-new session -- there is no
+    "resume" of the old one, so st.session_state is empty regardless of what
+    was on screen a moment ago. The run button stashes its run_id in the URL
+    (?run=...) precisely so a refresh can recover from it: this restores the
+    scenario and results a completed run saved to disk (ppa.run_store), and
+    -- for a run still in flight when the refresh happened -- reclaims it from
+    ppa.run_registry's abandonment grace period so it isn't cancelled out from
+    under the user just because their old session dropped.
+
+    Called once per script run from streamlit_app.py, before any tab renders,
+    so results are available regardless of which tab is active on reload.
+    """
+    run_id = st.query_params.get("run")
+    if not run_id or state.has_multi_year_results():
+        return
+
+    from ppa import run_registry, run_store
+
+    run_registry.touch(run_id)
+
+    payload = run_store.load(run_id)
+    if payload is None:
+        return
+    state.set_scenario(payload["scenario"])
+    state.set_multi_year_results(payload["results"])
+    state.set_multi_year_financial(payload["fin"])
+    if payload.get("sized") is not None:
+        state.set_optimised_sizes(payload["sized"])
+    if payload.get("diagnostics") is not None:
+        state.set_sizing_diagnostics(payload["diagnostics"])
+    st.toast("Restored your last completed run after refresh.", icon="🔄")
 
 
 def _sized_banner_text(sized) -> str:
@@ -93,122 +127,6 @@ def _render_sizing_diagnostics() -> None:
             "A single cached weather year (2025) means the sized fleet is tuned to 2025 "
             "weather; multi-year data is a TODO (see README)."
         )
-
-# ── timeseries loader (NEM period path) ───────────────────────────────────────
-
-@st.cache_data
-def _cached_nem_period_ts(
-    pv_duid: str, wind_duid: str, region: str, year: int,
-    start: str, end: str, resolution_minutes: int,
-):
-    from ppa.data import nem_data
-
-    class _FakeScenario:
-        nem_pv_duid = pv_duid
-        nem_wind_duid = wind_duid
-        nem_price_region = region
-        nem_year = year
-
-    return nem_data.period_ts(_FakeScenario(), start, end, resolution_minutes=resolution_minutes)
-
-
-# ── NEM period + resolution controls (single-day/period reference path) ────────
-
-_NEM_MONTH_NAMES = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-]
-
-
-def _render_snapshot_warning(n_snapshots: int) -> None:
-    if n_snapshots <= 2_000:
-        st.caption(f"≈{n_snapshots:,} snapshots — should solve in a few seconds.")
-    elif n_snapshots <= 10_000:
-        st.warning(
-            f"≈{n_snapshots:,} snapshots — may take tens of seconds and use noticeably more "
-            "memory. Close to the practical ceiling on memory-limited hosts (e.g. Streamlit "
-            "Community Cloud's free 1 GB tier)."
-        )
-    else:
-        st.error(
-            f"≈{n_snapshots:,} snapshots — this is a large LP. It may take minutes and risks "
-            "exceeding memory limits on constrained hosts (e.g. Streamlit Community Cloud's "
-            "free 1 GB tier). Consider a shorter period and/or coarser resolution."
-        )
-
-
-def _render_nem_period_controls(s) -> tuple[pd.Timestamp, pd.Timestamp, int]:
-    """Period (calendar month or custom range) + resolution picker for the NEM
-    single-day/period reference path. Returns (start, end [exclusive], resolution_minutes).
-    """
-    year = s.nem_year
-    year_start = pd.Timestamp(year=year, month=1, day=1).date()
-    year_end = pd.Timestamp(year=year, month=12, day=31).date()
-
-    cols = st.columns([1, 2, 1])
-    with cols[0]:
-        mode = st.radio(
-            "Period", ["Calendar month", "Custom range"], key="opt_nem_period_mode",
-        )
-    with cols[1]:
-        if mode == "Calendar month":
-            month = st.selectbox(
-                "Month", options=list(range(1, 13)), index=2,  # default March, matches prior behaviour
-                format_func=lambda m: _NEM_MONTH_NAMES[m - 1], key="opt_nem_month",
-            )
-            start_ts = pd.Timestamp(year=year, month=month, day=1)
-            end_ts = start_ts + pd.DateOffset(months=1)
-        else:
-            default_range = (pd.Timestamp(year=year, month=3, day=1).date(),
-                              (pd.Timestamp(year=year, month=3, day=1) + pd.DateOffset(months=1)
-                               - pd.Timedelta(days=1)).date())
-            picked = st.date_input(
-                "Date range (inclusive)", value=default_range,
-                min_value=year_start, max_value=year_end, key="opt_nem_date_range",
-            )
-            if isinstance(picked, tuple) and len(picked) == 2:
-                start_ts = pd.Timestamp(picked[0])
-                end_ts = pd.Timestamp(picked[1]) + pd.Timedelta(days=1)
-            else:
-                # Only the start date picked so far (mid-selection) -- show a single day.
-                single = picked[0] if isinstance(picked, tuple) else picked
-                start_ts = pd.Timestamp(single)
-                end_ts = start_ts + pd.Timedelta(days=1)
-    with cols[2]:
-        resolution_label = st.selectbox(
-            "Resolution", options=list(NEM_RESOLUTION_MINUTES.keys()), index=0,
-            key="opt_nem_resolution",
-        )
-        resolution_minutes = NEM_RESOLUTION_MINUTES[resolution_label]
-
-    n_snapshots = int((end_ts - start_ts) / pd.Timedelta(minutes=resolution_minutes))
-    _render_snapshot_warning(n_snapshots)
-
-    return start_ts, end_ts, resolution_minutes
-
-
-def _get_timeseries(scenario):
-    if scenario.data_source == "custom_csv":
-        upload = state.get_custom_upload()
-        if upload is None:
-            # Mirror the multi-year path's error handling (ppa.tabs.optimisation
-            # ._run_simulation): don't silently fall through to the NEM reference
-            # cache below -- that would run the LP against the
-            # wrong data source with no indication anything is amiss.
-            raise RuntimeError(
-                "Data source is 'custom_csv' but no uploaded file is active. "
-                "Go to the Custom Data tab and apply one."
-            )
-        ts = upload["ts"]
-        state.set_timeseries(ts)
-        return ts
-    # NEM (scenario.is_nem) is handled separately in render() -- it needs the
-    # user-selected period/resolution, which this scenario-only signature has
-    # no way to receive; see _cached_nem_period_ts / _render_nem_period_controls.
-    if state.has_timeseries():
-        return state.get_timeseries()
-    return None
-
 
 # ── scenario summary ──────────────────────────────────────────────────────────
 
@@ -346,11 +264,13 @@ def _render_data_status(s) -> tuple[bool, bool]:
 
 # ── Simulation runner ────────────────────────────────────────────────
 
-def _run_simulation(scenario, max_workers: int) -> None:
+def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
     import time
 
     from ppa.multi_year import run_multi_year
     from ppa.financials import run_multi_year_financial_analysis
+
+    orig_scenario = scenario  # pre-sizing, user-facing scenario -- persisted below
 
     if scenario.data_source == "custom_csv":
         from ppa.data_loader import custom_timeseries_dicts
@@ -474,6 +394,7 @@ def _run_simulation(scenario, max_workers: int) -> None:
         first_sim_year=scenario.first_sim_year,
         max_workers=max_workers,
         progress_callback=_on_progress,
+        run_id=run_id,
     )
     dispatch_seconds = time.monotonic() - _t_dispatch
     state.set_multi_year_results(results)
@@ -492,6 +413,16 @@ def _run_simulation(scenario, max_workers: int) -> None:
         scenario, results, first_sim_year=scenario.first_sim_year
     )
     state.set_multi_year_financial(fin)
+
+    from ppa import run_store
+
+    run_store.save(run_id, {
+        "scenario": orig_scenario,
+        "results": results,
+        "fin": fin,
+        "sized": state.get_optimised_sizes() if state.has_optimised_sizes() else None,
+        "diagnostics": state.get_sizing_diagnostics() if state.has_sizing_diagnostics() else None,
+    })
 
     progress_bar.progress(1.0, text="Optimisation complete!")
     timing = f" (sizing {sizing_seconds:.0f}s + dispatch {dispatch_seconds:.0f}s)" if sizing_seconds is not None else f" ({dispatch_seconds:.0f}s)"
@@ -661,8 +592,12 @@ def render() -> None:
                 st.success(f"Last run: {n_done} year(s) solved.")
 
     if model_run and data_ready:
+        from ppa import run_registry
+
+        run_id = run_registry.new_run_id()
+        st.query_params["run"] = run_id
         try:
-            _run_simulation(s, int(max_workers))
+            _run_simulation(s, int(max_workers), run_id)
         except Exception as exc:
             st.error(f"Optimisation failed: {exc}")
         else:
@@ -679,131 +614,3 @@ def render() -> None:
             )
             _render_sizing_diagnostics()
         _render_results(state.get_multi_year_financial(), s.simulation_years)
-
-    # ── Single-day reference optimisation ──────────────────────────────────────
-    # st.markdown("---")
-    if s.data_source == "custom_csv":
-        _single_day_title = "Single-day reference optimisation (custom CSV upload)"
-        _single_day_caption = (
-            "Runs the LP over the active **custom CSV upload** (prepared to hourly, "
-            "with the uploaded `ts_LoadMW` driving the offtake load directly). Pick "
-            "the day to inspect under **Reference day selection**. Results feed the "
-            "Results, and Analysis tabs."
-        )
-    else:
-        _single_day_title = "Period reference optimisation (NEM data)"
-        _single_day_caption = (
-            f"Runs the LP over the selected NEM plants/prices (region {s.nem_price_region}, "
-            f"{s.nem_year}) for any month or custom date range you pick below, at hourly, "
-            "30-minute, or native 5-minute resolution. Pick the day to inspect under "
-            "**Reference day selection**. Results feed the Results, and Analysis tabs."
-        )
-
-    with st.expander(_single_day_title, expanded=False):
-        st.caption(_single_day_caption)
-
-        resolution_h = 1.0
-        _ts_error_shown = False
-        try:
-            if s.is_nem:
-                period_start, period_end, resolution_minutes = _render_nem_period_controls(s)
-                resolution_h = resolution_minutes / 60.0
-                ts = _cached_nem_period_ts(
-                    s.nem_pv_duid, s.nem_wind_duid, s.nem_price_region, s.nem_year,
-                    period_start.isoformat(), period_end.isoformat(), resolution_minutes,
-                )
-                state.set_timeseries(ts)
-            else:
-                ts = _get_timeseries(s)
-        except (RuntimeError, FileNotFoundError, ValueError, KeyError) as exc:
-            st.error(str(exc))
-            ts = None
-            _ts_error_shown = True
-        if ts is None:
-            if s.data_source not in ("custom_csv",) and not s.is_nem and not _ts_error_shown:
-                st.error("Could not load the reference timeseries from `data/cache/`.")
-        else:
-            from ppa.data_loader import coerce_chosen_day, get_available_days
-
-            # Reconcile the sticky reference day with the period actually loaded,
-            # so day and period can never diverge: coerce (don't block) and
-            # surface the move as info rather than an error.
-            available_days = get_available_days(ts)
-            if available_days:
-                if s.chosen_day not in available_days:
-                    st.info(
-                        f"Reference day moved to **{coerce_chosen_day(ts, s.chosen_day)}** — "
-                        f"*{s.chosen_day}* is outside the selected period."
-                    )
-                reference_day = st.selectbox(
-                    "Reference day for daily charts", available_days,
-                    index=available_days.index(coerce_chosen_day(ts, s.chosen_day)),
-                    key="opt_reference_day",
-                )
-                s = dataclasses.replace(s, chosen_day=str(reference_day))
-
-            # The UI must not block on chosen_day (it is reconciled above); the
-            # check stays in validate_scenario for direct API callers.
-            errors = [e for e in validate_scenario(s, available_days=available_days)
-                      if "chosen_day" not in e]
-            if errors:
-                for err in errors:
-                    st.error(err)
-                st.warning("Fix the above issues in **Case Study Definition** before running.")
-            else:
-                cols = st.columns([1, 3])
-                with cols[0]:
-                    single_run = st.button("▶ Run Single-Day", type="secondary", width="stretch", key="opt_run_single")
-                with cols[1]:
-                    if state.has_result():
-                        r = state.get_result()
-                        st.success(f"Last run: **{r.solver_status}** / **{r.solver_condition}**")
-
-                if single_run:
-                    with st.spinner("Solving... (typically 5–15 s)"):
-                        try:
-                            from ppa.data_loader import prepare_timeseries
-                            from ppa.network import build_network
-                            from ppa.solver import solve
-                            from ppa.results import extract_results
-                            from ppa.financials import run_financial_analysis
-                            from ppa.counterfactuals import compute_counterfactuals
-
-                            ts_prep = prepare_timeseries(ts, s)
-
-                            # Capacity co-optimisation pre-step (reference period → fast;
-                            # optimise_capacities coarsens internally via
-                            # scenario.sizing_resolution_h regardless of ts_prep's own
-                            # resolution, so it needs no resolution_h argument here).
-                            if s.optimise_capacity:
-                                from ppa.sizing import apply_sizing, optimise_capacities, sizing_diagnostics
-
-                                sized = optimise_capacities(ts_prep, s)
-                                if sized.status != "ok":
-                                    raise RuntimeError(
-                                        f"Capacity sizing LP failed: {sized.status} / {sized.condition}"
-                                    )
-                                s = apply_sizing(s, sized)
-                                state.set_optimised_sizes(sized)
-                                state.set_sizing_diagnostics(sizing_diagnostics(sized, s, ts_prep))
-                                st.info(
-                                    f"Optimised portfolio — {_sized_banner_text(sized)} "
-                                    "(sized on the reference period)"
-                                )
-
-                            n = build_network(ts_prep, s, resolution_h=resolution_h)
-                            status, condition = solve(n, s, ts_prep)
-                            result = extract_results(n, s, ts_prep, status, condition, resolution_h=resolution_h)
-                            state.set_result(result)
-
-                            if s.run_financial_analysis:
-                                fin = run_financial_analysis(s, result.summary, result.revenue, result.n_period_hours)
-                                state.set_financial(fin)
-                            if s.enable_counterfactual:
-                                cf = compute_counterfactuals(ts_prep, s, result, dt=resolution_h)
-                                state.set_counterfactual(cf)
-                        except Exception as exc:
-                            st.error(f"Optimisation failed: {exc}")
-                        else:
-                            st.success(f"Complete — {status} / {condition}. See Results tabs.")
-                            _render_sizing_diagnostics()

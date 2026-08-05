@@ -4,9 +4,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from ppa.results import build_supply_mix_df, build_24h_avg
 from ui import state
-from ui.charts import make_supply_mix_24h_chart, make_revenue_breakdown_chart, year_axis
+from ui.charts import year_axis
 
 
 def _render_multi_year_overview(fin) -> None:
@@ -106,196 +105,7 @@ def _render_multi_year_overview(fin) -> None:
         for y in fin.yearly
     ]
     st.dataframe(pd.DataFrame(rows).set_index("Year"), width="stretch")
-
-    st.caption(
-        "Detailed hourly dispatch analysis is available in **Results Deep Dive** "
-        "after running the Single-Day reference in the Optimisation tab."
-    )
-
-
-def _render_single_day_overview() -> None:
-    result = state.get_result()
-    s = result.scenario
-    summary = result.summary
-    revenue = result.revenue
-    fin = state.get_financial()
-
-    # ── KPI row ───────────────────────────────────────────────────────────────
-    st.subheader("Key performance indicators")
-    st.caption(
-        "Financial figures here use a simplified unlevered model. For a full levered "
-        "project-finance appraisal — debt sizing, depreciation, tax, Equity IRR, and an "
-        "Excel export — run the **Financial Model** tab."
-    )
-    cols = st.columns(4)
-    cols[0].metric(
-        "PPA Fulfilment",
-        f"{summary.fulfilled_share:.1%}",
-        delta=f"{summary.fulfilled_share - s.required_delivery_share:+.1%} vs target",
-        delta_color="normal",
-    )
-    cols[1].metric(
-        "Net Revenue",
-        f"A${revenue.net_revenue / 1e6:,.2f}M",
-        help="PPA revenue + merchant revenue − market purchases − penalty costs − transmission costs (period total)",
-    )
-    cols[2].metric(
-        "Effective Capture Price",
-        f"A${revenue.effective_capture_price:.2f}/MWh",
-        help="Net revenue ÷ total generation (MWh)",
-    )
-    if fin is not None:
-        cols[3].metric(
-            "LCOE",
-            f"A${fin.lcoe:.2f}/MWh",
-            help=f"Levelised Cost of Energy at {s.discount_rate:.0%} WACC",
-        )
-    else:
-        cols[3].metric("LCOE", "—", help="Run with financial analysis enabled")
-
-    cols = st.columns(4)
-    cols[0].metric(
-        "Penalty Volume",
-        f"{summary.penalty_mwh:,.0f} MWh",
-        delta=f"{summary.penalty_share_of_load:.1%} of load",
-        delta_color="inverse",
-    )
-
-    # ── Offtaker procurement comparison ───────────────────────────────────────
-    if state.has_counterfactual():
-        cf = state.get_counterfactual()
-        # st.markdown("---")
-        st.subheader("Offtaker procurement comparison")
-        st.caption(
-            "How much would the offtaker have paid under alternative sourcing strategies? "
-            "Effective A$/MWh for the modelled period — covers shortfall hours at spot for the PPA column."
-        )
-        if s.cal_forward_source == "aer_indicative":
-            st.caption(s.cal_forward_note)
-        cols = st.columns(4)
-        cols[0].metric(
-            "PPA (offtaker)",
-            f"A${cf.ppa_effective_price:.2f}/MWh",
-            help="PPA tariff for delivered MWh + spot price for any undelivered load.",
-        )
-        cols[1].metric(
-            "Spot-only",
-            f"A${cf.spot_avg_price:.2f}/MWh",
-            delta=f"{cf.spot_avg_price - cf.ppa_effective_price:+.2f} A$/MWh vs PPA",
-            delta_color="normal",
-            help="100% of load sourced at real-time spot each hour.",
-        )
-        cols[2].metric(
-            f"Base futures (A${s.cal_forward_price:.0f}/MWh)",
-            f"A${cf.cal_avg_price:.2f}/MWh",
-            delta=f"{cf.cal_avg_price - cf.ppa_effective_price:+.2f} A$/MWh vs PPA",
-            delta_color="normal",
-            help="Flat baseload base-futures contract; zero spot exposure.",
-        )
-        cols[3].metric(
-            f"Blended ({s.cal_hedge_fraction:.0%} hedged)",
-            f"A${cf.blended_avg_price:.2f}/MWh",
-            delta=f"{cf.blended_avg_price - cf.ppa_effective_price:+.2f} A$/MWh vs PPA",
-            delta_color="normal",
-            help=f"{s.cal_hedge_fraction:.0%} of load at the base-futures price + remainder at spot.",
-        )
-
-    # st.markdown("---")
-
-    # ── Constraint compliance ──────────────────────────────────────────────────
-    st.subheader("Constraint compliance")
-    allowed_limit = s.allowed_shortfall_share * summary.total_load_mwh
-    buy_limit = s.market_buy_share * summary.ppa_delivered_mwh
-
-    compliance = {
-        "Constraint": ["Allowed shortfall cap", "Market buy cap"],
-        "Actual (MWh)": [f"{summary.allowed_shortfall_mwh:,.0f}", f"{summary.market_buy_to_ppa_mwh:,.0f}"],
-        "Limit (MWh)": [f"{allowed_limit:,.0f}", f"{buy_limit:,.0f}"],
-        "Status": [
-            "✅ Satisfied" if summary.allowed_shortfall_mwh <= allowed_limit + 1 else "❌ Violated",
-            "✅ Satisfied" if summary.market_buy_to_ppa_mwh <= buy_limit + 1 else "❌ Violated",
-        ],
-    }
-    st.dataframe(pd.DataFrame(compliance), hide_index=True, width="stretch")
-
-    # ── Dispatch summary table ─────────────────────────────────────────────────
-    st.subheader("Dispatch summary")
-
-    cols = st.columns(2)
-    with cols[0]:
-        st.markdown("**Generation volumes**")
-        gen_data = {
-            "Metric": [
-                "Total PPA load",
-                "PPA delivered",
-                " › from renewables & storage",
-                " › from market purchase",
-                "Allowed shortfall",
-                "Penalty volume",
-            ],
-            "MWh": [
-                f"{summary.total_load_mwh:,.0f}",
-                f"{summary.ppa_delivered_mwh:,.0f}",
-                f"{summary.renewable_and_storage_to_ppa_mwh:,.0f}",
-                f"{summary.market_buy_to_ppa_mwh:,.0f}",
-                f"{summary.allowed_shortfall_mwh:,.0f}",
-                f"{summary.penalty_mwh:,.0f}",
-            ],
-        }
-        st.dataframe(pd.DataFrame(gen_data), hide_index=True, width="stretch")
-
-    with cols[1]:
-        st.markdown("**Revenue breakdown**")
-        mkt_buy_label = (
-            "Market buy cost"
-            if revenue.market_purchase_cost >= 0
-            else "Market buy (negative-price benefit)"
-        )
-        mkt_buy_display = (
-            f"−A${revenue.market_purchase_cost:,.0f}"
-            if revenue.market_purchase_cost >= 0
-            else f"+A${-revenue.market_purchase_cost:,.0f}"
-        )
-        rev_data = {
-            "Item": [
-                "PPA revenue",
-                "Merchant revenue",
-                mkt_buy_label,
-                "Penalty cost",
-                "Transmission cost (combined)",
-                "Net revenue",
-            ],
-            "A$": [
-                f"A${revenue.ppa_revenue:,.0f}",
-                f"A${revenue.excess_revenue:,.0f}",
-                mkt_buy_display,
-                f"−A${revenue.penalty_cost:,.0f}",
-                f"−A${revenue.transmission_cost:,.0f}",
-                f"A${revenue.net_revenue:,.0f}",
-            ],
-        }
-        st.dataframe(pd.DataFrame(rev_data), hide_index=True, width="stretch")
-
-    # st.markdown("---")
-
-    # ── Charts ─────────────────────────────────────────────────────────────────
-    ts = state.get_timeseries()
-    if ts is not None:
-        from ppa.data_loader import prepare_timeseries
-        ts_prep = prepare_timeseries(ts, s)
-
-        cols = st.columns([3, 2])
-        with cols[0]:
-            st.subheader("Average hourly supply mix")
-            supply_mix = build_supply_mix_df(result.dispatch, ts_prep)
-            avg_24h = build_24h_avg(supply_mix)
-            fig = make_supply_mix_24h_chart(avg_24h, s.ppaload_mw)
-            st.plotly_chart(fig, width="stretch", height=500)
-
-        with cols[1]:
-            st.subheader("Revenue waterfall")
-            fig_rev = make_revenue_breakdown_chart(revenue)
-            st.plotly_chart(fig_rev, width="stretch", height=500)
+    st.caption("Detailed hourly dispatch analysis is available in **Results Deep Dive**.")
 
 
 def render() -> None:
@@ -306,15 +116,6 @@ def render() -> None:
         mode = f"{n}-year optimisation" if n > 1 else "single-year optimisation"
         st.caption(f"Showing results from last run: **{mode}**.")
         _render_multi_year_overview(state.get_multi_year_financial())
-
-        if state.has_result():
-            # st.markdown("---")
-            with st.expander("Single-day reference results", expanded=False):
-                _render_single_day_overview()
-
-    elif state.has_result():
-        st.caption("Showing results from last single-day reference run.")
-        _render_single_day_overview()
 
     else:
         st.info(

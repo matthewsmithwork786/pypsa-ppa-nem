@@ -195,6 +195,9 @@ class ProjectFinanceResult:
     # Per-period schedules (length = model_duration); index 0 = year 0
     periods: np.ndarray = field(repr=False, default=None)  # type: ignore
     schedule: dict[str, np.ndarray] = field(repr=False, default_factory=dict)
+    # Real per-year data actually used for the volume/price schedule, if any
+    # (None when the model ran off a single averaged/representative `energy`).
+    annual_energy: list[EnergyInputs] | None = field(repr=False, default=None)
 
 
 # ── Energy interface ─────────────────────────────────────────────────────────
@@ -269,12 +272,26 @@ def energy_inputs_from_result(
 # ── Timeline helpers ──────────────────────────────────────────────────────────
 
 
+def per_year_energy_inputs(results: list) -> list[EnergyInputs]:
+    """Per-year energy inputs, one per simulated year, in order.
+
+    This is what `run_project_finance`'s `annual_energy` parameter consumes so
+    the levered model reflects the real year-to-year variation (degradation,
+    weather-year cycling, the escalation the dispatch model already applied)
+    instead of one averaged year replayed under smooth indexation -- see
+    `energy_inputs_from_results` for the averaged fallback used when a caller
+    only has (or wants) a single representative year."""
+    return [energy_inputs_from_result(r) for r in results]
+
+
 def energy_inputs_from_results(results: list) -> EnergyInputs:
     """Average annualised energy inputs across several per-year results.
 
-    The financial model runs one representative operating year escalated by
-    indexation, so a multi-year PyPSA run is collapsed to its mean year here."""
-    per_year = [energy_inputs_from_result(r) for r in results]
+    Used only as a display/fallback summary and by callers that don't pass
+    `run_project_finance`'s `annual_energy` -- the model itself now consumes
+    real per-year data (via `per_year_energy_inputs`) rather than replaying
+    this average for every operating year."""
+    per_year = per_year_energy_inputs(results)
     if not per_year:
         raise ValueError("no results provided")
     n = len(per_year)
@@ -378,7 +395,21 @@ def _npv(rate: float, cashflows: np.ndarray, offset: int = 0) -> float:
 def run_project_finance(
     p: ProjectFinanceInputs,
     e: EnergyInputs,
+    annual_energy: list[EnergyInputs] | None = None,
 ) -> ProjectFinanceResult:
+    """Run the levered project-finance model.
+
+    `e` seeds capacities (MW/MWh) and is the fallback/display representative
+    year when `annual_energy` isn't given. When `annual_energy` *is* given
+    (one `EnergyInputs` per simulated operating year, e.g. from
+    `per_year_energy_inputs`), volumes and merchant capture prices for each
+    operating year are taken directly from the matching entry instead of
+    replaying `e` under smooth indexation -- real degradation, weather-year
+    cycling and price escalation the dispatch model already computed, rather
+    than one averaged year escalated by a fixed rate. Operating years beyond
+    the simulated horizon (e.g. `operating_life` longer than the run) hold
+    the last simulated year's values flat.
+    """
     n = p.model_duration
     tl = _build_timeline(p)
     periods = np.arange(0, n)  # 0-based years; year 0 is the base year
@@ -440,15 +471,42 @@ def run_project_finance(
 
     # ── Schedule 2: Volumes, prices, revenue ─────────────────────────────────
     # Volumes & prices are broken out first; revenue is derived from them.
-    ppa_vol = ppa_flag * e.ppa_gwh                       # GWh
-    merch_solar_vol = ppa_flag * e.excess_solar_gwh + nonppa_flag * e.total_solar_gwh
-    merch_nonsolar_vol = ppa_flag * e.excess_nonsolar_gwh + nonppa_flag * e.total_nonsolar_gwh
+    #
+    # Per-operating-year lookup into `annual_energy` (real per-year data) when
+    # given; otherwise every period just sees the same `e` (old behaviour,
+    # unchanged for every existing single-year caller/test).
+    op_year_idx = np.clip(periods - tl.ops_start, 0, None).astype(int)
+
+    def year_array(attr: str) -> np.ndarray:
+        if not annual_energy:
+            return np.full(n, getattr(e, attr))
+        vals = np.array([getattr(x, attr) for x in annual_energy], dtype=float)
+        idx = np.clip(op_year_idx, 0, len(vals) - 1)
+        return vals[idx]
+
+    ppa_gwh_arr = year_array("ppa_gwh")
+    excess_solar_arr = year_array("excess_solar_gwh")
+    excess_nonsolar_arr = year_array("excess_nonsolar_gwh")
+    penalty_gwh_arr = year_array("penalty_gwh")
+    total_solar_arr = year_array("total_solar_gwh")
+    total_nonsolar_arr = year_array("total_nonsolar_gwh")
+    sell_solar_price_arr = year_array("sell_solar_price")
+    sell_nonsolar_price_arr = year_array("sell_nonsolar_price")
+
+    ppa_vol = ppa_flag * ppa_gwh_arr                     # GWh
+    merch_solar_vol = ppa_flag * excess_solar_arr + nonppa_flag * total_solar_arr
+    merch_nonsolar_vol = ppa_flag * excess_nonsolar_arr + nonppa_flag * total_nonsolar_arr
     merch_vol = merch_solar_vol + merch_nonsolar_vol
-    pen_vol = ppa_flag * e.penalty_gwh                   # GWh
+    pen_vol = ppa_flag * penalty_gwh_arr                 # GWh
 
     ppa_price = ppa_idx * p.ppa_tariff                   # A$/MWh (indexed)
-    merch_solar_price = solar_idx * e.sell_solar_price
-    merch_nonsolar_price = nonsolar_idx * e.sell_nonsolar_price
+    # Real per-year merchant prices already embed the dispatch model's actual
+    # escalation -- `solar_idx`/`nonsolar_idx` are only nonzero-growth when the
+    # caller left `escalate_merchant_prices` on for a fallback/single-year `e`
+    # (see ProjectFinanceInputs.escalate_merchant_prices), so this does not
+    # double-count regardless of which path is active.
+    merch_solar_price = solar_idx * sell_solar_price_arr
+    merch_nonsolar_price = nonsolar_idx * sell_nonsolar_price_arr
     pen_price = ppa_idx * p.penalty_tariff
     lgc_price = ppa_idx * p.lgc_price
 
@@ -737,6 +795,7 @@ def run_project_finance(
         lcoe=lcoe,
         periods=periods,
         schedule=schedule,
+        annual_energy=annual_energy,
     )
 
 

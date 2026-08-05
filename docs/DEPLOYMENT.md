@@ -153,12 +153,12 @@ Cloud Build → Triggers → Create trigger): event *Push to a branch*, branch
 
 ### Configuration notes
 
-- **Memory:** `--memory=4Gi` — with the default **tsam typical-weeks** sizing
-  the sizing LP peaks ~400 MB, and a 2-worker dispatch ~1.7 GB (see §5). Even
-  the exact full-hourly sizing (~1.1 GB) fits this allocation, so leave the
-  default. On a smaller tier lower `PPA_WORKER_MEM_MB` or reduce simulation
-  years. `PPA_WORKER_MEM_MB` / `PPA_RESERVE_MEM_MB` are set as container env
-  vars.
+- **Memory/CPU:** `--memory=8Gi --cpu=4` — sized for a 4-worker dispatch
+  (reserve 800 MB + 4 x `PPA_WORKER_MEM_MB` 1200 MB = 5.6 GB, see §5), with
+  4 vCPU so the 4 processes actually run in parallel instead of contending for
+  cores. On a smaller tier lower `PPA_WORKER_MEM_MB`/worker count or reduce
+  simulation years. `PPA_WORKER_MEM_MB` / `PPA_RESERVE_MEM_MB` are set as
+  container env vars.
 - **Port:** Cloud Run injects `PORT`; `cloudbuild.yaml` deploys with
   `--port=8501` and the Dockerfile binds `${PORT:-8501}`.
 - **Public data:** all NEM data caches are committed under `data/cache/` and

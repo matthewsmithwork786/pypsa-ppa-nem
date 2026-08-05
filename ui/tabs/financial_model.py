@@ -11,8 +11,8 @@ from ppa.financial_model import (
     ProjectFinanceInputs,
     EnergyInputs,
     run_project_finance,
-    energy_inputs_from_result,
     energy_inputs_from_results,
+    per_year_energy_inputs,
     project_finance_inputs_from_scenario,
 )
 from ppa.financial_model_excel import export_financial_model, export_hourly_timeseries
@@ -36,9 +36,6 @@ def _energy_source() -> tuple[EnergyInputs | None, list, bool]:
             return energy_inputs_from_results(results), results, True
         if results:
             return energy_inputs_from_results(results), results, False
-    if state.has_result():
-        r = state.get_result()
-        return energy_inputs_from_result(r), [r], False
     return None, [], False
 
 
@@ -343,6 +340,11 @@ def render() -> None:
         )
         return
 
+    # Real per-year data (degradation, weather-year cycling, actual escalation)
+    # rather than replaying the single averaged `energy` for every operating
+    # year -- see ppa.financial_model.run_project_finance's `annual_energy`.
+    annual_energy = per_year_energy_inputs(results_list) if multi_year else None
+
     scenario = state.get_scenario()
     seed = (
         project_finance_inputs_from_scenario(scenario)
@@ -351,7 +353,14 @@ def render() -> None:
 
     # ── Energy interface (pre-filled, from PyPSA) ─────────────────────────────
     with st.expander("⚡ Energy inputs from PyPSA (pre-filled)", expanded=False):
-        st.caption(f"Representative operating year derived from: **{energy.name}**")
+        if annual_energy:
+            st.caption(
+                f"Averages shown below; the model itself uses each of the "
+                f"**{len(annual_energy)}** simulated years' real figures — "
+                f"source: **{energy.name}**."
+            )
+        else:
+            st.caption(f"Representative operating year derived from: **{energy.name}**")
         cols = st.columns(4)
         with cols[0]:
             st.metric("PPA delivered",
@@ -385,7 +394,7 @@ def render() -> None:
     run = st.button("▶️ Run financial model", type="primary", width="stretch")
     if run:
         try:
-            result = run_project_finance(inputs, energy)
+            result = run_project_finance(inputs, energy, annual_energy=annual_energy)
             state.set_project_finance(result)
         except Exception as exc:  # surface modelling errors rather than crash the tab
             st.error(f"Financial model failed: {exc}")

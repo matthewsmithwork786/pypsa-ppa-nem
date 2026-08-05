@@ -21,8 +21,6 @@ from ui.charts import (
     make_soc_24h_chart,
     make_price_series_chart,
     make_price_24h_chart,
-    make_counterfactual_bar_chart,
-    make_cumulative_cost_chart,
     make_multi_year_counterfactual_chart,
 )
 
@@ -324,125 +322,6 @@ def _render_multi_year_deep_dive() -> None:
             _render_multi_year_counterfactuals(results, fin, s)
 
 
-def _render_single_day_deep_dive() -> None:
-    result = state.get_result()
-    s = result.scenario
-    fin = state.get_financial()
-    ts = state.get_timeseries()
-
-    # ── Financial analysis ────────────────────────────────────────────────────
-    st.subheader("Financial analysis")
-
-    if fin is None:
-        st.info(
-            "Financial analysis was not run. Enable **Run financial analysis** in the scenario "
-            "form and re-run the optimisation.",
-            icon="💰",
-        )
-    else:
-        cols = st.columns(2)
-        with cols[0]:
-            st.markdown("**CAPEX & OPEX**")
-            capex_df = pd.DataFrame(
-                [
-                    ("Onshore wind", _fmt_m(fin.capex.capex_wind), f"{s.onsw_mw:.0f} MW × A${s.wind_capex_per_kw:,.0f}/kW"),
-                    ("Solar PV", _fmt_m(fin.capex.capex_pv), f"{s.pv_mw:.0f} MW × A${s.pv_capex_per_kw:,.0f}/kW"),
-                    ("BESS", _fmt_m(fin.capex.capex_bess), f"{s.effective_bess_mwh:.0f} MWh × A${s.bess_capex_per_kwh:,.0f}/kWh"),
-                    ("Devex", _fmt_m(fin.capex.devex_total), f"{s.devex_pct_of_capex:.0%} of CAPEX"),
-                    ("Total CAPEX", _fmt_m(fin.capex.capex_total), ""),
-                    ("Total investment", _fmt_m(fin.capex.total_investment), ""),
-                    ("Annual OPEX", _fmt_m(fin.capex.annual_opex), f"{s.opex_rate:.0%} of CAPEX"),
-                ],
-                columns=["Component", "Value", "Basis"],
-            )
-            st.dataframe(capex_df, hide_index=True, width="stretch", height="content")
-
-        with cols[1]:
-            st.markdown("**Project economics**")
-            irr_str = f"{fin.project_irr:.1%}" if not np.isnan(fin.project_irr) else "n/a"
-            lcoe_str = f"A${fin.lcoe:.2f}/MWh" if not np.isnan(fin.lcoe) else "n/a"
-            be_str = f"A${fin.breakeven_ppa_price:.2f}/MWh" if not np.isnan(fin.breakeven_ppa_price) else "n/a"
-            econ_df = pd.DataFrame(
-                [
-                    ("Scale factor (period → annual)", f"×{fin.scale_factor:.2f}", ""),
-                    ("Annual generation (indicative)", f"{fin.annual_gen_mwh:,.0f} MWh", ""),
-                    ("Annual PPA revenue", _fmt_m(fin.annual_ppa_rev), f"A${s.ppa_price:.0f}/MWh"),
-                    ("Annual merchant revenue", _fmt_m(fin.annual_merch_rev), f"avg A${fin.avg_merch_price:.2f}/MWh"),
-                    ("Annual market purchase cost", _fmt_m(fin.annual_buy_cost), f"avg A${fin.avg_buy_price:.2f}/MWh"),
-                    ("Annual net revenue", _fmt_m(fin.annual_net_rev), ""),
-                    ("Annual OPEX", _fmt_m(fin.annual_opex), ""),
-                    ("Annual pre-tax cashflow", _fmt_m(fin.annual_cf), ""),
-                    ("LCOE", lcoe_str, f"at {s.discount_rate:.0%} WACC"),
-                    ("Simple payback", f"{fin.simple_payback:.1f} yrs", ""),
-                    ("Project IRR", irr_str, f"pre-tax, {s.project_life_yrs}-yr life"),
-                    ("NPV at WACC", _fmt_m(fin.npv_at_wacc), f"at {s.discount_rate:.0%}"),
-                    (f"Breakeven PPA for {s.target_irr:.0%} IRR", be_str, f"vs A${s.ppa_price:.0f}/MWh contracted"),
-                ],
-                columns=["Metric", "Value", "Note"],
-            )
-            st.dataframe(econ_df, hide_index=True, width="stretch", height="content")
-
-    # ── Dispatch detail ────────────────────────────────────────────────────────
-    # st.markdown("---")
-    st.subheader("Daily dispatch detail")
-
-    if ts is not None:
-        from ppa.data_loader import coerce_chosen_day, prepare_timeseries, get_available_days
-        ts_prep = prepare_timeseries(ts, s)
-        available_days = get_available_days(ts)
-        default_idx = available_days.index(coerce_chosen_day(ts, s.chosen_day)) if available_days else 0
-        chosen_day = st.selectbox("Select a day to inspect", available_days, index=default_idx, key="dd_chosen_day2")
-
-        _render_dispatch_section(result, s, chosen_day)
-
-        st.subheader("Market spot price")
-        if getattr(result, "market_prices", None) is not None:
-            fig_price = make_price_series_chart(result.market_prices, title="Market spot price")
-        else:
-            fig_price = make_price_series_chart(ts_prep)
-        st.plotly_chart(fig_price, width="stretch", height=400)
-
-    # ── Generation statistics ──────────────────────────────────────────────────
-    # st.markdown("---")
-    st.subheader("Generation statistics")
-    _render_gen_stats(result, s)
-
-    # ── Counterfactual procurement comparison ──────────────────────────────────
-    if state.has_counterfactual():
-        cf = state.get_counterfactual()
-        # st.markdown("---")
-        st.subheader("Counterfactual procurement comparison")
-        st.markdown(
-            "How does the PPA cost compare to what the offtaker would have paid "
-            "under alternative sourcing strategies? All figures are for the modelled period."
-        )
-        if s.cal_forward_source == "aer_indicative":
-            st.caption(s.cal_forward_note)
-
-        cols = st.columns([1, 2])
-        with cols[0]:
-            fig_cf = make_counterfactual_bar_chart(cf, s)
-            st.plotly_chart(fig_cf, width="stretch", height=400)
-        with cols[1]:
-            fig_cum = make_cumulative_cost_chart(cf)
-            st.plotly_chart(fig_cum, width="stretch", height=400)
-
-        cf_table = pd.DataFrame(
-            [
-                ("Spot-only", f"A${cf.spot_avg_price:.2f}", f"A${cf.spot_cost / 1e6:.3f}M",
-                 f"A${cf.spot_cost - cf.ppa_offtaker_cost:+,.0f}"),
-                (f"Base futures (A${s.cal_forward_price:.0f}/MWh)", f"A${cf.cal_avg_price:.2f}",
-                 f"A${cf.cal_cost / 1e6:.3f}M", f"A${cf.cal_cost - cf.ppa_offtaker_cost:+,.0f}"),
-                (f"Blended ({s.cal_hedge_fraction:.0%} hedged)", f"A${cf.blended_avg_price:.2f}",
-                 f"A${cf.blended_cost / 1e6:.3f}M", f"A${cf.blended_cost - cf.ppa_offtaker_cost:+,.0f}"),
-                ("PPA (offtaker)", f"A${cf.ppa_effective_price:.2f}",
-                 f"A${cf.ppa_offtaker_cost / 1e6:.3f}M", "—"),
-            ],
-            columns=["Strategy", "Effective A$/MWh", "Period total", "vs PPA (A$, + = more expensive)"],
-        )
-        st.dataframe(cf_table, hide_index=True, width="stretch")
-
-
 def render() -> None:
     st.title("🔍 Detailed Results")
 
@@ -450,15 +329,6 @@ def render() -> None:
         n = len(state.get_multi_year_financial().yearly)
         st.caption(f"Showing results from last optimisation run ({n} year(s)).")
         _render_multi_year_deep_dive()
-
-        if state.has_result():
-            # st.markdown("---")
-            with st.expander("Single-day reference deep dive", expanded=False):
-                _render_single_day_deep_dive()
-
-    elif state.has_result():
-        st.caption("Showing results from last single-day reference run.")
-        _render_single_day_deep_dive()
 
     else:
         st.info(

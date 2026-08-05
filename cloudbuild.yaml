@@ -40,10 +40,12 @@ steps:
       # --port=8501 so the Dockerfile CMD binds there. Keep in sync with the
       # HEALTHCHECK / EXPOSE in the Dockerfile.
       - '--port=8501'
-      # The full-hourly sizing LP peaks ~1.1 GB and dispatch with 2 workers
-      # ~1.7 GB (docs/DEPLOYMENT.md section 5). 4 GiB leaves headroom.
-      - '--cpu=2'
-      - '--memory=4Gi'
+      # 4 vCPU / 8Gi supports 4 parallel dispatch workers: reserve 800MB +
+      # 4 x 1200MB/worker (docs/DEPLOYMENT.md section 5) = 5.6GB, with headroom.
+      # 2 vCPU would leave 4 processes contending for 2 cores -- no real
+      # speedup -- so CPU is bumped alongside memory.
+      - '--cpu=4'
+      - '--memory=8Gi'
       # Long optimisations run for minutes; Cloud Run request timeout is capped
       # at 3600 s.
       - '--timeout=3600'

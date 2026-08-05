@@ -5,12 +5,13 @@ import dataclasses
 import gc
 import multiprocessing
 import os
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
 from typing import Callable
 
 import pandas as pd
 
+from ppa import run_registry
 from ppa.data.timeseries_utils import build_year_timeseries, pick_weather_year
 from ppa.network import build_network
 from ppa.results import OptimisationResult, extract_results
@@ -18,6 +19,7 @@ from ppa.scenario import Scenario
 from ppa.solver import solve
 
 import streamlit as st
+from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 # Peak RSS of a single full-year EU solve, measured at ~735 MB with io_api="direct".
 # Each parallel worker is its own process and pays this in full, so we budget one
@@ -237,6 +239,7 @@ def run_multi_year(
     first_sim_year: int = 2025,
     max_workers: int = 4,
     progress_callback: Callable[[int, int, int], None] | None = None,
+    run_id: str | None = None,
 ) -> list[OptimisationResult]:
     """
     Run `scenario.simulation_years` independent year-simulations in parallel.
@@ -246,6 +249,13 @@ def run_multi_year(
     (e.g. 2021: high prices + low wind).  Prices are then escalated from that
     historical base year to the simulation year via `scenario.price_escalation_rate`.
     Technology degradation is applied per-year via `scenario.*_degradation_rate`.
+
+    `run_id`, if given, registers this run with `ppa.run_registry` so a browser
+    disconnect (e.g. the caller's Streamlit session going away) starts a grace
+    timer instead of immediately abandoning the forked worker pool -- a page
+    refresh that reconnects with the same run_id within the grace window
+    (`ppa.run_registry.touch`) is spared; only a truly abandoned tab gets its
+    workers cancelled early, to free memory for the next run.
     """
     if scenario.optimise_capacity:
         raise ValueError(
@@ -352,40 +362,64 @@ def run_multi_year(
         mp_context = multiprocessing.get_context("fork")
     except ValueError:  # pragma: no cover - Windows only
         mp_context = multiprocessing.get_context("spawn")
-    try:
-        with ProcessPoolExecutor(max_workers=workers, mp_context=mp_context) as executor:
-            futures = {
-                executor.submit(
-                    _solve_one_year,
-                    idx,
-                    first_sim_year + idx,
-                    timeseries_by_idx[idx],
-                    dataclasses.asdict(scenario_by_idx[idx]),
-                ): idx
-                for idx in range(n_years)
-            }
 
-            for future in as_completed(futures):
-                year_idx, result = future.result()  # propagates exceptions
-                _record(year_idx, result)
-    except BrokenProcessPool:
-        # A worker was killed outright — almost always the OOM killer, which
-        # sends SIGKILL with no traceback and no exit code. Forking is what
-        # makes this likely: fork is copy-on-write, but CPython refcounting
-        # dirties nearly every page a child touches, so each worker ends up
-        # costing roughly the parent's own RSS. If a big object (e.g. the
-        # capacity-sizing LP) is still resident in the parent, N workers
-        # multiply it N times.
-        #
-        # Recover rather than die: the serial path reuses the parent's memory
-        # and re-solves only the years that never came back.
-        remaining = sum(1 for r in results if r is None)
-        st.warning(
-            f"Parallel workers were killed (most likely out of memory) after "
-            f"{n_years - remaining} of {n_years} year(s). Falling back to the "
-            f"serial path for the remaining {remaining} — slower, but it uses "
-            f"about 1/{workers} of the memory."
-        )
-        _run_serial()
+    session_id = None
+    if run_id:
+        ctx = get_script_run_ctx()
+        session_id = ctx.session_id if ctx else None
+        if session_id:
+            run_registry.register(run_id, session_id)
+
+    try:
+        try:
+            with ProcessPoolExecutor(max_workers=workers, mp_context=mp_context) as executor:
+                futures = {
+                    executor.submit(
+                        _solve_one_year,
+                        idx,
+                        first_sim_year + idx,
+                        timeseries_by_idx[idx],
+                        dataclasses.asdict(scenario_by_idx[idx]),
+                    ): idx
+                    for idx in range(n_years)
+                }
+
+                # Polled in short slices (rather than as_completed's unbounded
+                # block) so an abandoned browser tab can be detected and its
+                # workers reclaimed instead of running to completion unwatched.
+                pending = set(futures)
+                while pending:
+                    done, pending = wait(pending, timeout=2.0, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        year_idx, result = future.result()  # propagates exceptions
+                        _record(year_idx, result)
+                    if session_id and pending and run_registry.is_abandoned(run_id):
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        raise run_registry.RunAbandoned(
+                            f"Run {run_id} abandoned (browser gone, not reclaimed within "
+                            f"{run_registry.GRACE_SECONDS:.0f}s) — cancelling to free memory."
+                        )
+        except BrokenProcessPool:
+            # A worker was killed outright — almost always the OOM killer, which
+            # sends SIGKILL with no traceback and no exit code. Forking is what
+            # makes this likely: fork is copy-on-write, but CPython refcounting
+            # dirties nearly every page a child touches, so each worker ends up
+            # costing roughly the parent's own RSS. If a big object (e.g. the
+            # capacity-sizing LP) is still resident in the parent, N workers
+            # multiply it N times.
+            #
+            # Recover rather than die: the serial path reuses the parent's memory
+            # and re-solves only the years that never came back.
+            remaining = sum(1 for r in results if r is None)
+            st.warning(
+                f"Parallel workers were killed (most likely out of memory) after "
+                f"{n_years - remaining} of {n_years} year(s). Falling back to the "
+                f"serial path for the remaining {remaining} — slower, but it uses "
+                f"about 1/{workers} of the memory."
+            )
+            _run_serial()
+    finally:
+        if run_id:
+            run_registry.unregister(run_id)
 
     return results  # type: ignore[return-value]
