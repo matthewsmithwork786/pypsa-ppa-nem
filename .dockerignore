@@ -1,0 +1,31 @@
+# VCS / CI
+.git
+.github
+.gitignore
+.devcontainer
+.claude
+
+# Local Python environments & caches
+.pixi
+.venv
+venv
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.ipynb_checkpoints
+
+# Not needed at runtime
+notebooks
+docs
+tests
+*.md
+!README.md
+!LICENSE
+
+# Raw acquisition caches (re-fetchable; never shipped)
+nemosis_cache
+data/.~lock.*
+
+# Local scratch
+*.log

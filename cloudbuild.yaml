@@ -1,0 +1,63 @@
+# Google Cloud Build pipeline for the PyPSA PPA Explorer Streamlit app.
+#
+# Builds the image from the Dockerfile, pushes it to Artifact Registry and
+# deploys it to Cloud Run. Trigger it on a push to main, or run manually:
+#
+#   gcloud builds submit --config cloudbuild.yaml
+#
+# One-time setup (see docs/DEPLOYMENT.md section 8):
+#   gcloud artifacts repositories create pypsa-ppa-nem \
+#       --repository-format=docker --location=us-central1
+#   gcloud services enable run.googleapis.com artifactregistry.googleapis.com
+#
+# Substitutions: _REGION / _REPO / _SERVICE_NAME can be overridden on the
+# command line with --substitutions=...
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE_NAME}:${_COMMIT_SHA}'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE_NAME}:${_COMMIT_SHA}'
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:slim'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE_NAME}'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE_NAME}:${_COMMIT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      # The container listens on PORT (injected by Cloud Run); cloudbuild sets
+      # --port=8501 so the Dockerfile CMD binds there. Keep in sync with the
+      # HEALTHCHECK / EXPOSE in the Dockerfile.
+      - '--port=8501'
+      # The full-hourly sizing LP peaks ~1.1 GB and dispatch with 2 workers
+      # ~1.7 GB (docs/DEPLOYMENT.md section 5). 4 GiB leaves headroom.
+      - '--cpu=2'
+      - '--memory=4Gi'
+      # Long optimisations run for minutes; Cloud Run request timeout is capped
+      # at 3600 s.
+      - '--timeout=3600'
+      - '--min-instances=0'
+      - '--max-instances=3'
+      - '--set-env-vars=PPA_WORKER_MEM_MB=1200,PPA_RESERVE_MEM_MB=800'
+
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE_NAME}:${_COMMIT_SHA}'
+
+substitutions:
+  _REGION: us-central1
+  _REPO: pypsa-ppa-nem
+  _SERVICE_NAME: pypsa-ppa-explorer
+
+options:
+  logging: CLOUD_LOGGING_ONLY
