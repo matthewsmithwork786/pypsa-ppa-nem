@@ -205,12 +205,15 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                   index=_method_idx,
                   key="sf_sizing_method",
                   help=(
-                      "How the sizing LP represents the year. **Full year hourly** is "
-                      "exact and the default, but slowest. **Coarse resolution** "
+                      "How the sizing LP represents the year. **Typical weeks (tsam)** "
+                      "is the default: it clusters the year into representative "
+                      "168-hour weeks, is ~11x faster than exact, and lands the fleet "
+                      "within ~10% and the BESS within a few percent of the exact "
+                      "answer. **Full year hourly** is exact but the slowest. "
+                      "**Coarse resolution** "
                       "block-averages to the legacy 1-6 h resolution (~4% smaller fleet, "
-                      "~8x faster). **Typical weeks (tsam)** clusters the year into "
-                      "representative 168-hour weeks and is ~11x faster, landing the fleet "
-                      "within ~10% and the BESS within a few percent of the exact answer. "
+                      "~8x faster) but smooths away the intra-day variability storage "
+                      "sizing needs. "
                       "The sized portfolio is always re-simulated at hourly resolution "
                       "afterwards."
                   ),

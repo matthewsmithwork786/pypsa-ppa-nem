@@ -5,9 +5,9 @@
 | File | Purpose |
 |---|---|
 | `streamlit_app.py` | Entry point — set this as the "Main file path" |
-| `requirements.txt` | Runtime dependencies **only** |
+| `requirements.txt` | Runtime dependencies **only** — includes `tsam==3.4.2` (see §2) |
 | `requirements-dev.txt` | Adds `pytest`; not installed on the deployed app |
-| `requirements-optional.txt` | `tsam` — **must not** go in `requirements.txt` (see §2) |
+| `requirements-optional.txt` | Legacy — `tsam` now ships in `requirements.txt` |
 | `.python-version` | `3.13` |
 | `.streamlit/config.toml` | Upload limit, XSRF, theme |
 
@@ -15,23 +15,23 @@
 `data/cache/` and read from disk. The acquisition scripts in `scripts/` need
 `OPENELECTRICITY_API_KEY`, but they are run locally and never by the deployed app.
 
-## 2. The dependency conflict — do not undo this
+## 2. tsam and the highspy pin — keep them together
 
-`tsam==3.4.2` requires `highspy<=1.15.0`, while the rest of the stack uses
-`highspy==1.15.1`. With both in `requirements.txt`, pip fails outright:
+`tsam==3.4.2` requires `highspy<=1.15.0`, while newer highspy releases are
+otherwise fine. `requirements.txt` pins `highspy==1.15.0` **and** ships
+`tsam==3.4.2` so the two resolve together. Bump highspy past 1.15.0 and pip
+fails outright:
 
 ```
 ERROR: ResolutionImpossible
 ```
 
-Streamlit Cloud does a clean `pip install -r requirements.txt`, so this is a hard
-deploy failure, not a warning. `tsam` therefore lives in
-`requirements-optional.txt`.
-
-The app is unaffected: `sizing_method` defaults to `full_hourly`, the tsam import is
-guarded, and selecting "Typical days" without the package produces a clear validation
-error rather than a crash. (Clustered sizing also under-sizes storage — see
-`docs/sizing_experiments.md` E7/E9 — so it is not a default worth fighting for.)
+tsam is not a deploy-time extra: it is the **default** sizing representation
+(`Scenario.sizing_method="tsam"`, 16 typical weeks — the app's radio default
+is "Typical weeks (tsam)"). It is what keeps the capacity-sizing LP small
+enough to fit a container (~400 MB vs ~1.1 GB for the exact hourly year)
+while staying more accurate than legacy coarse 3 h block-averaging. Keep both
+pins.
 
 ## 3. Deploy steps
 
@@ -59,16 +59,18 @@ locally:
 | Phase | Peak RSS |
 |---|---|
 | Baseline after data load | ~350 MB |
-| Sizing LP, coarse 3 h | ~780 MB |
-| Sizing LP, **full hourly (the default)** | **~1,143 MB** (171 s) |
+| Sizing LP, **tsam typical weeks (the default)** | **~400 MB** (18 s) |
+| Sizing LP, coarse 3 h (legacy) | ~780 MB |
+| Sizing LP, full hourly (exact) | ~1,143 MB (171 s) |
 | Dispatch, 2 forked workers | ~1,770 MB |
 | Dispatch, 1 worker (serial) | ~725 MB |
 
-> **On a 1 GB tier the default `full_hourly` sizing LP will not fit.** The app now
-> warns before the solve rather than being killed silently — but the practical
-> setting for a memory-limited deployment is **Coarse resolution (3 h)** at
-> ~780 MB, which is ~8x faster and only about 4.5% off on sized fleet. Capacity
-> sizing is the only feature affected; fixed-capacity dispatch runs in ~725 MB.
+> **The default tsam sizing LP (~400 MB) fits any tier, so coarse is no longer
+> the memory fallback.** tsam is both lighter *and* more accurate than coarse:
+> typical weeks keep hourly intra-day resolution, which coarse's 3 h
+> block-averages smooth away (the shape storage sizing depends on). Only the
+> exact full-hourly year (~1.1 GB) needs a multi-GB tier — pick it if you want
+> the exact answer and have the memory, otherwise leave the default.
 
 The app already defends itself:
 
@@ -82,8 +84,9 @@ The app already defends itself:
 
 **If the deployed app still runs out of memory**, in order of preference:
 
-1. Set sizing representation to **Coarse resolution (3 h)** in Case Setup — about 8×
-   faster than full hourly and only ~4.5% off on sized fleet.
+1. Keep the default **Typical weeks (tsam)** — ~400 MB and more accurate than
+   coarse. Only the exact **full-hourly** year (~1.1 GB) is too big for a 1 GB
+   tier.
 2. Reduce **simulation years** — the dispatch phase solves every year.
 3. Raise `PPA_WORKER_MEM_MB` (default `1200`) so fewer workers are started; setting it
    above the container limit forces the serial path.
@@ -150,10 +153,12 @@ Cloud Build → Triggers → Create trigger): event *Push to a branch*, branch
 
 ### Configuration notes
 
-- **Memory:** `--memory=4Gi` — the default full-hourly sizing LP peaks ~1.1 GB
-  and a 2-worker dispatch ~1.7 GB (see §5). On a smaller tier, set the sizing
-  representation to **Coarse (3 h)** in the UI, or lower `PPA_WORKER_MEM_MB`.
-  `PPA_WORKER_MEM_MB` / `PPA_RESERVE_MEM_MB` are set as container env vars.
+- **Memory:** `--memory=4Gi` — with the default **tsam typical-weeks** sizing
+  the sizing LP peaks ~400 MB, and a 2-worker dispatch ~1.7 GB (see §5). Even
+  the exact full-hourly sizing (~1.1 GB) fits this allocation, so leave the
+  default. On a smaller tier lower `PPA_WORKER_MEM_MB` or reduce simulation
+  years. `PPA_WORKER_MEM_MB` / `PPA_RESERVE_MEM_MB` are set as container env
+  vars.
 - **Port:** Cloud Run injects `PORT`; `cloudbuild.yaml` deploys with
   `--port=8501` and the Dockerfile binds `${PORT:-8501}`.
 - **Public data:** all NEM data caches are committed under `data/cache/` and
