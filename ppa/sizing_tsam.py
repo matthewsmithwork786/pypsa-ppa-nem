@@ -68,6 +68,20 @@ def cluster_typical_periods(
     import tsam
     from tsam.config import ClusterConfig, ExtremeConfig
 
+    # You cannot ask for more clusters than there are periods to cluster. The
+    # period-reference path solves a user-chosen window (a calendar month is
+    # ~4.3 weeks), so the 16-week default exceeded the sample count and tsam
+    # raised "cannot extract more clusters than samples". Clamp instead: a
+    # window with fewer periods than clusters is already its own best
+    # representation.
+    available_periods = len(ts) // max(1, hours_per_period)
+    if available_periods < 2:
+        # Nothing to cluster — hand back the window itself, weighted one hour
+        # per row so downstream cost/energy integration is unchanged.
+        weights = pd.Series(1.0, index=ts.index, dtype=float)
+        return ts.copy(), weights
+    n_periods = max(1, min(int(n_periods), available_periods))
+
     cols = ["ts_PVGen", "ts_WindGen", "ts_MktPrice", "ppaload_mw"]
     data = ts[cols]
 

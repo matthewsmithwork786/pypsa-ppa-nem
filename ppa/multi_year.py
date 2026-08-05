@@ -111,15 +111,37 @@ def _safe_worker_count(requested: int, n_years: int) -> int:
     flat per-worker constant misses this entirely and oversubscribes into the
     OOM killer.
     """
+    workers, _ = _worker_count_with_reason(requested, n_years)
+    return workers
+
+
+def _worker_count_with_reason(requested: int, n_years: int) -> tuple[int, str]:
+    """`_safe_worker_count` plus a plain-English reason for any reduction.
+
+    Selecting 4 workers and silently getting 1 reads as the control being
+    ignored, so the caller can say which limit actually bound and with what
+    numbers.
+    """
     workers = max(1, min(requested, n_years, _usable_cpu_count()))
+    reason = ""
+    if requested > n_years and n_years < _usable_cpu_count():
+        reason = f"only {n_years} year(s) to solve"
+    elif workers < requested:
+        reason = f"only {_usable_cpu_count()} usable CPU(s)"
 
     mem_mb = _available_memory_mb()
     if mem_mb is not None:
         per_worker = max(_PER_WORKER_MEM_MB, _parent_rss_mb() or 0.0)
         usable_mb = max(0.0, mem_mb - _RESERVE_MEM_MB)
         mem_cap = max(1, int(usable_mb // per_worker))
+        if mem_cap < workers:
+            reason = (
+                f"only ~{mem_mb / 1024:.1f} GB of memory is available and each "
+                f"parallel solve needs ~{per_worker / 1024:.1f} GB "
+                f"(plus a {_RESERVE_MEM_MB / 1024:.1f} GB reserve)"
+            )
         workers = min(workers, mem_cap)
-    return workers
+    return workers, reason
 
 
 def _degraded_scenario(scenario: Scenario, year_idx: int) -> Scenario:
@@ -276,8 +298,19 @@ def run_multi_year(
         if progress_callback is not None:
             progress_callback(completed, n_years, first_sim_year + year_idx)
 
-    workers = _safe_worker_count(max_workers, n_years)
-    st.caption(f"Based on available RAM running {n_years} year-simulations with {workers} parallel worker(s) ...")
+    workers, reason = _worker_count_with_reason(max_workers, n_years)
+    if workers < max_workers and reason:
+        st.caption(
+            f"Running {n_years} year-simulations with **{workers}** parallel "
+            f"worker(s), not the {max_workers} selected: {reason}. "
+            + ("Years are solved one after another, so this takes longer than a "
+               "parallel run would." if workers == 1 else
+               "Running more would risk the run being killed for exceeding memory.")
+        )
+    else:
+        st.caption(
+            f"Running {n_years} year-simulations with {workers} parallel worker(s)."
+        )
 
     def _run_serial() -> None:
         # Serial, in-process. Required on memory-constrained hosts (e.g. Streamlit

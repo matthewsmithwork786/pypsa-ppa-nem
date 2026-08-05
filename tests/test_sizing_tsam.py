@@ -197,3 +197,39 @@ def test_storage_is_buildable_under_typical_periods(hourly_year):
         "clustered sizing built no storage even at throwaway capex -- the "
         "storage timestep is probably wrong again"
     )
+
+
+# ── Short windows (period-reference path) ────────────────────────────────────
+#
+# The period-reference optimisation solves a user-chosen window, not a year. A
+# calendar month is ~4.3 weeks, so the 16-week default asked tsam for more
+# clusters than there were periods and it raised "cannot extract more clusters
+# than samples", failing the run outright.
+
+@pytest.mark.parametrize(
+    "hours, label",
+    [(744, "calendar month"), (336, "two weeks"), (168, "one week"), (72, "three days")],
+)
+def test_short_windows_cluster_instead_of_raising(hourly_year, hours, label):
+    window = hourly_year.iloc[:hours]
+    clustered, weights = cluster_typical_periods(window, n_periods=16)
+    assert len(clustered) > 0, f"{label}: clustering returned nothing"
+    assert float(weights.sum()) == pytest.approx(hours, rel=1e-6), (
+        f"{label}: weightings must still sum to the real hours in the window, "
+        "or every cost and energy figure downstream is scaled wrong"
+    )
+
+
+def test_window_shorter_than_one_period_is_passed_through(hourly_year):
+    """Under one period there is nothing to cluster: hand back the window."""
+    window = hourly_year.iloc[:72]
+    clustered, weights = cluster_typical_periods(window, n_periods=16)
+    pd.testing.assert_frame_equal(clustered, window)
+    assert float(weights.sum()) == pytest.approx(72.0)
+
+
+def test_full_year_still_clusters_down(hourly_year):
+    """The clamp must not disturb the normal year-length path."""
+    clustered, weights = cluster_typical_periods(hourly_year, n_periods=16)
+    assert len(clustered) < len(hourly_year)
+    assert float(weights.sum()) == pytest.approx(8760, rel=1e-3)
