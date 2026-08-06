@@ -58,6 +58,17 @@ def registry_path(cache_dir: Path = NEM_CACHE_DIR) -> Path:
     return Path(cache_dir) / "registry" / REGISTRY_FILENAME
 
 
+def eligibility_cache_path(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> Path:
+    """Precomputed per-DUID eligibility/CUF summary for `list_eligible_plants`.
+
+    Built offline by `scripts/build_nem_eligibility_cache.py` and committed
+    alongside the other `data/cache/nem/` caches, so the Get Data / Pick
+    Plants map+list renders from a single parquet read instead of running
+    `scada_summary` (a full-year scan) over every plant on every cold start.
+    """
+    return Path(cache_dir) / "registry" / f"eligibility_{year}.parquet"
+
+
 def scada_path(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> Path:
     duid = duid.strip().upper()
     return Path(cache_dir) / "scada" / f"{duid}_{year}.parquet"
@@ -289,6 +300,26 @@ def plant_capacity_mw(
     if row.empty:
         raise KeyError(f"DUID '{duid}' not found in the NEM plant registry.")
     return float(row.iloc[0]["capacity_registered_mw"])
+
+
+def plant_name_for_duid(
+    duid: str, registry: pd.DataFrame | None = None, cache_dir: Path = NEM_CACHE_DIR
+) -> str:
+    """Station name for a DUID, falling back to the DUID itself if the plant
+    registry is unavailable or the DUID is not found -- callers show this in
+    results/exports and must not crash a run over a missing name."""
+    if not duid:
+        return ""
+    duid = duid.strip().upper()
+    try:
+        if registry is None:
+            registry = load_plant_registry(cache_dir)
+        row = registry.loc[registry["duid"] == duid]
+        if not row.empty:
+            return str(row.iloc[0]["station_name"])
+    except (FileNotFoundError, KeyError):
+        pass
+    return duid
 
 
 def capacity_factor_for_duid(
@@ -610,6 +641,18 @@ def nem_generation_ready(
 
 # ── Two-tier eligibility ─────────────────────────────────────────────────────
 
+def _load_eligibility_cache(year: int, cache_dir: Path) -> "pd.DataFrame | None":
+    path = eligibility_cache_path(year, cache_dir)
+    if not path.exists():
+        return None
+    try:
+        return pd.read_parquet(path)
+    except Exception:
+        # Corrupt/unreadable cache degrades to "recompute everything live",
+        # same as a missing cache -- never a hard failure.
+        return None
+
+
 def list_eligible_plants(
     min_capacity_mw: float = MIN_CAPACITY_MW,
     year: int = DEFAULT_YEAR,
@@ -634,15 +677,21 @@ def list_eligible_plants(
         df = df[df["region"].isin(regions_upper)]
 
     if check_whole_year:
-        has_scada_list = []
-        sim_ready_list = []
-        data_status_list = []
-        reject_reasons_list = []
-        coverage_list = []
-        mean_cf_list = []
-        cuf_list = []
-        first_output_date_list = []
-        for _, row in df.iterrows():
+        eligibility_cols = [
+            "has_scada", "simulation_ready", "data_status", "reject_reasons",
+            "coverage", "mean_cf", "cuf", "first_output_date",
+        ]
+        cached = _load_eligibility_cache(year, cache_dir)
+        cached_duids = set(cached["duid"]) if cached is not None else set()
+        # Plants missing from the precomputed cache (new since it was last
+        # built, or the cache is absent entirely) still get computed live --
+        # slower for those rows only, correct either way.
+        to_compute = df[~df["duid"].isin(cached_duids)] if cached is not None else df
+
+        has_scada_list, sim_ready_list, data_status_list = [], [], []
+        reject_reasons_list, coverage_list = [], []
+        mean_cf_list, cuf_list, first_output_date_list = [], [], []
+        for _, row in to_compute.iterrows():
             duid = row["duid"]
             capacity_mw = float(row["capacity_registered_mw"])
             has_scada = (
@@ -658,14 +707,22 @@ def list_eligible_plants(
             mean_cf_list.append(summary.mean_cf if summary.mean_cf is not None else np.nan)
             cuf_list.append(summary.cuf if summary.cuf is not None else np.nan)
             first_output_date_list.append(summary.first_output_date)
-        df["has_scada"] = has_scada_list
-        df["simulation_ready"] = sim_ready_list
-        df["data_status"] = data_status_list
-        df["reject_reasons"] = reject_reasons_list
-        df["coverage"] = coverage_list
-        df["mean_cf"] = mean_cf_list
-        df["cuf"] = cuf_list
-        df["first_output_date"] = first_output_date_list
+        computed = pd.DataFrame({
+            "duid": to_compute["duid"].values,
+            "has_scada": has_scada_list, "simulation_ready": sim_ready_list,
+            "data_status": data_status_list, "reject_reasons": reject_reasons_list,
+            "coverage": coverage_list, "mean_cf": mean_cf_list, "cuf": cuf_list,
+            "first_output_date": first_output_date_list,
+        })
+        combined = (
+            pd.concat([cached[["duid"] + eligibility_cols], computed], ignore_index=True)
+            if cached is not None else computed
+        )
+        df = df.merge(combined, on="duid", how="left")
+        for col in ("has_scada", "simulation_ready"):
+            df[col] = df[col].infer_objects(copy=False).fillna(False).astype(bool)
+        df["data_status"] = df["data_status"].fillna("unchecked")
+        df["reject_reasons"] = df["reject_reasons"].fillna("")
     else:
         df["has_scada"] = False
         df["simulation_ready"] = False

@@ -45,7 +45,8 @@ def _energy_source() -> tuple[EnergyInputs | None, list, bool]:
 # ── Input widgets ──────────────────────────────────────────────────────────────
 
 
-def _num(label: str, key: str, default, *, step=None, fmt=None, pct=False, help=None, label_visibility="visible"):
+def _num(label: str, key: str, default, *, step=None, fmt=None, pct=False, help=None,
+         label_visibility="visible", max_value=None):
     """Number input that persists its own default into session state once.
 
     With ``pct=True`` the model value is a decimal fraction (e.g. 0.065) but is
@@ -59,6 +60,12 @@ def _num(label: str, key: str, default, *, step=None, fmt=None, pct=False, help=
         kwargs["step"] = step
     if fmt is not None:
         kwargs["format"] = fmt
+    if max_value is not None:
+        kwargs["max_value"] = max_value * scale if not isinstance(max_value, int) else max_value
+        # Session state can carry a value from before max_value shrank (e.g. debt
+        # tenor left over from a longer PPA tenor); clamp it or number_input raises.
+        if st.session_state[key] > kwargs["max_value"]:
+            st.session_state[key] = kwargs["max_value"]
     val = st.number_input(label, key=key, help=help, label_visibility=label_visibility, **kwargs, )
     return val / scale if pct else val
 
@@ -168,30 +175,27 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
             ppa_idx = _num("PPA & LGC indexation (%/yr)", f + "ppa_idx", seed.ppa_indexation, step=0.1, fmt="%.2f", pct=True)
             solar_infl = _num("Solar-hour price infl. (%/yr)", f + "solar_infl", seed.solar_price_inflation, step=0.1, fmt="%.2f", pct=True)
             nonsolar_infl = _num("Non-solar price infl. (%/yr)", f + "nonsolar_infl", seed.nonsolar_price_inflation, step=0.1, fmt="%.2f", pct=True)
-        esc_key = f + "esc_merch"
-        if esc_key not in st.session_state:
-            st.session_state[esc_key] = not multi_year
-        escalate_merchant = st.checkbox(
-            "Escalate merchant prices over the project life",
-            key=esc_key,
-            help=(
-                "Leave OFF when the energy inputs come from a multi-year optimisation that "
-                "already escalates market prices each year (avoids double-counting price "
-                "growth). Turn ON for a single base-year snapshot. The solar-hour / non-solar "
-                "price inflation rates above only apply when this is ON."
-            ),
-        )
-        if multi_year and escalate_merchant:
+        # Whether to escalate merchant capture prices is derived, not a user
+        # choice: multi-year energy inputs already escalate market prices per
+        # simulated year, so escalating again here would double-count price
+        # growth. A single base-year snapshot (single-year run) still needs it.
+        escalate_merchant = not multi_year
+        if multi_year:
             st.caption(
-                "⚠️ Merchant prices are already escalated by the multi-year energy run — "
-                "leaving this on double-counts price growth."
+                "Merchant prices are taken as-escalated from the multi-year optimisation "
+                "(the solar-hour / non-solar price inflation rates above are not re-applied)."
             )
 
     with st.expander("🏦 Debt, depreciation & tax", expanded=True):
         cols = st.columns(4)
         with cols[0]:
             st.markdown("**Debt**")
-            debt_tenor = int(_num("Repayment tenor (yrs)", f + "debt_tenor", seed.debt_tenor, step=1))
+            debt_tenor = int(_num(
+                "Repayment tenor (yrs)", f + "debt_tenor", min(seed.debt_tenor, tenor), step=1,
+                max_value=tenor,
+                help="Capped at the PPA contract tenor above — debt is sized to be "
+                     "repaid within the contracted revenue period.",
+            ))
             debt_rate = _num("Debt rate (%)", f + "debt_rate", seed.debt_rate, step=0.1, fmt="%.2f", pct=True)
             wacc = _num("Discount rate / WACC (%)", f + "wacc", seed.discount_rate, step=0.1, fmt="%.2f", pct=True)
         with cols[1]:
@@ -242,7 +246,10 @@ def _render_results(r) -> None:
 
         cols = st.columns(4)
         cols[0].metric("Total funding (incl. IDC)", f"A${r.total_capex:,.0f}m")
-        cols[1].metric("Debt / Equity", f"A${r.total_debt:,.0f}m / A${r.total_equity:,.0f}m")
+        # st.metric parses its value as markdown; two "$" in one string forms a
+        # LaTeX math span that swallows everything between them, so only one
+        # "$" per value -- both amounts are already the same currency.
+        cols[1].metric("Debt / Equity", f"A${r.total_debt:,.0f}m / {r.total_equity:,.0f}m")
         cols[2].metric("Min / Avg DSCR", f"{r.min_dscr:.2f} / {r.avg_dscr:.2f}")
         pb = f"{r.payback_years:.1f} yrs" if r.payback_years < 1e8 else "n/a"
         cols[3].metric("Equity payback / LCOE", f"{pb} · A${r.lcoe:,.0f}/MWh")
@@ -373,7 +380,7 @@ def render() -> None:
 
         with cols[3]:
             st.metric("Merchant capture (solar / non-solar)",
-                      f"A${energy.sell_solar_price:,.0f} / A${energy.sell_nonsolar_price:,.0f}")
+                      f"A${energy.sell_solar_price:,.0f} / {energy.sell_nonsolar_price:,.0f}")
             st.metric("Capacity (BESS)",
                       f"{energy.bess_mw:,.0f} MW / {energy.bess_mwh:,.0f} MWh")
 

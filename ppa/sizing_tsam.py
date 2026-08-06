@@ -91,7 +91,13 @@ def cluster_typical_periods(
     extremes = (
         ExtremeConfig(
             method="new_cluster",
-            max_value=["ppaload_mw"],
+            # Peak generation hours matter as much as peak load: the connection
+            # links (wind_link_mw / pvbess_link_mw) size to whatever peak flow
+            # the sizing LP actually sees, so without max_value on the
+            # generation columns tsam could cluster away the single hour that
+            # sets the true annual peak, sizing the link below what the full
+            # hourly run then needs (reported as "link undersized").
+            max_value=["ppaload_mw", "ts_PVGen", "ts_WindGen"],
             min_value=["ts_PVGen", "ts_WindGen"],
         )
         if extreme_periods

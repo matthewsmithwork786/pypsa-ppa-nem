@@ -73,8 +73,10 @@ def _warnings_for(diag: dict) -> list[tuple[str, str]]:
     if price_max > _PRICE_MAX_SANE or price_min < _PRICE_MIN_SANE:
         out.append((
             "warning",
-            f"Price range (${price_min:.0f} to ${price_max:.0f}/MWh) is outside "
-            f"a sane NEM range (${_PRICE_MIN_SANE:.0f} to ${_PRICE_MAX_SANE:.0f}/MWh) "
+            # st.warning parses markdown; four "$" in one string forms two LaTeX
+            # math spans, so escape every one of them.
+            f"Price range (\\${price_min:.0f} to \\${price_max:.0f}/MWh) is outside "
+            f"a sane NEM range (\\${_PRICE_MIN_SANE:.0f} to \\${_PRICE_MAX_SANE:.0f}/MWh) "
             "— double check the units.",
         ))
 

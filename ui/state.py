@@ -61,7 +61,8 @@ _SCENARIO_FORM_KEYS = [
     "sf_sim_years", "sf_first_sim_year", "sf_escalation",
     "sf_pv_deg", "sf_wind_deg", "sf_bess_deg",
     "sf_optimise_capacity", "sf_max_build_wind", "sf_max_build_pv", "sf_max_build_bess",
-    "sf_sizing_resolution", "sf_load_profile",
+    "sf_sizing_resolution", "sf_sizing_method", "sf_sizing_n_periods", "sf_grid_connection",
+    "sf_connection_cost_aud_mw", "sf_merchant_share", "sf_enforce_min_delivery", "sf_load_profile",
     "sf_data_source", "sf_nem_price_region", "sf_nem_year",
     "sf_aer_region", "sf_aer_quarters",
     "_sf_data_source_touched", "_sf_aer_applied", "_sf_aer_pending",
@@ -89,11 +90,29 @@ def get_effective_scenario() -> "Scenario | None":
     return apply_sizing(s, sized)
 
 
+def reset_financial_model_inputs() -> None:
+    """Drop every 'fm_*' widget key so the Financial Model tab's `_num()`
+    inputs re-seed from the current scenario/energy on next render, and drop
+    any stale computed/exported result bound to the old inputs.
+
+    Without this, `_num()` only sets `st.session_state[key]` the first time a
+    key is seen -- so editing the PPA tariff (or anything else) on Case Setup,
+    reloading a case study, or re-running the optimisation with new
+    assumptions left every Financial Model input (and any cached project
+    finance result / Excel export) frozen at whatever was first shown,
+    typically the A$100/MWh default.
+    """
+    for key in [k for k in st.session_state if k.startswith("fm_")]:
+        st.session_state.pop(key, None)
+    st.session_state.pop(PROJECT_FINANCE_KEY, None)
+
+
 def set_scenario(s: "Scenario") -> None:
     st.session_state[SCENARIO_KEY] = s
     # Reset form widget keys so the form re-initialises from the new scenario values
     for key in _SCENARIO_FORM_KEYS:
         st.session_state.pop(key, None)
+    reset_financial_model_inputs()
 
 
 def has_scenario() -> bool:
@@ -108,6 +127,7 @@ def set_result(r: "OptimisationResult") -> None:
     st.session_state[RESULT_KEY] = r
     st.session_state.pop(FINANCIAL_KEY, None)
     st.session_state.pop(COUNTERFACTUAL_KEY, None)
+    reset_financial_model_inputs()
 
 
 def has_result() -> bool:
@@ -182,6 +202,7 @@ def get_multi_year_financial() -> "MultiYearFinancialResult | None":
 
 def set_multi_year_financial(fin: "MultiYearFinancialResult") -> None:
     st.session_state[MULTI_YEAR_FINANCIAL_KEY] = fin
+    reset_financial_model_inputs()
 
 
 def has_multi_year_financial() -> bool:

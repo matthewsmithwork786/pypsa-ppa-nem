@@ -216,6 +216,10 @@ def extract_results(
 def build_supply_mix_df(dispatch: DispatchSeries, ts: pd.DataFrame | None = None) -> pd.DataFrame:
     pv_direct = dispatch.pv_gen - dispatch.bess_store
     idx = ts.index if ts is not None else dispatch.wind_gen.index
+    # Actual hourly PPA load, reconstructed from the dispatch balance at
+    # Bus_PPAOfftake (ppa_delivery + allowed_shortfall + penalty_gen == load) --
+    # the shaped load profile, not the flat contracted peak MW.
+    load_mw = dispatch.ppa_delivery + dispatch.allowed_shortfall + dispatch.penalty_gen
     df = pd.DataFrame(
         {
             "Wind": dispatch.wind_gen.values,
@@ -223,6 +227,7 @@ def build_supply_mix_df(dispatch: DispatchSeries, ts: pd.DataFrame | None = None
             "BESS discharge": dispatch.bess_dispatch.values,
             "Buy from market": dispatch.market_buy.values,
             "BESS charging": (-dispatch.bess_store).values,
+            "Load (MW)": load_mw.values,
         },
         index=idx,
     )

@@ -11,7 +11,9 @@ import streamlit as st
 
 from ppa.scenario import BASE_SCENARIO, validate_scenario
 from ui import state
+from ui.config_summary import render_config_summary
 from ui.constants import NEM_RESOLUTION_MINUTES
+from ui.exports import csv_download_button
 
 
 def _sized_banner_text(sized) -> str:
@@ -221,7 +223,7 @@ def _render_scenario_summary(s) -> None:
                     f"solar **{s.max_build_pv_mw:.0f}** / "
                     f"BESS **{s.max_build_bess_mw:.0f} MW**"
                 )
-                st.markdown(f"- Sizing LP resolution: **{s.sizing_resolution_h}h**")
+                st.markdown(f"- Sizing LP representation: **{_sizing_method_caption(s)}**")
                 if s.include_bess:
                     st.markdown(f"- BESS duration: **{s.bess_max_hours:.1f} h** (fixed)")
                 else:
@@ -498,8 +500,10 @@ def _run_simulation(scenario, max_workers: int) -> None:
 # ── multi-year results display ────────────────────────────────────────────────
 
 def _render_results(fin, n_years: int) -> None:
+    render_config_summary(state.get_effective_scenario())
     with st.expander("Optimisation results", expanded=True):
-        cols = st.columns(5)
+        avg_delivery = sum(y.fulfilled_share for y in fin.yearly) / len(fin.yearly) if fin.yearly else 0.0
+        cols = st.columns(6)
         irr_str = f"{fin.irr:.1%}" if fin.irr == fin.irr else "N/A"
         lcoe_str = f"A${fin.lcoe:.1f}/MWh" if fin.lcoe == fin.lcoe else "N/A"
         payback_str = f"{fin.simple_payback:.1f} yrs" if fin.simple_payback < 1e8 else "N/A"
@@ -508,6 +512,20 @@ def _render_results(fin, n_years: int) -> None:
         cols[2].metric("LCOE", lcoe_str)
         cols[3].metric("Simple Payback", payback_str)
         cols[4].metric("Lifetime Net Revenue", f"A${fin.total_lifetime_revenue/1e6:.1f}M")
+        cols[5].metric(
+            "Achieved PPA delivery (avg)", f"{avg_delivery:.1%}",
+            help="Average share of contracted PPA load actually delivered "
+                 "from renewables/storage + market purchase, across all simulated years.",
+        )
+        if fin.breakeven_ppa_price == fin.breakeven_ppa_price:  # not NaN
+            # Escape every "$" -- two unescaped dollar signs in one markdown
+            # string are parsed by Streamlit as a LaTeX math span, swallowing
+            # everything (including the ** bold markers) in between.
+            st.caption(
+                f"Breakeven PPA price for a **{state.get_scenario().target_irr:.0%} target IRR**: "
+                f"**A\\${fin.breakeven_ppa_price:.1f}/MWh** (vs A\\${state.get_scenario().ppa_price:.0f}/MWh "
+                "contracted; holds delivered volumes fixed at the simulated dispatch, unlevered project IRR basis)."
+            )
 
         if n_years == 1:
             y = fin.yearly[0]
@@ -556,6 +574,10 @@ def _render_npv_chart(fin) -> None:
         xaxis_title="Year", yaxis_title="NPV (A$M)", height=400,
     )
     st.plotly_chart(fig, width="stretch")
+    csv_download_button(
+        pd.DataFrame({"year": years, "cumulative_npv_aud_m": [v / 1e6 for v in fin.cumulative_npv]}),
+        "cumulative_npv.csv", key="dl_npv",
+    )
 
 
 def _render_revenue_chart(fin) -> None:
@@ -572,6 +594,18 @@ def _render_revenue_chart(fin) -> None:
         xaxis_title="Year", yaxis_title="A$M", height=400,
     )
     st.plotly_chart(fig, width="stretch")
+    csv_download_button(
+        pd.DataFrame({
+            "year": years,
+            "ppa_revenue_aud_m": [y.ppa_revenue / 1e6 for y in fin.yearly],
+            "merchant_revenue_aud_m": [y.merch_revenue / 1e6 for y in fin.yearly],
+            "market_buy_cost_aud_m": [y.market_buy_cost / 1e6 for y in fin.yearly],
+            "penalty_cost_aud_m": [y.penalty_cost / 1e6 for y in fin.yearly],
+            "transmission_cost_aud_m": [y.transmission_cost / 1e6 for y in fin.yearly],
+            "opex_aud_m": [y.opex / 1e6 for y in fin.yearly],
+        }),
+        "annual_revenue_breakdown.csv", key="dl_revenue",
+    )
 
 
 def _render_delivery_chart(fin) -> None:
@@ -588,6 +622,10 @@ def _render_delivery_chart(fin) -> None:
         yaxis=dict(range=[0, 105]), height=400,
     )
     st.plotly_chart(fig, width="stretch")
+    csv_download_button(
+        pd.DataFrame({"year": years, "delivery_rate_pct": [round(y.fulfilled_share, 3) * 100 for y in fin.yearly]}),
+        "ppa_delivery_rate.csv", key="dl_delivery",
+    )
 
 
 def _render_yearly_table(fin) -> None:

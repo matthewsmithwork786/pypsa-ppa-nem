@@ -231,6 +231,7 @@ _HOURLY_COLS = [
     "Year", "Timestamp", "Hour", "Wind (MWh)", "PV (MWh)", "BESS discharge (MWh)",
     "BESS charge (MWh)", "Total generation (MWh)", "Market buy (MWh)",
     "Market sell (MWh)", "PPA delivered (MWh)", "Penalty (MWh)", "Price (A$/MWh)",
+    "Load (MWh)",
 ]
 _C_YEAR, _C_HOUR = "A", "C"
 _C_TOTAL, _C_BUY, _C_SELL = "H", "I", "J"
@@ -396,8 +397,12 @@ def _write_hourly_sheet(wb: Workbook, year_results: list) -> dict[str, list[str]
         sell = d.market_sell.to_numpy()
         ppa = d.ppa_delivery.to_numpy()
         pen = d.penalty_gen.to_numpy()
+        shortfall = d.allowed_shortfall.to_numpy()
         price = prices.to_numpy()
         total = wind + pv + bess_dis
+        # Actual PPA load, reconstructed from the dispatch balance at
+        # Bus_PPAOfftake (ppa_delivery + allowed_shortfall + penalty_gen == load).
+        load = ppa + shortfall + pen
         index = d.wind_gen.index
         hours = index.hour
         year_val = year_labels[idx - 1]
@@ -415,6 +420,7 @@ def _write_hourly_sheet(wb: Workbook, year_results: list) -> dict[str, list[str]
             ws.cell(cur, 11, round(float(ppa[i]), 3))
             ws.cell(cur, 12, round(float(pen[i]), 3))
             ws.cell(cur, 13, round(float(price[i]), 3))
+            ws.cell(cur, 14, round(float(load[i]), 3))
             cur += 1
     ws.freeze_panes = f"A{_HOURLY_DATA_START}"
 
@@ -466,6 +472,13 @@ def _write_energy(
     field("BESS power", "bess_mw", e.bess_mw, "MW")
     field("BESS energy", "bess_mwh", e.bess_mwh, "MWh")
     field("Offtaker load", "load_mw", e.load_mw, "MW")
+    if e.wind_plant_name or e.pv_plant_name:
+        _text(ws.cell(row, 2), "Wind plant")
+        _text(ws.cell(row, 3), e.wind_plant_name or "—")
+        row += 1
+        _text(ws.cell(row, 2), "Solar plant")
+        _text(ws.cell(row, 3), e.pv_plant_name or "—")
+        row += 1
     row += 1
     field("PPA delivered", "ppa_gwh", e.ppa_gwh, "GWh p.a.")
     field("Excess sold — solar hours", "excess_solar_gwh", e.excess_solar_gwh, "GWh p.a.")

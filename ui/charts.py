@@ -57,6 +57,18 @@ def _dual_axis_supply_mix(
             )
         )
 
+    if "Load (MW)" in df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=df[x_col],
+                y=df["Load (MW)"],
+                name="Load (MW)",
+                mode="lines",
+                line=dict(color="#B71C1C", width=2, dash="dot"),
+                yaxis="y",
+            )
+        )
+
     fig.add_hline(
         y=ppaload_mw,
         line_dash="dash",

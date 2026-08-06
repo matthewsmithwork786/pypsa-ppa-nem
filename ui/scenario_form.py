@@ -172,23 +172,9 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 "Max BESS build (MW)", 0.0, 10_000.0, float(initial.max_build_bess_mw),
                 50.0, key="sf_max_build_bess",
             )
-            enforce_min_delivery = st.checkbox(
-                f"Enforce the {initial.required_delivery_share:.0%} delivery share as a "
-                "hard constraint",
-                value=bool(initial.enforce_min_delivery),
-                key="sf_enforce_min_delivery",
-                help=(
-                    "By default the delivery requirement is only a *price* signal: the "
-                    "sizing LP weighs the penalty (PPA price x penalty multiplier) "
-                    "against the cost of building, and buys its way out of the SLA "
-                    "whenever the penalty is cheaper. At current NEM costs it usually "
-                    "is — penalty A$126/MWh against a wind LCOE near A$162/MWh — so "
-                    "sized portfolios settle around 50-65% delivery. Tick this to make "
-                    "the contractual share binding, so the LP must build enough to meet "
-                    "it. If no portfolio within the build caps can, the LP reports "
-                    "infeasible and says which limit is blocking."
-                ),
-            )
+            # `enforce_min_delivery` is set below, in "PPA contract terms" right
+            # after `required_delivery_share` — its label quotes that value, so
+            # it needs to be seen and set together with it.
             with st.expander("⚙️ Advanced sizing settings", expanded=False):
               _method_labels = {
                   "full_hourly": "Full year hourly",
@@ -265,7 +251,19 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                     "connection limit; when it binds it curtails the build."
                 ),
             )
-            cols[1].caption("")
+            connection_cost_aud_mw = cols[1].number_input(
+                "Link/connection cost (A$/MW)", min_value=0.0, max_value=2_000_000.0,
+                value=float(initial.connection_cost_aud_mw), step=10_000.0,
+                key="sf_connection_cost_aud_mw",
+                help=(
+                    "Capital cost per MW charged on the wind/PV+BESS/export "
+                    "transport links in the sizing LP. A strictly positive value is "
+                    "what stops the LP over-building a link beyond its realised peak "
+                    "flow — it is *why* sized links come out matching peak flow "
+                    "rather than some larger round number. Set to 0 to size links "
+                    "purely against the grid connection limit with no cost penalty."
+                ),
+            )
             merchant_share = cols[2].slider(
                 "Merchant value share", 0.0, 1.0, float(initial.sizing_merchant_value_share),
                 0.05, key="sf_merchant_share",
@@ -285,7 +283,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             sizing_n_periods = initial.sizing_n_periods
             grid_connection = "" if initial.grid_connection_max_mw == float("inf") else str(initial.grid_connection_max_mw)
             merchant_share = float(initial.sizing_merchant_value_share)
-            enforce_min_delivery = bool(initial.enforce_min_delivery)
+            connection_cost_aud_mw = float(initial.connection_cost_aud_mw)
 
         # When capacity co-optimisation is on the MW values are ignored entirely,
         # so the sliders are hidden rather than greyed out -- a disabled control
@@ -332,6 +330,27 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             value=float(initial.pen_mult), step=0.1,
             key="sf_pen_mult",
         )
+
+        if optimise_capacity:
+            enforce_min_delivery = st.checkbox(
+                f"Enforce the {required_delivery_share:.0%} delivery share as a "
+                "hard constraint",
+                value=bool(initial.enforce_min_delivery),
+                key="sf_enforce_min_delivery",
+                help=(
+                    "By default the delivery requirement is only a *price* signal: the "
+                    "sizing LP weighs the penalty (PPA price x penalty multiplier) "
+                    "against the cost of building, and buys its way out of the SLA "
+                    "whenever the penalty is cheaper. At current NEM costs it usually "
+                    "is — penalty A$126/MWh against a wind LCOE near A$162/MWh — so "
+                    "sized portfolios settle around 50-65% delivery. Tick this to make "
+                    "the contractual share binding, so the LP must build enough to meet "
+                    "it. If no portfolio within the build caps can, the LP reports "
+                    "infeasible and says which limit is blocking."
+                ),
+            )
+        else:
+            enforce_min_delivery = bool(initial.enforce_min_delivery)
 
         # ── Load profile selector ─────────────────────────────────────────────
         st.markdown("**Offtaker load profile**")
@@ -617,6 +636,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             float("inf") if not str(grid_connection).strip() else float(str(grid_connection).strip())
         ),
         sizing_merchant_value_share=float(merchant_share),
+        connection_cost_aud_mw=float(connection_cost_aud_mw),
         enforce_min_delivery=bool(enforce_min_delivery),
         include_bess=include_bess,
         enable_market_buy=enable_market_buy,

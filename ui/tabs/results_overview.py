@@ -160,6 +160,25 @@ def _render_single_day_overview() -> None:
         delta_color="inverse",
     )
 
+    # ── Charts (generation first — before the financial/procurement tables) ───
+    ts = state.get_timeseries()
+    if ts is not None:
+        from ppa.data_loader import prepare_timeseries
+        ts_prep = prepare_timeseries(ts, s)
+
+        cols = st.columns([3, 2])
+        with cols[0]:
+            st.subheader("Average hourly supply mix")
+            supply_mix = build_supply_mix_df(result.dispatch, ts_prep)
+            avg_24h = build_24h_avg(supply_mix)
+            fig = make_supply_mix_24h_chart(avg_24h, s.ppaload_mw)
+            st.plotly_chart(fig, width="stretch", height=500)
+
+        with cols[1]:
+            st.subheader("Revenue waterfall")
+            fig_rev = make_revenue_breakdown_chart(revenue)
+            st.plotly_chart(fig_rev, width="stretch", height=500)
+
     # ── Offtaker procurement comparison ───────────────────────────────────────
     if state.has_counterfactual():
         cf = state.get_counterfactual()
@@ -274,27 +293,6 @@ def _render_single_day_overview() -> None:
             ],
         }
         st.dataframe(pd.DataFrame(rev_data), hide_index=True, width="stretch")
-
-    # st.markdown("---")
-
-    # ── Charts ─────────────────────────────────────────────────────────────────
-    ts = state.get_timeseries()
-    if ts is not None:
-        from ppa.data_loader import prepare_timeseries
-        ts_prep = prepare_timeseries(ts, s)
-
-        cols = st.columns([3, 2])
-        with cols[0]:
-            st.subheader("Average hourly supply mix")
-            supply_mix = build_supply_mix_df(result.dispatch, ts_prep)
-            avg_24h = build_24h_avg(supply_mix)
-            fig = make_supply_mix_24h_chart(avg_24h, s.ppaload_mw)
-            st.plotly_chart(fig, width="stretch", height=500)
-
-        with cols[1]:
-            st.subheader("Revenue waterfall")
-            fig_rev = make_revenue_breakdown_chart(revenue)
-            st.plotly_chart(fig_rev, width="stretch", height=500)
 
 
 def render() -> None:
