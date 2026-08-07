@@ -10,6 +10,7 @@ import dataclasses
 import os
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from ppa.financial_model import (
@@ -19,8 +20,8 @@ from ppa.financial_model import (
     project_finance_inputs_from_scenario,
 )
 from ppa.scenario import CASE_STUDIES, validate_scenario, load_case_study
-from ppa.financials import run_financial_analysis
-from ppa.results import SummaryVolumes, RevenueBreakdown
+from ppa.financials import run_multi_year_financial_analysis
+from ppa.results import DispatchSeries, OptimisationResult, SummaryVolumes, RevenueBreakdown
 
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -189,10 +190,10 @@ def test_case_studies_validate_and_produce_finite_results(cs):
     assert np.isfinite(result.npv_project)
 
 
-# ── 7. run_financial_analysis cashflow bullet includes devex ──────────────
+# ── 7. run_multi_year_financial_analysis cashflow bullet includes devex ────
 
 
-def test_run_financial_analysis_cashflow_includes_devex():
+def test_run_multi_year_financial_analysis_cashflow_includes_devex():
     scenario = CASE_STUDIES[0]
     s = load_case_study(scenario)
     s = dataclasses.replace(s, devex_pct_of_capex=0.10)
@@ -223,18 +224,29 @@ def test_run_financial_analysis_cashflow_includes_devex():
         net_revenue=75_500_000.0,
         effective_capture_price=80.0,
     )
+    empty = pd.Series(dtype=float)
+    dispatch = DispatchSeries(
+        wind_gen=empty, pv_gen=empty, market_buy=empty, allowed_shortfall=empty,
+        penalty_gen=empty, market_sell=empty, bess_dispatch=empty, bess_store=empty,
+        soc=empty, ppa_delivery=empty,
+    )
+    result = OptimisationResult(
+        scenario=s, dispatch=dispatch, summary=summary, revenue=revenue,
+        solver_status="ok", solver_condition="optimal", n_period_hours=8760,
+    )
 
-    fin = run_financial_analysis(s, summary, revenue, n_period_hours=8760)
+    fin = run_multi_year_financial_analysis(s, [result], first_sim_year=s.first_sim_year)
 
     expected_bullet = -(fin.capex.capex_total + fin.capex.devex_total)
     assert fin.capex.devex_total == pytest.approx(fin.capex.capex_total * 0.10)
     assert fin.capex.total_investment == pytest.approx(
         fin.capex.capex_total + fin.capex.devex_total
     )
-    # simple_payback is total_investment / annual_cf when annual_cf > 0
-    if fin.annual_cf > 0:
+    # simple_payback is total_investment / avg_cf when avg_cf > 0
+    year0_cf = fin.yearly[0].net_cashflow
+    if year0_cf > 0:
         assert fin.simple_payback == pytest.approx(
-            fin.capex.total_investment / fin.annual_cf
+            fin.capex.total_investment / year0_cf
         )
     assert expected_bullet == pytest.approx(-fin.capex.total_investment)
 
