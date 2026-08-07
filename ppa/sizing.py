@@ -21,6 +21,7 @@ from typing import Callable
 
 import pandas as pd
 
+from ppa.costing import annualised_cost_per_mw
 from ppa.data.timeseries_utils import build_year_timeseries, pick_weather_year
 from ppa.multi_year import _available_memory_mb, _PER_WORKER_MEM_MB
 from ppa.network import build_network
@@ -454,11 +455,14 @@ def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFr
     """
     horizon_years = len(ts) / 8760.0
 
-    def _crf(rate: float, life: int) -> float:
-        return rate / (1 - (1 + rate) ** -life) if rate > 0 else 1.0 / life
-
-    crf = _crf(scenario.target_irr, scenario.project_life_yrs)
-    devex = 1.0 + scenario.devex_pct_of_capex
+    # target_irr, not discount_rate: this table only ever explains a sizing
+    # run, and ppa.network.build_network uses target_irr whenever sizing=True
+    # (see its own comment) -- so this must track that choice, not decide
+    # independently. Per-year figure (no horizon_years multiplier): the LP's
+    # actual capital_cost is this times horizon_years, since it needs the
+    # total capital charge over the whole modelled horizon, not a per-year rate.
+    crf_rate = scenario.target_irr
+    devex_pct = scenario.devex_pct_of_capex
     opex = scenario.opex_rate
 
     tech_rows = []
@@ -466,7 +470,9 @@ def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFr
         ("Onshore wind", scenario.wind_capex_per_kw, "ts_WindGen", sized.onsw_mw, sized.wind_cap_binding),
         ("Solar PV", scenario.pv_capex_per_kw, "ts_PVGen", sized.pv_mw, sized.pv_cap_binding),
     ]:
-        annualised_per_mw = capex_per_kw * 1_000 * devex * (crf + opex)
+        annualised_per_mw = annualised_cost_per_mw(
+            capex_per_kw * 1_000, crf_rate, scenario.project_life_yrs, opex, devex_pct
+        )
         achieved_cf = float(ts[cf_col].mean()) if cf_col in ts.columns else 0.0
         implied_lcoe = (
             annualised_per_mw / (achieved_cf * 8760.0) if achieved_cf > 0 else None
@@ -487,9 +493,9 @@ def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFr
     # storage had no row explaining the decision. Storage has no generation CF,
     # so cost is annualised per MW using the fixed duration and CF/LCOE are n/a.
     if scenario.include_bess:
-        bess_per_mw = (
-            scenario.bess_capex_per_kwh * 1_000 * scenario.bess_max_hours
-            * devex * (crf + opex)
+        bess_per_mw = annualised_cost_per_mw(
+            scenario.bess_capex_per_kwh * 1_000 * scenario.bess_max_hours,
+            crf_rate, scenario.project_life_yrs, opex, devex_pct,
         )
         tech_rows.append(
             {

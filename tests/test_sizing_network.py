@@ -163,6 +163,39 @@ def test_generator_capital_cost_includes_devex_and_target_irr():
     assert actual_pv == pytest.approx(expected_pv, rel=1e-6)
 
 
+def test_diagnostics_annualised_cost_matches_lp_capital_cost():
+    """B3: ppa.network.build_network's capital_cost and
+    ppa.sizing.sizing_diagnostics's "Annualised cost (A$/MW/yr)" must come
+    from the same formula (ppa.costing.annualised_cost_per_mw) or the LP
+    builds one fleet while the UI explains a different one (AGENTS.md §5.1).
+
+    They are not literally equal: build_network needs the *total* capital
+    charge over the whole modelled horizon (so it sits on the same additive
+    basis as revenue terms spanning that horizon), while the diagnostics
+    table reports a *per-year* rate. The relationship is exactly
+    `capital_cost == per_year_figure * horizon_years`.
+    """
+    from ppa.sizing import sizing_diagnostics
+
+    ts = _toy_ts()
+    scn = _toy_scenario()
+    horizon_years = len(ts) / 8760.0
+
+    n = build_network(ts, scn)
+    capital_cost_wind = float(n.generators.static.capital_cost["Gen_OnshoreWind"])
+    capital_cost_pv = float(n.generators.static.capital_cost["Gen_PV"])
+
+    sized = optimise_capacities(ts, scn)
+    diag = sizing_diagnostics(sized, scn, ts)
+    per_year_wind = diag["tech_rows"][0]["Annualised cost (A$/MW/yr)"]
+    per_year_pv = diag["tech_rows"][1]["Annualised cost (A$/MW/yr)"]
+
+    # diag's figures are rounded for display (round(..., 0)); rel tolerance
+    # absorbs that without weakening the check on the actual relationship.
+    assert capital_cost_wind == pytest.approx(per_year_wind * horizon_years, rel=1e-3)
+    assert capital_cost_pv == pytest.approx(per_year_pv * horizon_years, rel=1e-3)
+
+
 # ── (b) merchant haircut applies to positive prices only ─────────────────────
 
 def test_merchant_negative_price_hours_undiscounted():

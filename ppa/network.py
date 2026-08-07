@@ -10,6 +10,7 @@ pypsa.options.params.optimize.log_to_console = False
 pypsa.options.params.optimize.include_objective_constant = False
 pypsa.options.api.new_components_api = True
 
+from ppa.costing import annualised_cost_per_mw
 from ppa.scenario import Scenario
 
 
@@ -74,24 +75,30 @@ def build_network(
     # over the same horizon. crf annualizes overnight capex; opex_rate adds fixed O&M.
     horizon_years = total_hours / 8760.0
 
-    def _crf(rate: float, life: int) -> float:
-        return rate / (1 - (1 + rate) ** -life) if rate > 0 else 1.0 / life
-
     # In sizing mode the LP sizes to the project's hurdle rate (target_irr) and
     # includes devex, so its cost basis matches the financial model (plan W12c):
     # the optimiser only builds capacity that clears the hurdle rate. Dispatch
     # mode carries no capex anyway (fixed capacities), so the rate choice is
     # inert there.
     crf_rate = s.target_irr if sizing else s.discount_rate
-    crf = _crf(crf_rate, s.project_life_yrs)
-    devex = (1.0 + s.devex_pct_of_capex) if sizing else 1.0
-    wind_cc = s.wind_capex_per_kw * 1_000 * devex * (crf + s.opex_rate) * horizon_years
-    pv_cc = s.pv_capex_per_kw * 1_000 * devex * (crf + s.opex_rate) * horizon_years
-    bess_cc = s.bess_capex_per_kwh * 1_000 * s.bess_max_hours * devex * (crf + s.opex_rate) * horizon_years
+    devex_pct = s.devex_pct_of_capex if sizing else 0.0
+    wind_cc = annualised_cost_per_mw(
+        s.wind_capex_per_kw * 1_000, crf_rate, s.project_life_yrs, s.opex_rate, devex_pct
+    ) * horizon_years
+    pv_cc = annualised_cost_per_mw(
+        s.pv_capex_per_kw * 1_000, crf_rate, s.project_life_yrs, s.opex_rate, devex_pct
+    ) * horizon_years
+    bess_cc = annualised_cost_per_mw(
+        s.bess_capex_per_kwh * 1_000 * s.bess_max_hours, crf_rate, s.project_life_yrs,
+        s.opex_rate, devex_pct,
+    ) * horizon_years
     # Connection capital cost annualised the same way as generation capex
     # (plan W12a): strictly positive, so each extendable transport link's
     # p_nom_opt is pinned to its realised peak flow instead of degenerating.
-    link_cc = s.connection_cost_aud_mw * (crf + s.opex_rate) * horizon_years
+    # Never devex'd (devex_pct left at its 0.0 default).
+    link_cc = annualised_cost_per_mw(
+        s.connection_cost_aud_mw, crf_rate, s.project_life_yrs, s.opex_rate
+    ) * horizon_years
     grid_connection_cap = float(s.grid_connection_max_mw) if s.grid_connection_max_mw is not None else float("inf")
     # Generous transport bound so links never constrain optimised builds
     build_cap_sum = s.max_build_wind_mw + s.max_build_pv_mw + s.max_build_bess_mw
