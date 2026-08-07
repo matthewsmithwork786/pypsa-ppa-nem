@@ -103,10 +103,6 @@ def set_timeseries(ts: "pd.DataFrame") -> None:
     st.session_state[TIMESERIES_KEY] = ts
 
 
-def has_timeseries() -> bool:
-    return TIMESERIES_KEY in st.session_state
-
-
 def get_active_case_study_id() -> str | None:
     return st.session_state.get(ACTIVE_CASE_STUDY_KEY)
 
@@ -185,10 +181,6 @@ def set_nem_selection(sel: dict) -> None:
 
 def clear_nem_selection() -> None:
     st.session_state.pop(NEM_SELECTION_KEY, None)
-
-
-def clear_timeseries() -> None:
-    st.session_state.pop(TIMESERIES_KEY, None)
 
 
 def get_custom_upload() -> "dict | None":

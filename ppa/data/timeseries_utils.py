@@ -22,48 +22,6 @@ def escalate_prices(
     return base_prices * factor
 
 
-def get_prices_for_sim_year(
-    sim_year: int,
-    base_prices: pd.Series,
-    base_year: int,
-    escalation_rate: float,
-) -> pd.Series:
-    """
-    Return market prices for a given simulation year.
-
-    Uses the 2024 hourly price *shape* with dates shifted to sim_year,
-    then applies compound escalation from base_year.
-    """
-    # Shift timestamps: replace year in index while preserving hourly shape
-    shifted = _shift_to_year(base_prices, sim_year)
-    return escalate_prices(shifted, base_year, sim_year, escalation_rate)
-
-
-def _shift_to_year(prices: pd.Series, target_year: int) -> pd.Series:
-    """Re-index a full-year price series onto target_year keeping hourly shape."""
-    # Build a target index covering target_year at hourly resolution in UTC
-    target_index = pd.date_range(
-        start=f"{target_year}-01-01",
-        end=f"{target_year+1}-01-01",
-        freq="h",
-        tz="UTC",
-        inclusive="left",
-    )
-    # Map by day-of-year + hour to handle different year lengths gracefully
-    # Easiest: just assign the values positionally, trimming/padding if leap year differs
-    n = min(len(prices), len(target_index))
-    result = pd.Series(prices.values[:n], index=target_index[:n], name=prices.name)
-    if len(target_index) > n:
-        # Leap year target but non-leap source: repeat last day
-        pad = pd.Series(
-            [prices.values[-1]] * (len(target_index) - n),
-            index=target_index[n:],
-            name=prices.name,
-        )
-        result = pd.concat([result, pad])
-    return result
-
-
 def build_year_timeseries(
     sim_year: int,
     weather_year: int,

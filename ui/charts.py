@@ -3,8 +3,6 @@ from __future__ import annotations
 import pandas as pd
 import plotly.graph_objects as go
 
-from ppa.counterfactuals import CounterfactualResult
-from ppa.results import RevenueBreakdown
 from ppa.scenario import Scenario
 
 _COLORS = {
@@ -117,54 +115,6 @@ def make_supply_mix_24h_chart(avg_24h: pd.DataFrame, ppaload_mw: float, rangesli
         ppaload_mw=ppaload_mw,
         rangeslider=rangeslider,
     )
-
-
-def make_supply_mix_day_chart(
-    day_df: pd.DataFrame,
-    ppaload_mw: float,
-    chosen_day: str,
-) -> go.Figure:
-    df = day_df.reset_index().rename(columns={"snapshot": "time"})
-    return _dual_axis_supply_mix(
-        df,
-        x_col="time",
-        title=f"Dispatch — {chosen_day}",
-        ppaload_mw=ppaload_mw,
-    )
-
-
-def make_revenue_breakdown_chart(revenue: RevenueBreakdown) -> go.Figure:
-    labels = ["PPA Revenue", "Merchant Revenue", "Market Buy Cost", "Penalty Cost", "Net Revenue"]
-    values = [
-        revenue.ppa_revenue,
-        revenue.excess_revenue,
-        -revenue.market_purchase_cost,
-        -revenue.penalty_cost,
-        revenue.net_revenue,
-    ]
-    colors = ["#388E3C", "#66BB6A", "#E53935", "#B71C1C", "#1565C0"]
-    measure = ["relative", "relative", "relative", "relative", "total"]
-
-    fig = go.Figure(
-        go.Waterfall(
-            name="Revenue",
-            orientation="v",
-            measure=measure,
-            x=labels,
-            y=values,
-            connector={"line": {"color": "rgb(63, 63, 63)"}},
-            decreasing={"marker": {"color": "#E53935"}},
-            increasing={"marker": {"color": "#388E3C"}},
-            totals={"marker": {"color": "#1565C0"}},
-        )
-    )
-    fig.update_layout(
-        title="Revenue breakdown",
-        yaxis_title="$ (period)",
-        height=380,
-        showlegend=False,
-    )
-    return fig
 
 
 def make_soc_chart(soc: "pd.Series", bess_mwh: float, rangeslider: bool = False) -> go.Figure:
@@ -477,88 +427,6 @@ def make_ppa_obligation_chart(
         showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=1.1, xanchor="left", x=0),
         margin=dict(l=20, r=20, t=60, b=40),
-    )
-    return fig
-
-
-def make_counterfactual_bar_chart(cf: CounterfactualResult, scenario: Scenario) -> go.Figure:
-    """Horizontal bar chart comparing effective A$/MWh across procurement strategies."""
-    strategies = ["Spot-only", f"Blended\n({scenario.cal_hedge_fraction:.0%} hedged)", "Base futures hedge", "PPA\n(offtaker)"]
-    prices = [cf.spot_avg_price, cf.blended_avg_price, cf.cal_avg_price, cf.ppa_effective_price]
-    colors = ["#FF6F00", "#FFA726", "#546E7A", "#1565C0"]
-
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=prices,
-            y=strategies,
-            orientation="h",
-            marker_color=colors,
-            text=[f"A${p:.2f}/MWh" for p in prices],
-            textposition="outside",
-            textfont=dict(size=11),
-            cliponaxis=False,
-        )
-    )
-    fig.add_vline(
-        x=scenario.ppa_price,
-        line_dash="dash",
-        line_color="#1565C0",
-        line_width=1.5,
-        annotation_text=f"PPA tariff (A${scenario.ppa_price:.0f}/MWh)",
-        annotation_position="top",
-        annotation_font_color="#1565C0",
-        annotation_font_size=10,
-    )
-    x_max = max(prices) * 1.25
-    fig.update_layout(
-        title="Effective procurement cost by strategy",
-        xaxis=dict(title="Effective A$/MWh", range=[0, x_max]),
-        yaxis=dict(autorange="reversed"),
-        height=280,
-        showlegend=False,
-        margin=dict(l=140, r=60, t=50, b=40),
-        plot_bgcolor="white",
-    )
-    return fig
-
-
-def make_cumulative_cost_chart(cf: CounterfactualResult) -> go.Figure:
-    """Cumulative procurement cost over the period for each strategy."""
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=cf.cumulative_spot.index,
-            y=cf.cumulative_spot.values / 1e6,
-            mode="lines",
-            name="Spot-only",
-            line=dict(color="#FF6F00", width=1.5),
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=cf.cumulative_cal.index,
-            y=cf.cumulative_cal.values / 1e6,
-            mode="lines",
-            name="Base futures hedge",
-            line=dict(color="#546E7A", width=1.5, dash="dot"),
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=cf.cumulative_ppa.index,
-            y=cf.cumulative_ppa.values / 1e6,
-            mode="lines",
-            name="PPA (offtaker)",
-            line=dict(color="#1565C0", width=2),
-        )
-    )
-    fig.update_layout(
-        title="Cumulative procurement cost over the modelled period",
-        xaxis_title="",
-        yaxis_title="Cumulative cost ($M)",
-        height=320,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     return fig
 

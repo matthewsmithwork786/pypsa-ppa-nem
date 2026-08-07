@@ -256,7 +256,6 @@ CHECKED_FILES = [
     os.path.join(REPO_ROOT, "ppa", "network.py"),
     os.path.join(REPO_ROOT, "ppa", "sizing.py"),
     os.path.join(REPO_ROOT, "ui", "tabs", "financial_model.py"),
-    os.path.join(REPO_ROOT, "ui", "tabs", "results_overview.py"),
     os.path.join(REPO_ROOT, "ui", "tabs", "results_deep_dive.py"),
     os.path.join(REPO_ROOT, "ui", "tabs", "sensitivity_analysis.py"),
     os.path.join(REPO_ROOT, "ui", "scenario_form.py"),

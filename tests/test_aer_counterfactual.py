@@ -21,7 +21,6 @@ _COUNTERFACTUAL_FILES = [
     REPO_ROOT / "ppa" / "counterfactuals.py",
     REPO_ROOT / "ui" / "charts.py",
     REPO_ROOT / "ui" / "tabs" / "results_deep_dive.py",
-    REPO_ROOT / "ui" / "tabs" / "results_overview.py",
 ]
 _EURO_PATTERN = re.compile(r"EUR|\u20ac|\bENTSO\b|CAL Y\+1")
 

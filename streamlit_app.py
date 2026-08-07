@@ -14,10 +14,8 @@ from ui.tabs import (
     nem_map,
     custom_data,
     optimisation,
-    results_overview,
     results_deep_dive,
     sensitivity_analysis,
-    scenario_analysis,
     financial_model,
 )
 
@@ -90,13 +88,3 @@ i += 1
 if tabs[i].open:
     with tabs[i]:
         introduction.render()
-
-#i += 1
-#if tabs[i].open:
-#    with tabs[i]:
-#        scenario_analysis.render()
-
-#i += 1
-#if tabs[i].open:
-#    with tabs[i]:
-#        results_overview.render()
