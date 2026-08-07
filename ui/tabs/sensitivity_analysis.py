@@ -119,64 +119,29 @@ def _what_if_panel(
         )
 
         pf = "wi_"
-        cols = st.columns(4)
+        groups: dict[str, list] = {}
+        for p in PARAMS:
+            groups.setdefault(p.group, []).append(p)
 
-        with cols[0]:
-            st.markdown(r"**CAPEX (A\$m/MW or A\$m/MWh)**")
-            onsw_build = _num("Wind build", pf + "onsw_build", base_finance.onsw_build_cost, step=0.05, fmt="%.3f")
-            pv_build   = _num("Solar build", pf + "pv_build",  base_finance.pv_build_cost,   step=0.05, fmt="%.3f")
-            bess_build = _num("BESS build",  pf + "bess_build", base_finance.bess_build_cost, step=0.05, fmt="%.3f")
-            st.markdown(r"**OPEX (A\$m/MW or A\$m/MWh p.a.)**")
-            onsw_om  = _num("Wind O&M",  pf + "onsw_om",  base_finance.onsw_fixed_om,  step=0.005, fmt="%.4f")
-            pv_om    = _num("Solar O&M", pf + "pv_om",    base_finance.pv_fixed_om,    step=0.005, fmt="%.4f")
-            bess_om  = _num("BESS O&M",  pf + "bess_om",  base_finance.bess_fixed_om,  step=0.005, fmt="%.4f")
-            anc      = _num("Ancillary (% rev)", pf + "anc", base_finance.ancillary_pct, step=0.1, fmt="%.2f", pct=True)
+        # PARAMS is the single source (ppa/sensitivity.py) -- a field added there
+        # appears here automatically, so the what-if form can no longer drift
+        # from the tornado catalogue the way it had (three devex fields the
+        # catalogue didn't carry).
+        n_cols = 4
+        cols = st.columns(n_cols)
+        overrides: dict[str, float | int] = {}
+        for i, (group, group_params) in enumerate(groups.items()):
+            with cols[i % n_cols]:
+                st.markdown(f"**{group}**")
+                for p in group_params:
+                    default = getattr(base_finance, p.field)
+                    val = _num(
+                        p.label, pf + p.field, default,
+                        step=p.step, fmt=p.widget_fmt, pct=p.pct_display,
+                    )
+                    overrides[p.field] = int(val) if isinstance(default, int) else val
 
-        with cols[1]:
-            st.markdown("**Revenue**")
-            tariff  = _num("PPA tariff (A$/MWh)",    pf + "tariff",  base_finance.ppa_tariff,      step=1.0)
-            pen     = _num("Penalty multiple (×)",   pf + "pen",     base_finance.penalty_multiple, step=0.1, fmt="%.2f")
-            lgc     = _num("LGC / GO (A$/MWh)",       pf + "lgc",     base_finance.lgc_price,        step=0.5)
-            st.markdown("**Indexation (%/yr)**")
-            ppa_idx      = _num("PPA indexation",     pf + "ppa_idx",      base_finance.ppa_indexation,          step=0.1, fmt="%.2f", pct=True)
-            cost_infl    = _num("Cost inflation",     pf + "cost_infl",    base_finance.cost_inflation,           step=0.1, fmt="%.2f", pct=True)
-            solar_infl   = _num("Solar price",        pf + "solar_infl",   base_finance.solar_price_inflation,    step=0.1, fmt="%.2f", pct=True)
-            nonsolar_infl= _num("Non-solar price",    pf + "nonsolar_infl",base_finance.nonsolar_price_inflation, step=0.1, fmt="%.2f", pct=True)
-
-        with cols[2]:
-            st.markdown("**Debt**")
-            debt_rate   = _num("Debt rate (%)",      pf + "debt_rate",   base_finance.debt_rate,   step=0.1, fmt="%.2f", pct=True)
-            debt_tenor  = int(_num("Tenor (yrs)",    pf + "debt_tenor",  base_finance.debt_tenor,  step=1))
-            dscr_c      = _num("DSCR contracted",    pf + "dscr_c",      base_finance.dscr_contracted,   step=0.05, fmt="%.2f")
-            dscr_u      = _num("DSCR uncontracted",  pf + "dscr_u",      base_finance.dscr_uncontracted, step=0.05, fmt="%.2f")
-            gear_c      = _num("Max gearing contr. (%)", pf + "gear_c",  base_finance.max_gearing_contracted,   step=1.0, fmt="%.1f", pct=True)
-            gear_u      = _num("Max gearing uncontr. (%)", pf + "gear_u", base_finance.max_gearing_uncontracted, step=1.0, fmt="%.1f", pct=True)
-
-        with cols[3]:
-            st.markdown("**Tax & depreciation**")
-            tax_rate  = _num("Corp. tax rate (%)",    pf + "tax_rate",  base_finance.corp_tax_rate,         step=1.0, fmt="%.1f", pct=True)
-            book_dep  = _num("Book dep. rate (%)",     pf + "book_dep",  base_finance.book_depreciation_rate, step=0.1, fmt="%.2f", pct=True)
-            tax_dep   = _num("Tax dep. rate (%)",      pf + "tax_dep",   base_finance.tax_depreciation_rate,  step=0.1, fmt="%.2f", pct=True)
-            wacc      = _num("WACC / discount rate (%)", pf + "wacc",    base_finance.discount_rate,          step=0.1, fmt="%.2f", pct=True)
-            st.markdown("**Devex**")
-            onsw_devex = _num("Wind devex",  pf + "onsw_devex", base_finance.onsw_devex, step=0.01, fmt="%.3f")
-            pv_devex   = _num("Solar devex", pf + "pv_devex",   base_finance.pv_devex,   step=0.01, fmt="%.3f")
-            bess_devex = _num("BESS devex",  pf + "bess_devex", base_finance.bess_devex, step=0.01, fmt="%.3f")
-
-        wi_finance = dataclasses.replace(
-            base_finance,
-            onsw_build_cost=onsw_build, pv_build_cost=pv_build, bess_build_cost=bess_build,
-            onsw_fixed_om=onsw_om, pv_fixed_om=pv_om, bess_fixed_om=bess_om, ancillary_pct=anc,
-            ppa_tariff=tariff, penalty_multiple=pen, lgc_price=lgc,
-            ppa_indexation=ppa_idx, cost_inflation=cost_infl,
-            solar_price_inflation=solar_infl, nonsolar_price_inflation=nonsolar_infl,
-            debt_rate=debt_rate, debt_tenor=debt_tenor,
-            dscr_contracted=dscr_c, dscr_uncontracted=dscr_u,
-            max_gearing_contracted=gear_c, max_gearing_uncontracted=gear_u,
-            corp_tax_rate=tax_rate, book_depreciation_rate=book_dep, tax_depreciation_rate=tax_dep,
-            discount_rate=wacc,
-            onsw_devex=onsw_devex, pv_devex=pv_devex, bess_devex=bess_devex,
-        )
+        wi_finance = dataclasses.replace(base_finance, **overrides)
 
     base_result = run_project_finance(base_finance, base_energy, annual_energy=annual_energy)
     wi_result   = run_project_finance(wi_finance,   base_energy, annual_energy=annual_energy)

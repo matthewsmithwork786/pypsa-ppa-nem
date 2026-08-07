@@ -24,46 +24,61 @@ from ppa.financial_model import (
 
 @dataclass(frozen=True)
 class SensParam:
-    """Specification of one sensitivity parameter."""
-    label: str          # human-readable name for charts/tables
-    field: str          # field name on ProjectFinanceInputs
-    group: str          # grouping for display (CAPEX, OPEX, Debt, Revenue, …)
-    pct: float = 25.0   # default ±% range around the base value
-    fmt: str = ".2f"    # numeric format for display
+    """Specification of one sensitivity parameter.
+
+    Also the single source for the "What-if" form in
+    ui/tabs/sensitivity_analysis.py, which used to hand-write a `st.number_input`
+    and a `dataclasses.replace()` keyword per field -- three parallel lists that
+    had already drifted (the tab exposed devex fields this catalogue didn't
+    carry). `step`/`widget_fmt`/`pct` are exactly what that form needs and
+    nothing it doesn't: everything about how the field displays lives here once.
+    """
+    label: str              # human-readable name for charts/tables and the what-if form
+    field: str               # field name on ProjectFinanceInputs
+    group: str                # grouping for display (CAPEX, OPEX, Debt, Revenue, …)
+    pct: float = 25.0        # default ±% range around the base value, for the tornado
+    fmt: str = ".2f"         # numeric format for tornado/table display (Python format-spec)
+    step: float = 0.1        # st.number_input step, for the what-if form
+    widget_fmt: "str | None" = None   # st.number_input format (printf-style), or None for its default
+    pct_display: bool = False  # what-if form: edit as a percent (value is a 0-1 fraction)
 
 
 # Full catalogue — ordered by group then impact
 PARAMS: list[SensParam] = [
     # CAPEX
-    SensParam("Wind build cost (A$m/MW)",  "onsw_build_cost",   "CAPEX"),
-    SensParam("Solar build cost (A$m/MW)", "pv_build_cost",     "CAPEX"),
-    SensParam("BESS build cost (A$m/MWh)", "bess_build_cost",   "CAPEX"),
+    SensParam("Wind build cost (A$m/MW)",  "onsw_build_cost",   "CAPEX", step=0.05, widget_fmt="%.3f"),
+    SensParam("Solar build cost (A$m/MW)", "pv_build_cost",     "CAPEX", step=0.05, widget_fmt="%.3f"),
+    SensParam("BESS build cost (A$m/MWh)", "bess_build_cost",   "CAPEX", step=0.05, widget_fmt="%.3f"),
     # OPEX
-    SensParam("Wind fixed O&M (A$m/MW)",   "onsw_fixed_om",     "OPEX"),
-    SensParam("Solar fixed O&M (A$m/MW)",  "pv_fixed_om",       "OPEX"),
-    SensParam("BESS fixed O&M (A$m/MWh)",  "bess_fixed_om",     "OPEX"),
-    SensParam("Ancillary cost (% rev)",   "ancillary_pct",     "OPEX"),
+    SensParam("Wind fixed O&M (A$m/MW)",   "onsw_fixed_om",     "OPEX", step=0.005, widget_fmt="%.4f"),
+    SensParam("Solar fixed O&M (A$m/MW)",  "pv_fixed_om",       "OPEX", step=0.005, widget_fmt="%.4f"),
+    SensParam("BESS fixed O&M (A$m/MWh)",  "bess_fixed_om",     "OPEX", step=0.005, widget_fmt="%.4f"),
+    SensParam("Ancillary cost (% rev)",   "ancillary_pct",     "OPEX", step=0.1, widget_fmt="%.2f", pct_display=True),
     # Revenue
-    SensParam("PPA tariff (A$/MWh)",       "ppa_tariff",        "Revenue"),
-    SensParam("Penalty multiple (×)",     "penalty_multiple",  "Revenue", pct=30),
-    SensParam("LGC / GO price (A$/MWh)",   "lgc_price",         "Revenue", pct=50),
+    SensParam("PPA tariff (A$/MWh)",       "ppa_tariff",        "Revenue", step=1.0),
+    SensParam("Penalty multiple (×)",     "penalty_multiple",  "Revenue", pct=30, step=0.1, widget_fmt="%.2f"),
+    SensParam("LGC / GO price (A$/MWh)",   "lgc_price",         "Revenue", pct=50, step=0.5),
+    # Devex (uplift on capex, at FID)
+    SensParam("Wind devex (× capex)",      "onsw_devex",        "Devex", step=0.01, widget_fmt="%.3f"),
+    SensParam("Solar devex (× capex)",     "pv_devex",          "Devex", step=0.01, widget_fmt="%.3f"),
+    SensParam("BESS devex (× capex)",      "bess_devex",        "Devex", step=0.01, widget_fmt="%.3f"),
     # Indexation
-    SensParam("PPA indexation (%/yr)",    "ppa_indexation",    "Indexation", pct=50),
-    SensParam("Cost inflation (%/yr)",    "cost_inflation",    "Indexation", pct=50),
-    SensParam("Solar price infl. (%/yr)", "solar_price_inflation",   "Indexation", pct=50),
-    SensParam("Non-solar price infl. (%/yr)", "nonsolar_price_inflation", "Indexation", pct=50),
+    SensParam("PPA indexation (%/yr)",    "ppa_indexation",    "Indexation", pct=50, step=0.1, widget_fmt="%.2f", pct_display=True),
+    SensParam("Cost inflation (%/yr)",    "cost_inflation",    "Indexation", pct=50, step=0.1, widget_fmt="%.2f", pct_display=True),
+    SensParam("Solar price infl. (%/yr)", "solar_price_inflation",   "Indexation", pct=50, step=0.1, widget_fmt="%.2f", pct_display=True),
+    SensParam("Non-solar price infl. (%/yr)", "nonsolar_price_inflation", "Indexation", pct=50, step=0.1, widget_fmt="%.2f", pct_display=True),
     # Debt & sizing
-    SensParam("Debt rate (%)",            "debt_rate",         "Debt", pct=20),
-    SensParam("Debt tenor (yrs)",         "debt_tenor",        "Debt", pct=20),
-    SensParam("DSCR — contracted",        "dscr_contracted",   "Debt", pct=20),
-    SensParam("DSCR — uncontracted",      "dscr_uncontracted", "Debt", pct=20),
-    SensParam("Max gearing — contracted", "max_gearing_contracted",   "Debt", pct=15),
-    SensParam("Max gearing — uncontracted", "max_gearing_uncontracted", "Debt", pct=20),
+    SensParam("Debt rate (%)",            "debt_rate",         "Debt", pct=20, step=0.1, widget_fmt="%.2f", pct_display=True),
+    SensParam("Debt tenor (yrs)",         "debt_tenor",        "Debt", pct=20, step=1),
+    SensParam("DSCR — contracted",        "dscr_contracted",   "Debt", pct=20, step=0.05, widget_fmt="%.2f"),
+    SensParam("DSCR — uncontracted",      "dscr_uncontracted", "Debt", pct=20, step=0.05, widget_fmt="%.2f"),
+    SensParam("Max gearing — contracted", "max_gearing_contracted",   "Debt", pct=15, step=1.0, widget_fmt="%.1f", pct_display=True),
+    SensParam("Max gearing — uncontracted", "max_gearing_uncontracted", "Debt", pct=20, step=1.0, widget_fmt="%.1f", pct_display=True),
     # Tax & depreciation
-    SensParam("Corporate tax rate",       "corp_tax_rate",     "Tax / Dep.", pct=25),
-    SensParam("Book depreciation rate",   "book_depreciation_rate", "Tax / Dep.", pct=25),
-    SensParam("Tax depreciation rate",    "tax_depreciation_rate",  "Tax / Dep.", pct=25),
-    SensParam("WACC / discount rate",     "discount_rate",     "Tax / Dep.", pct=20),
+    SensParam("Corporate tax rate",       "corp_tax_rate",     "Tax / Dep.", pct=25, step=1.0, widget_fmt="%.1f", pct_display=True),
+    SensParam("Book depreciation rate",   "book_depreciation_rate", "Tax / Dep.", pct=25, step=0.1, widget_fmt="%.2f", pct_display=True),
+    SensParam("Tax depreciation rate",    "tax_depreciation_rate",  "Tax / Dep.", pct=25, step=0.1, widget_fmt="%.2f", pct_display=True),
+    SensParam("WACC / discount rate",     "discount_rate",     "Tax / Dep.", pct=20, step=0.1, widget_fmt="%.2f", pct_display=True),
 ]
 
 PARAM_BY_FIELD: dict[str, SensParam] = {p.field: p for p in PARAMS}
