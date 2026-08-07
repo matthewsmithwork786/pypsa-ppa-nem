@@ -2,11 +2,13 @@
 
 Two-stage flow: the sizing LP here optimises capacities + dispatch over the
 concatenated simulation horizon (least-cost-to-serve-the-PPA, see
-`ppa.network.build_network` sizing mode) at a coarse, configurable time
-resolution (`scenario.sizing_resolution_h`, default 3h), then `apply_sizing`
-writes the optimal capacities back into a fixed-capacity Scenario that the
-existing per-year *hourly* simulation (`ppa.multi_year.run_multi_year`) and
-financials consume unchanged.
+`ppa.network.build_network` sizing mode) -- either the exact hourly year
+("full_hourly") or tsam typical-period clustering at hourly resolution
+("tsam", the default; best fidelity for the LP size, see
+`ppa.sizing_tsam`) -- then `apply_sizing` writes the optimal capacities back
+into a fixed-capacity Scenario that the existing per-year *hourly*
+simulation (`ppa.multi_year.run_multi_year`) and financials consume
+unchanged.
 """
 from __future__ import annotations
 
@@ -40,10 +42,10 @@ class SizedCapacities:
     sizing_years_used: int
     horizon_clamped: bool
     resolution_h: int = 1
-    # Sizing representation used ("tsam" / "full_hourly" / "coarse")
-    sizing_method: str = "coarse"
+    # Sizing representation used ("tsam" / "full_hourly")
+    sizing_method: str = "tsam"
     # PPA delivery share the sizing LP itself achieves on its representation
-    # (clustered typical weeks / coarse blocks / full hourly) — compared against
+    # (clustered typical weeks / full hourly) — compared against
     # the full hourly simulation of the sized portfolio to catch clustering
     # losses (plan W14 item 6).
     sizing_delivery_share: float = 0.0
@@ -93,12 +95,11 @@ def weather_cycle_years(
 # (baseline after data load ~355 MB is included in these figures):
 #
 #     full_hourly   1,143 MB   171 s
-#     coarse (3 h)    778 MB    10 s
 #     tsam                small (the LP is ~25x smaller)
 #
 # Used to warn BEFORE a solve that would exhaust a memory-limited container,
 # because the failure mode otherwise is a silent SIGKILL with no traceback.
-SIZING_PEAK_MB = {"full_hourly": 1150.0, "coarse": 800.0, "tsam": 400.0}
+SIZING_PEAK_MB = {"full_hourly": 1150.0, "tsam": 400.0}
 
 
 def sizing_memory_advice(scenario: Scenario) -> "str | None":
@@ -117,12 +118,10 @@ def sizing_memory_advice(scenario: Scenario) -> "str | None":
     if needed is None or mem_mb >= needed:
         return None
 
-    cheaper = [m for m in ("coarse", "tsam") if SIZING_PEAK_MB[m] <= mem_mb]
     suggestion = (
-        f" Switch the sizing representation to "
-        f"{' or '.join('Coarse resolution' if m == 'coarse' else 'Typical weeks' for m in cheaper)}"
-        ", or reduce the max-build caps and simulation years."
-        if cheaper else
+        " Switch the sizing representation to Typical weeks, or reduce the "
+        "max-build caps and simulation years."
+        if method != "tsam" and SIZING_PEAK_MB["tsam"] <= mem_mb else
         " Reduce the max-build caps and the simulation years, or run this locally."
     )
     return (
@@ -215,37 +214,21 @@ def build_sizing_timeseries(
     return sizing_ts
 
 
-def coarsen_timeseries(ts: pd.DataFrame, resolution_h: int) -> pd.DataFrame:
-    """Downsample an hourly timeseries to `resolution_h`-hour block averages.
-
-    Block-averaging CFs, prices and load preserves per-block energy and cost
-    exactly; only intra-block variability (which the sizing LP doesn't need at
-    full fidelity) is smoothed. Bins align to midnight, and year blocks are
-    whole multiples of common resolutions, so no bin straddles a year boundary.
-    """
-    if resolution_h <= 1:
-        return ts
-    coarse = ts.resample(f"{resolution_h}h").mean()
-    coarse.index.name = ts.index.name
-    return coarse
-
-
 def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities:
-    """Solve the investment LP at coarse resolution and extract optimal capacities.
+    """Solve the investment LP and extract optimal capacities.
 
     `ts` is the hourly timeseries. How it is represented before the solve is
-    chosen by `scenario.sizing_method`: "tsam" clusters it into typical weeks at
-    hourly resolution (best fidelity for the size; W14), "full_hourly" keeps the
-    exact hourly year (slowest), and "coarse" block-averages to
-    `scenario.sizing_resolution_h`-hour blocks (legacy, fastest per snapshot).
-    Snapshot weightings (set in `build_network`) keep costs and storage
-    dynamics in real hours either way.
+    chosen by `scenario.sizing_method`: "tsam" (the default) clusters it into
+    typical weeks at hourly resolution (best fidelity for the LP size; W14),
+    "full_hourly" keeps the exact hourly year (slowest, used as the exactness
+    benchmark by `validate_sizing_representation`). Snapshot weightings (set
+    in `build_network`) keep costs and storage dynamics in real hours either
+    way.
 
     BESS energy capacity fade cannot be time-varied on a StorageUnit, so the
     horizon-average degradation factor is applied to the fixed duration — a
     slight de-rating that approximates multi-year usable-capacity fade.
     """
-    resolution_h = max(1, int(scenario.sizing_resolution_h))
     method = scenario.sizing_method
     if method == "tsam":
         from ppa.sizing_tsam import cluster_typical_periods
@@ -254,14 +237,9 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
             ts, n_periods=max(4, int(scenario.sizing_n_periods))
         )
         n_years = max(1, round(float(weights.sum()) / 8760))
-        # Report the effective (clustered) resolution for diagnostics
-        resolution_h = 1
-    elif method == "full_hourly":
+    else:  # full_hourly
         n_years = max(1, round(len(ts) / 8760))
-        resolution_h = 1
-    else:  # coarse (legacy)
-        ts = coarsen_timeseries(ts, resolution_h)
-        n_years = max(1, round(len(ts) * resolution_h / 8760))
+    resolution_h = 1
 
     avg_bess_factor = (
         sum((1.0 - scenario.bess_degradation_rate) ** i for i in range(n_years)) / n_years
@@ -287,10 +265,8 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         # elapsed time between snapshots, and conflating them sizes storage to
         # zero (docs/sizing_experiments.md E9).
         n = build_network(ts, sizing_scn, snapshot_weightings=weights)
-    elif method == "full_hourly":
+    else:  # full_hourly
         n = build_network(ts, sizing_scn, resolution_h=1.0)
-    else:
-        n = build_network(ts, sizing_scn, resolution_h=resolution_h)
 
     status, condition = solve(n, sizing_scn, ts)
 

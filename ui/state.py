@@ -56,7 +56,7 @@ _SCENARIO_FORM_KEYS = [
     "sf_sim_years", "sf_first_sim_year", "sf_escalation",
     "sf_pv_deg", "sf_wind_deg", "sf_bess_deg",
     "sf_optimise_capacity", "sf_max_build_wind", "sf_max_build_pv", "sf_max_build_bess",
-    "sf_sizing_resolution", "sf_load_profile",
+    "sf_load_profile",
     "sf_data_source", "sf_nem_price_region", "sf_nem_year",
     "sf_aer_region", "sf_aer_quarters",
     "_sf_data_source_touched", "_sf_aer_applied", "_sf_aer_pending",

@@ -177,7 +177,7 @@ def test_sizing_memory_advice_warns_when_method_will_not_fit(monkeypatch):
     msg = sizing.sizing_memory_advice(scn)
     assert msg and "full_hourly" in msg
     # Must point at a representation that actually fits in the memory available.
-    assert "Coarse resolution" in msg
+    assert "Typical weeks" in msg
 
 
 def test_sizing_memory_advice_silent_when_it_fits(monkeypatch):
@@ -193,7 +193,7 @@ def test_sizing_memory_advice_silent_when_it_fits(monkeypatch):
 
     monkeypatch.setattr(sizing, "_available_memory_mb", lambda: 900.0)
     assert sizing.sizing_memory_advice(
-        dataclasses.replace(Scenario(), sizing_method="coarse")
+        dataclasses.replace(Scenario(), sizing_method="tsam")
     ) is None
 
 

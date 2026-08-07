@@ -660,3 +660,30 @@ Residual error is concentrated in **wind** (76 vs 57). Wind is the most day-to-d
 input, so it is the hardest to represent in any aggregation; the total and the storage
 decision are both good. Use `validate_sizing_representation()` to check a specific scenario
 before relying on a clustered result.
+
+---
+
+## E12 — Retired the `coarse` sizing method
+
+**Date:** 2026-08-08
+
+`Scenario.sizing_method` no longer accepts `"coarse"` (block-averaged resolution,
+`ppa.sizing.coarsen_timeseries` / `Scenario.sizing_resolution_h`). `tsam` (the default since
+E11) superseded it on every axis measured in this log:
+
+- **Memory:** 800 MB (coarse, 3 h blocks) vs. 400 MB (tsam) — see the `SIZING_PEAK_MB` table,
+  §"Memory profile" below.
+- **Fidelity:** E11's table above shows every typical-*week* tsam configuration (RMSE 7–20)
+  beating the 3 h coarse row (RMSE not measured there directly, but E7/E9 and the coarse rows
+  elsewhere in this log — e.g. the −4.5% delivery-share gap at line 83 — show it losing
+  intra-day variability tsam's 168 h weeks preserve).
+- **Speed:** tsam's clustered LP is ~25× smaller than the full-hourly LP and faster than
+  coarse's per-snapshot resolution reduction at comparable fidelity (E11: 18.0 s vs. the
+  ~10 s coarse figure quoted in this log's memory-profile section, for a materially worse fleet
+  match).
+
+`full_hourly` is retained as the exactness benchmark `validate_sizing_representation()`
+compares `tsam` against. The historical coarse-method rows and figures earlier in this log
+(E1's disabled-slider fleet aside, the "coarse 3h (legacy)" rows, the memory-profile table,
+§"weighted (typical-period) LP" `resolution_h` comparison) are left as-is — they are the
+record of why coarse was retired, not current guidance.

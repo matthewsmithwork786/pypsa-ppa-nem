@@ -192,12 +192,11 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             with st.expander("⚙️ Advanced sizing settings", expanded=False):
               _method_labels = {
                   "full_hourly": "Full year hourly",
-                  "coarse": "Coarse resolution (legacy)",
                   "tsam": "Typical weeks (tsam)",
               }
               _method_idx = list(_method_labels).index(
                   initial.sizing_method if initial.sizing_method in _method_labels
-                  else "full_hourly"
+                  else "tsam"
               )
               sizing_method = st.radio(
                   "Sizing representation",
@@ -210,10 +209,6 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                       "168-hour weeks, is ~11x faster than exact, and lands the fleet "
                       "within ~10% and the BESS within a few percent of the exact "
                       "answer. **Full year hourly** is exact but the slowest. "
-                      "**Coarse resolution** "
-                      "block-averages to the legacy 1-6 h resolution (~4% smaller fleet, "
-                      "~8x faster) but smooths away the intra-day variability storage "
-                      "sizing needs. "
                       "The sized portfolio is always re-simulated at hourly resolution "
                       "afterwards."
                   ),
@@ -235,28 +230,8 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                           "poor-resource days rather than stitched-together fragments."
                       ),
                   )
-                  sizing_resolution_h = initial.sizing_resolution_h
-              elif sizing_method == "full_hourly":
+              else:  # full_hourly
                   sizing_n_periods = initial.sizing_n_periods
-                  sizing_resolution_h = 1
-              else:  # coarse
-                  _res_options = [1, 2, 3, 4, 6]
-                  _res_idx = (
-                      _res_options.index(int(initial.sizing_resolution_h))
-                      if int(initial.sizing_resolution_h) in _res_options
-                      else _res_options.index(3)
-                  )
-                  sizing_n_periods = initial.sizing_n_periods
-                  sizing_resolution_h = st.selectbox(
-                      "Sizing LP resolution (h)", _res_options, index=_res_idx,
-                      key="sf_sizing_resolution",
-                      help=(
-                          "Block-average resolution of the capacity-sizing LP only. "
-                          "Coarser blocks (e.g. 3h) solve faster and use less memory; "
-                          "the sized portfolio is then always re-simulated at hourly "
-                          "resolution for dispatch and financials."
-                      ),
-                  )
             cols = st.columns(4)
             grid_connection = cols[0].text_input(
                 "Grid connection limit (MW)",
@@ -283,7 +258,6 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             max_build_wind_mw = initial.max_build_wind_mw
             max_build_pv_mw = initial.max_build_pv_mw
             max_build_bess_mw = initial.max_build_bess_mw
-            sizing_resolution_h = initial.sizing_resolution_h
             sizing_method = initial.sizing_method
             sizing_n_periods = initial.sizing_n_periods
             grid_connection = "" if initial.grid_connection_max_mw == float("inf") else str(initial.grid_connection_max_mw)
@@ -621,7 +595,6 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         max_build_wind_mw=float(max_build_wind_mw),
         max_build_pv_mw=float(max_build_pv_mw),
         max_build_bess_mw=float(max_build_bess_mw),
-        sizing_resolution_h=int(sizing_resolution_h),
         sizing_method=str(sizing_method),
         sizing_n_periods=int(sizing_n_periods),
         grid_connection_max_mw=(

@@ -34,9 +34,9 @@ def build_network(
     `scenario.sizing_merchant_value_share` of positive spot prices only, so the
     LP sizes to a realistic capture price while still curtaining negative hours.
 
-    `resolution_h` is the hours each snapshot represents (>1 for the coarse
-    sizing LP). It sets the snapshot weightings so marginal costs and storage
-    state-of-charge integrate over real hours, not snapshot counts.
+    `resolution_h` is the hours each snapshot represents. It sets the
+    snapshot weightings so marginal costs and storage state-of-charge
+    integrate over real hours, not snapshot counts.
 
     `snapshot_weightings` is an optional per-snapshot weighting Series (e.g.
     tsam typical-period occurrence counts, which sum to ≈ 8760). When given it

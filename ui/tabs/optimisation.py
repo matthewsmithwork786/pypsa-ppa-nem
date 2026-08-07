@@ -64,24 +64,16 @@ def _sizing_method_label(sized) -> str:
     labels = {
         "tsam": "typical-day clustering (tsam)",
         "full_hourly": "full hourly year",
-        "coarse": f"{getattr(sized, 'resolution_h', 1)}h coarse resolution",
     }
-    return labels.get(getattr(sized, "sizing_method", "coarse"), "sizing LP")
+    return labels.get(getattr(sized, "sizing_method", "tsam"), "sizing LP")
 
 
 def _sizing_method_caption(scenario) -> str:
-    """Describe the sizing representation actually in use.
-
-    The status line previously reported `sizing_resolution_h` regardless of
-    method, so a tsam run announced "3h resolution" -- the legacy coarse
-    setting, which it was not using.
-    """
+    """Describe the sizing representation actually in use."""
     method = getattr(scenario, "sizing_method", "tsam")
     if method == "tsam":
         return f"{scenario.sizing_n_periods} typical weeks"
-    if method == "full_hourly":
-        return "full hourly"
-    return f"{scenario.sizing_resolution_h}h blocks"
+    return "full hourly"
 
 
 def _render_sizing_diagnostics() -> None:
@@ -118,7 +110,7 @@ def _render_sizing_diagnostics() -> None:
             )
             st.caption(
                 f"PPA delivery share: sizing LP **{_delivery_sizing:.1%}** "
-                f"({diag.get('sizing_method', 'coarse')} representation) vs full "
+                f"({diag.get('sizing_method', 'tsam')} representation) vs full "
                 f"hourly simulation **{_delivery_full:.1%}** ({_gap:+.1f}pp){_gap_note}."
             )
         st.caption(
@@ -142,7 +134,7 @@ def _render_scenario_summary(s) -> None:
                     f"solar **{s.max_build_pv_mw:.0f}** / "
                     f"BESS **{s.max_build_bess_mw:.0f} MW**"
                 )
-                st.markdown(f"- Sizing LP resolution: **{s.sizing_resolution_h}h**")
+                st.markdown(f"- Sizing LP representation: **{_sizing_method_caption(s)}**")
                 if s.include_bess:
                     st.markdown(f"- BESS duration: **{s.bess_max_hours:.1f} h** (fixed)")
                 else:
@@ -315,9 +307,7 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
         )
         if cycle_note:
             st.info(cycle_note)
-        n_sizing_years, notice = clamp_sizing_years(
-            n_sizing_years, scenario.sizing_resolution_h
-        )
+        n_sizing_years, notice = clamp_sizing_years(n_sizing_years)
         if notice:
             st.warning(notice)
         # Warn BEFORE the solve: an out-of-memory kill arrives as a silent
@@ -401,7 +391,7 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
 
     # Compare the sizing LP's delivery share against the full hourly simulation
     # of the sized portfolio (plan W14 item 6): a large gap means the typical-
-    # period / coarse representation dropped something the hourly year has.
+    # period representation dropped something the hourly year has.
     if sizing_seconds is not None and state.has_sizing_diagnostics():
         diag = state.get_sizing_diagnostics()
         diag["delivery_share_full"] = float(

@@ -1,10 +1,9 @@
 """W14: better sizing representation via `tsam` typical periods.
 
 The sizing LP (`ppa.sizing.optimise_capacities`) can run over the full hourly
-year, coarse block averages, or — with the optional `tsam` dependency —
-typical periods at full hourly resolution. Typical days preserve intra-day
-variability (which the 3-hourly blocks smooth away) while keeping the LP ~2
-orders of magnitude smaller than the full year.
+year, or — with the optional `tsam` dependency — typical periods at full
+hourly resolution. Typical weeks preserve intra-day variability while
+keeping the LP ~2 orders of magnitude smaller than the full year.
 
 STORAGE NOTE. Clustered sizing under-sizes storage against the exact LP
 (207 vs 299 MW on the Corporate PPA under a hard SLA), which is ordinary

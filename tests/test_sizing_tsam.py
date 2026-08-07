@@ -85,7 +85,7 @@ def _sizing_scenario(**overrides):
         onsw_mw=50.0, pv_mw=50.0, include_bess=True, bess_mw=20.0, bess_mwh=80.0,
         max_build_wind_mw=2000.0, max_build_pv_mw=2000.0, max_build_bess_mw=2000.0,
         wind_capex_per_kw=100.0, pv_capex_per_kw=100.0, bess_capex_per_kwh=50.0,
-        simulation_years=1, sizing_resolution_h=1,
+        simulation_years=1,
     )
     base.update(overrides)
     return Scenario(**base)
