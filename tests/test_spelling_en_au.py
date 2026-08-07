@@ -58,8 +58,9 @@ _ALLOWLIST_PATTERNS = [
     re.compile(r"\bscipy\.optimize\b"),
     # pandas Timestamp/Index.normalize() (third-party API — never renamed)
     re.compile(r"\.normalize\("),
-    # Excel-tab compat: scenario_from_excel must accept the legacy US spelling
-    # of the optimise_capacity column key (plan W10b).
+    # Legacy US spelling of the optimise_capacity column key, from the now-removed
+    # Excel-tab import (scenario_from_excel, plan W10b). No current source uses it;
+    # kept in case Excel import is rebuilt.
     re.compile(r"optimize_capacity"),
 ]
 

@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
-
-import pandas as pd
 
 from ppa.industrial_profiles import PROFILE_KEYS
 
@@ -484,57 +481,3 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
     return errors
 
 
-def scenario_from_excel(path: str | Path) -> Scenario:
-    raw = pd.read_excel(path, sheet_name="Scenario", header=None)
-    params: dict[str, Any] = {}
-    for _, row in raw.iterrows():
-        param = row.iloc[4]
-        value = row.iloc[1]
-        if pd.notna(param):
-            key = str(param).strip()
-            if key and key.isidentifier():
-                params[key] = value
-
-    def _yn(key: str) -> bool:
-        return str(params.get(key, "no")).strip().lower() == "yes"
-
-    def _float(key: str, default: float = 0.0) -> float:
-        return float(params.get(key, default))
-
-    def _int(key: str, default: int = 0) -> int:
-        return int(float(params.get(key, default)))
-
-    return Scenario(
-        include_bess=_yn("include_bess"),
-        enable_market_buy=_yn("enable_market_buy"),
-        enable_market_sell=_yn("enable_market_sell"),
-        enable_shortfall=_yn("enable_shortfall"),
-        enable_penalty=_yn("enable_penalty"),
-        run_financial_analysis=_yn("run_financial_analysis"),
-        # Accept both spellings: older templates use "optimize_capacity".
-        optimise_capacity=_yn("optimise_capacity") or _yn("optimize_capacity"),
-        onsw_mw=_float("onsw_mw", 150.0),
-        pv_mw=_float("pv_mw", 200.0),
-        bess_mw=_float("bess_mw", 60.0),
-        bess_mwh=_float("bess_mwh", 240.0),
-        bess_efficiency_store=_float("bess_efficiency_store", 0.9),
-        bess_efficiency_dispatch=_float("bess_efficiency_dispatch", 0.9),
-        ppaload_mw=_float("ppaload_mw", 100.0),
-        ppa_price=_float("ppa_price", 100.0),
-        pen_mult=_float("pen_mult", 1.5),
-        required_delivery_share=_float("required_delivery_share", 0.75),
-        market_buy_share=_float("market_buy_share", 0.05),
-        market_spread=_float("market_spread", 0.10),
-        transmission_cost_aud_mwh=_float(
-            "transmission_cost_aud_mwh",
-            _float("transmission_cost_eur_mwh", 0.0),
-        ),
-        chosen_day=str(params.get("chosen_day", "2025-03-15")).strip(),
-        wind_capex_per_kw=_float("wind_capex_per_kw", 2900.0),
-        pv_capex_per_kw=_float("pv_capex_per_kw", 1718.6),
-        bess_capex_per_kwh=_float("bess_capex_per_kwh", 276.5),
-        opex_rate=_float("opex_rate", 0.02),
-        project_life_yrs=_int("project_life_yrs", 30),
-        discount_rate=_float("discount_rate", 0.08),
-        target_irr=_float("target_irr", 0.10),
-    )
