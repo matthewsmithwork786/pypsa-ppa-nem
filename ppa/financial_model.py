@@ -72,6 +72,8 @@ class EnergyInputs:
     marketbuy_gwh: float = 0.0
 
     name: str = "PyPSA scenario"
+    wind_plant_name: str = ""
+    pv_plant_name: str = ""
 
 
 @dataclass
@@ -259,6 +261,15 @@ def energy_inputs_from_result(
         float((d.market_buy * prices).sum()) / buy_vol if buy_vol > 0 else 0.0
     )
 
+    wind_plant_name = pv_plant_name = ""
+    if getattr(s, "is_nem", False):
+        from ppa.data.nem_data import plant_name_for_duid
+
+        if s.nem_wind_duid:
+            wind_plant_name = plant_name_for_duid(s.nem_wind_duid)
+        if s.nem_pv_duid:
+            pv_plant_name = plant_name_for_duid(s.nem_pv_duid)
+
     return EnergyInputs(
         onsw_mw=s.onsw_mw,
         pv_mw=s.pv_mw,
@@ -276,6 +287,8 @@ def energy_inputs_from_result(
         purchase_price=buy_price,
         marketbuy_gwh=buy_vol * to_gwh,
         name=s.name,
+        wind_plant_name=wind_plant_name,
+        pv_plant_name=pv_plant_name,
     )
 
 
@@ -327,6 +340,8 @@ def energy_inputs_from_results(results: list) -> EnergyInputs:
         purchase_price=avg("purchase_price"),
         marketbuy_gwh=avg("marketbuy_gwh"),
         name=first.name,
+        wind_plant_name=first.wind_plant_name,
+        pv_plant_name=first.pv_plant_name,
     )
 
 

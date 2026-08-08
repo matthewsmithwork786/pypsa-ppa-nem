@@ -291,6 +291,26 @@ def plant_capacity_mw(
     return float(row.iloc[0]["capacity_registered_mw"])
 
 
+def plant_name_for_duid(
+    duid: str, registry: pd.DataFrame | None = None, cache_dir: Path = NEM_CACHE_DIR
+) -> str:
+    """Station name for a DUID, falling back to the DUID itself if the plant
+    registry is unavailable or the DUID is not found -- callers show this in
+    results/exports and must not crash a run over a missing name."""
+    if not duid:
+        return ""
+    duid = duid.strip().upper()
+    try:
+        if registry is None:
+            registry = load_plant_registry(cache_dir)
+        row = registry.loc[registry["duid"] == duid]
+        if not row.empty:
+            return str(row.iloc[0]["station_name"])
+    except (FileNotFoundError, KeyError):
+        pass
+    return duid
+
+
 def capacity_factor_for_duid(
     duid: str,
     year: int = DEFAULT_YEAR,

@@ -423,7 +423,8 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
 
 def _render_results(fin, n_years: int) -> None:
     with st.expander("Optimisation results", expanded=True):
-        cols = st.columns(5)
+        avg_delivery = sum(y.fulfilled_share for y in fin.yearly) / len(fin.yearly) if fin.yearly else 0.0
+        cols = st.columns(6)
         irr_str = f"{fin.irr:.1%}" if fin.irr == fin.irr else "N/A"
         lcoe_str = f"A${fin.lcoe:.1f}/MWh" if fin.lcoe == fin.lcoe else "N/A"
         payback_str = f"{fin.simple_payback:.1f} yrs" if fin.simple_payback < 1e8 else "N/A"
@@ -432,6 +433,21 @@ def _render_results(fin, n_years: int) -> None:
         cols[2].metric("LCOE", lcoe_str)
         cols[3].metric("Simple Payback", payback_str)
         cols[4].metric("Lifetime Net Revenue", f"A${fin.total_lifetime_revenue/1e6:.1f}M")
+        cols[5].metric(
+            "Achieved PPA delivery (avg)", f"{avg_delivery:.1%}",
+            help="Average share of contracted PPA load actually delivered "
+                 "from renewables/storage + market purchase, across all simulated years.",
+        )
+        if fin.breakeven_ppa_price == fin.breakeven_ppa_price:  # not NaN
+            s = state.get_scenario()
+            # Escape every "$" -- two unescaped dollar signs in one markdown
+            # string are parsed by Streamlit as a LaTeX math span, swallowing
+            # everything (including ** bold markers) in between.
+            st.caption(
+                rf"Breakeven PPA price for a **{s.target_irr:.0%} target IRR**: "
+                rf"**A\${fin.breakeven_ppa_price:.1f}/MWh** (vs A\${s.ppa_price:.0f}/MWh "
+                "contracted; holds delivered volumes fixed at the simulated dispatch, unlevered project IRR basis)."
+            )
 
         if n_years == 1:
             y = fin.yearly[0]

@@ -266,6 +266,8 @@ def _render_multi_year_deep_dive() -> None:
             irr_str = f"{fin.irr:.1%}" if fin.irr == fin.irr else "n/a"
             lcoe_str = f"A${fin.lcoe:.2f}/MWh" if fin.lcoe == fin.lcoe else "n/a"
             payback_str = f"{fin.simple_payback:.1f} yrs" if fin.simple_payback < 1e8 else "n/a"
+            avg_delivery = sum(y.fulfilled_share for y in fin.yearly) / len(fin.yearly) if fin.yearly else 0.0
+            be_str = f"A${fin.breakeven_ppa_price:.2f}/MWh" if fin.breakeven_ppa_price == fin.breakeven_ppa_price else "n/a"
             econ_df = pd.DataFrame(
                 [
                     ("NPV", _fmt_m(fin.npv), f"at {s.discount_rate:.0%} WACC"),
@@ -274,6 +276,10 @@ def _render_multi_year_deep_dive() -> None:
                     ("Simple payback", payback_str, ""),
                     ("Total lifetime revenue", _fmt_m(fin.total_lifetime_revenue), ""),
                     ("Total lifetime generation", f"{fin.total_lifetime_generation_mwh / 1e3:.0f} GWh", ""),
+                    ("Achieved PPA delivery (avg)", f"{avg_delivery:.1%}",
+                     f"vs {s.required_delivery_share:.0%} required"),
+                    ("Breakeven PPA for target IRR", be_str,
+                     f"at {s.target_irr:.0%} vs A${s.ppa_price:.0f}/MWh contracted"),
                 ],
                 columns=["Metric", "Value", "Note"],
             )

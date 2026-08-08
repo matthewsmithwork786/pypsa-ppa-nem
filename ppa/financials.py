@@ -85,6 +85,7 @@ class MultiYearFinancialResult:
     simple_payback: float = float("inf")
     total_lifetime_revenue: float = 0.0
     total_lifetime_generation_mwh: float = 0.0
+    breakeven_ppa_price: float = float("nan")
 
     # Running NPV series (index = year number 1..N, value = cumulative NPV)
     cumulative_npv: list[float] = field(default_factory=list)
@@ -173,6 +174,40 @@ def run_multi_year_financial_analysis(
         running += cf / (1 + s.discount_rate) ** t
         cumulative_npv.append(running)
 
+    # ── Breakeven PPA price for target IRR ────────────────────────────────────
+    # Each year's cashflow is linear in the PPA price: net_cf(p) = net_cf(s.ppa_price)
+    # + (p - s.ppa_price) * delivered_volume, since only ppa_revenue depends on
+    # price. Solve for the price that makes lifetime IRR == target_irr, holding
+    # delivered volumes (and every other cost/revenue) fixed at what the
+    # dispatch actually did. Bisection (not scipy) to match _irr's own approach.
+    breakeven_ppa_price = float("nan")
+    if s.ppa_price > 0 and yearly:
+        sim_volumes = [y.ppa_revenue / s.ppa_price for y in yearly]
+        volumes = list(sim_volumes)
+        if n_sim < n_life:
+            avg_volume = sum(sim_volumes) / n_sim
+            volumes.extend([avg_volume] * (n_life - n_sim))
+
+        base_cfs = cashflows[1:]  # length n_life, at s.ppa_price
+
+        def _npv_at_price(p: float) -> float:
+            adj_cfs = [cf + (p - s.ppa_price) * vol for cf, vol in zip(base_cfs, volumes)]
+            return _npv(s.target_irr, np.array([-total_investment] + adj_cfs))
+
+        lo, hi = 0.0, 2000.0
+        flo, fhi = _npv_at_price(lo), _npv_at_price(hi)
+        if flo * fhi <= 0:
+            for _ in range(200):
+                mid = (lo + hi) / 2
+                fmid = _npv_at_price(mid)
+                if abs(fmid) < 1e-6:
+                    break
+                if flo * fmid < 0:
+                    hi = mid
+                else:
+                    lo, flo = mid, fmid
+            breakeven_ppa_price = (lo + hi) / 2
+
     return MultiYearFinancialResult(
         capex=capex,
         annual_opex=annual_opex,
@@ -183,5 +218,6 @@ def run_multi_year_financial_analysis(
         simple_payback=simple_payback,
         total_lifetime_revenue=total_revenue,
         total_lifetime_generation_mwh=total_gen_mwh,
+        breakeven_ppa_price=breakeven_ppa_price,
         cumulative_npv=cumulative_npv,
     )
