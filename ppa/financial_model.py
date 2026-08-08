@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from ppa import assumptions as A
+
 try:  # optional — only needed by energy_inputs_from_result
     from ppa.results import OptimisationResult
 except Exception:  # pragma: no cover
@@ -81,25 +83,25 @@ class ProjectFinanceInputs:
     source model's units; the dashboard converts the familiar A$/kW figures."""
 
     # ── Build cost (A$m/MW, A$m/MWh for BESS) ────────────────────────────────
-    onsw_build_cost: float = 2.9       # A$m/MW   (2900 A$/kW)
-    pv_build_cost: float = 1.7186      # A$m/MW   (1718.6 A$/kW)
-    bess_build_cost: float = 0.2765    # A$m/MWh  (276.5 A$/kWh)
+    onsw_build_cost: float = A.PFI_WIND_BUILD_COST_AUD_M_MW       # A$m/MW   (2900 A$/kW)
+    pv_build_cost: float = A.PFI_PV_BUILD_COST_AUD_M_MW      # A$m/MW   (1718.6 A$/kW)
+    bess_build_cost: float = A.PFI_BESS_BUILD_COST_AUD_M_MWH    # A$m/MWh  (276.5 A$/kWh)
 
     # ── Connection cost ─────────────────────────────────────────────────────
-    onsw_connection_cost: float = 0.15
-    pv_connection_cost: float = 0.15
-    bess_connection_cost: float = 0.0225  # A$m/MWh
+    onsw_connection_cost: float = A.PFI_ONSW_CONNECTION_COST_AUD_M_MW
+    pv_connection_cost: float = A.PFI_PV_CONNECTION_COST_AUD_M_MW
+    bess_connection_cost: float = A.PFI_BESS_CONNECTION_COST_AUD_M_MWH  # A$m/MWh
 
     # ── Project development cost (devex) ────────────────────────────────────
-    onsw_devex: float = 0.29           # A$m/MW   (~10% of build)
-    pv_devex: float = 0.17186          # A$m/MW
-    bess_devex: float = 0.02765        # A$m/MWh
+    onsw_devex: float = A.PFI_WIND_DEVEX_AUD_M_MW           # A$m/MW   (~10% of build)
+    pv_devex: float = A.PFI_PV_DEVEX_AUD_M_MW          # A$m/MW
+    bess_devex: float = A.PFI_BESS_DEVEX_AUD_M_MWH        # A$m/MWh
 
     # ── Fixed O&M (A$m/MW p.a., A$m/MWh p.a. for BESS) ───────────────────────
-    onsw_fixed_om: float = 0.028
-    pv_fixed_om: float = 0.012
-    bess_fixed_om: float = 0.0105      # A$m/MWh
-    ancillary_pct: float = 0.01        # % of revenue
+    onsw_fixed_om: float = A.WIND_FIXED_OM_AUD_MW_YR / 1e6
+    pv_fixed_om: float = A.PV_FIXED_OM_AUD_MW_YR / 1e6
+    bess_fixed_om: float = A.BESS_FIXED_OM_AUD_MWH_YR / 1e6      # A$m/MWh
+    ancillary_pct: float = A.ANCILLARY_PCT_OF_REVENUE        # % of revenue
 
     # ── Timing (years) ──────────────────────────────────────────────────────
     model_duration: int = 40
@@ -107,43 +109,43 @@ class ProjectFinanceInputs:
     onsw_constr_years: int = 2
     pv_constr_years: int = 1
     bess_constr_years: int = 1
-    operating_life: int = 30
+    operating_life: int = A.PROJECT_LIFE_YRS
 
     # ── Revenue ─────────────────────────────────────────────────────────────
     ppa_tenor: int = 15                # PPA contract length (years)
     ppa_tariff: float = 100.0          # A$/MWh (base, pre-indexation)
     penalty_multiple: float = 1.5      # penalty tariff = multiple × PPA tariff
-    lgc_price: float = 5.0             # A$/MWh green-certificate revenue on excess
+    lgc_price: float = A.LGC_PRICE_AUD_MWH             # A$/MWh green-certificate revenue on excess
 
     # ── Indexation (% p.a.) ─────────────────────────────────────────────────
     # Year 0 of the model is the base year: indexation multipliers are 1.0 at
     # year 0 and compound (1 + rate)^year thereafter. The inputs (tariffs,
     # costs, capture prices) are therefore stated in year-0 dollars, which is
     # what retired the old `indexation_offset_years` input.
-    cost_inflation: float = 0.025
-    ppa_indexation: float = 0.025
+    cost_inflation: float = A.PRICE_ESCALATION_RATE
+    ppa_indexation: float = A.PRICE_ESCALATION_RATE
     solar_price_inflation: float = 0.01
-    nonsolar_price_inflation: float = 0.025
+    nonsolar_price_inflation: float = A.PRICE_ESCALATION_RATE
     # Whether the model escalates merchant capture prices over the project life.
     # Turn OFF when the energy inputs already come from a multi-year simulation that
     # escalated market prices per year, so price growth is not double-counted.
     escalate_merchant_prices: bool = True
 
     # ── Project finance ─────────────────────────────────────────────────────
-    debt_tenor: int = 15
-    debt_rate: float = 0.065
-    dscr_contracted: float = 1.35
-    dscr_uncontracted: float = 2.40
-    max_gearing_contracted: float = 0.80
-    max_gearing_uncontracted: float = 0.50
+    debt_tenor: int = A.DEBT_TENOR_YRS
+    debt_rate: float = A.DEBT_RATE
+    dscr_contracted: float = A.DSCR_CONTRACTED
+    dscr_uncontracted: float = A.DSCR_UNCONTRACTED
+    max_gearing_contracted: float = A.MAX_GEARING_CONTRACTED
+    max_gearing_uncontracted: float = A.MAX_GEARING_UNCONTRACTED
 
     # ── Depreciation & tax ──────────────────────────────────────────────────
-    book_depreciation_rate: float = 0.04
-    tax_depreciation_rate: float = 0.10
-    corp_tax_rate: float = 0.30
+    book_depreciation_rate: float = A.BOOK_DEPRECIATION_RATE
+    tax_depreciation_rate: float = A.TAX_DEPRECIATION_RATE
+    corp_tax_rate: float = A.CORP_TAX_RATE
 
     # Discount rate used for NPV reporting (project WACC)
-    discount_rate: float = 0.08
+    discount_rate: float = A.DISCOUNT_RATE
 
     @property
     def penalty_tariff(self) -> float:
@@ -153,14 +155,29 @@ class ProjectFinanceInputs:
 def project_finance_inputs_from_scenario(scenario) -> "ProjectFinanceInputs":
     """Seed :class:`ProjectFinanceInputs` from a :class:`~ppa.scenario.Scenario`.
 
-    Carries across the overlapping assumptions (costs, PPA terms, life, discount
-    rate, escalation) so the financial tab starts aligned with the run that
-    produced the energy results. Costs convert A$/kW → A$m/MW (and A$/kWh → A$m/MWh)."""
+    Carries across the overlapping assumptions (costs, O&M, PPA terms, life,
+    discount rate, escalation) so the financial tab starts aligned with the run
+    that produced the energy results. Costs convert A$/kW -> A$m/MW (and
+    A$/kWh -> A$m/MWh).
+
+    O&M: `Scenario` only has one scalar `opex_rate` (%-of-capex), not PFI's
+    per-technology absolute figures, so it is converted at the *seeded* build
+    cost (`opex_rate x onsw_build_cost` etc.) -- the same basis the sizing LP
+    actually charged. Without this, a seeded PFI kept its own legacy Aus247RE_FM
+    fixed-O&M defaults regardless of what `opex_rate` the run used, which is the
+    "depends on the code path" bug TASK_financial_assumptions_refactor.md
+    Phase 1 exists to close."""
     s = scenario
+    onsw_build_cost = s.wind_capex_per_kw / 1000.0
+    pv_build_cost = s.pv_capex_per_kw / 1000.0
+    bess_build_cost = s.bess_capex_per_kwh / 1000.0
     return ProjectFinanceInputs(
-        onsw_build_cost=s.wind_capex_per_kw / 1000.0,
-        pv_build_cost=s.pv_capex_per_kw / 1000.0,
-        bess_build_cost=s.bess_capex_per_kwh / 1000.0,
+        onsw_build_cost=onsw_build_cost,
+        pv_build_cost=pv_build_cost,
+        bess_build_cost=bess_build_cost,
+        onsw_fixed_om=s.opex_rate * onsw_build_cost,
+        pv_fixed_om=s.opex_rate * pv_build_cost,
+        bess_fixed_om=s.opex_rate * bess_build_cost,
         operating_life=s.project_life_yrs,
         ppa_tariff=s.ppa_price,
         penalty_multiple=s.pen_mult,

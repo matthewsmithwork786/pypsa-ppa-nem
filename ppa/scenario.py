@@ -4,6 +4,7 @@ import dataclasses
 from dataclasses import dataclass, field
 from typing import Any
 
+from ppa import assumptions as A
 from ppa.industrial_profiles import PROFILE_KEYS
 
 # "nem_map" (NEM plants picked on the map), "nem_default" (NEM prices/DUIDs
@@ -107,7 +108,7 @@ class Scenario:
     # The 5.0 default is inherited from ProjectFinanceInputs, NOT a market
     # quote. Set it from current LGC market data before relying on it; the RET
     # winds down to 2030, so the forward curve matters more than spot here.
-    lgc_price_aud_mwh: float = 5.0
+    lgc_price_aud_mwh: float = A.LGC_PRICE_AUD_MWH
     # Enforce `required_delivery_share` as a HARD constraint in the sizing LP
     # rather than leaving it to the penalty price. Off by default (the penalty/
     # shortfall merit order is the original design), but essential whenever the
@@ -154,7 +155,7 @@ class Scenario:
     # Multi-year simulation
     simulation_years: int = 25
     first_sim_year: int = 2025
-    price_escalation_rate: float = 0.025  # annual escalation applied to base market prices
+    price_escalation_rate: float = A.PRICE_ESCALATION_RATE  # annual escalation applied to base market prices
 
     # Technology degradation (compound per year, applied from year 1 onward)
     pv_degradation_rate: float = 0.005    # 0.5%/yr — industry standard for crystalline Si
@@ -186,20 +187,20 @@ class Scenario:
     # `onsw/pv/bess_connection_cost` in the financial model is correct and does
     # not double-count. Overnight also means interest during construction is
     # excluded, which the financial model applies via its own build schedule.
-    wind_capex_per_kw: float = 3248.0   # A$/kW, GenCost 2025-26 T.B1 "Wind" 2025
-    pv_capex_per_kw: float = 1621.0     # A$/kW, GenCost 2025-26 T.B1 "Large scale solar PV" 2025
-    bess_capex_per_kwh: float = 385.0   # A$/kWh, GenCost 2025-26 T.B5 4-hour total (battery 265 + BOP 120)
-    opex_rate: float = 0.02
-    devex_pct_of_capex: float = 0.10    # development cost as a share of build capex
-    project_life_yrs: int = 30
-    discount_rate: float = 0.08
-    target_irr: float = 0.10
+    wind_capex_per_kw: float = A.WIND_CAPEX_AUD_KW   # A$/kW, GenCost 2025-26 T.B1 "Wind" 2025
+    pv_capex_per_kw: float = A.PV_CAPEX_AUD_KW     # A$/kW, GenCost 2025-26 T.B1 "Large scale solar PV" 2025
+    bess_capex_per_kwh: float = A.BESS_CAPEX_AUD_KWH   # A$/kWh, GenCost 2025-26 T.B5 4-hour total (battery 265 + BOP 120)
+    opex_rate: float = A.OPEX_RATE
+    devex_pct_of_capex: float = A.DEVEX_PCT_OF_CAPEX    # development cost as a share of build capex
+    project_life_yrs: int = A.PROJECT_LIFE_YRS
+    discount_rate: float = A.DISCOUNT_RATE
+    target_irr: float = A.TARGET_IRR
     # Grid-connection capital cost (A$/MW) for the transport links in sizing
     # mode. Matches ProjectFinanceInputs' onsw/pv connection cost (A$0.15M/MW);
     # a strictly positive value pins each extendable link's p_nom_opt to its
     # realised peak flow (no degenerate over-build) and makes connection a
     # genuine part of the sizing trade-off.
-    connection_cost_aud_mw: float = 150_000.0
+    connection_cost_aud_mw: float = A.CONNECTION_COST_AUD_MW
 
     # ── Derived properties ─────────────────────────────────────────────────────
 
