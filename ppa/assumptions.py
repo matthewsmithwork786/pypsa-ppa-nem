@@ -117,9 +117,20 @@ TARGET_IRR: float = 0.10
 
 # ── Debt ─────────────────────────────────────────────────────────────────────────
 # ProjectFinanceInputs-only (no Scenario equivalent — Scenario has no debt model).
-# See docs/financial_assumptions.md Phase 3 for the derivation of DEBT_RATE.
 DEBT_TENOR_YRS: int = 15
-DEBT_RATE: float = 0.065
+# Gohdes (2026) prices a 5-year Facility A (415bp swap + 140bp contracted
+# credit spread = 555bp) that then refinances every 5 years, against a 25-year
+# notional amortisation profile. This repo models a single 15-year tenor with
+# no refinancing, so copying the paper's 555bp directly would understate the
+# cost of a 15-year fixed rate (which legitimately prices above a 5-year one)
+# -- a modelling error, not a correction. DEBT_RATE (5.75%, down from the
+# legacy 6.50%) is instead a blended-over-life proxy approximating the paper's
+# refinancing path: 555bp for years 1-5, then a step-up to Facility B's 563bp
+# (433 + 130bp) for years 6-15, plus an allowance for refinancing fees
+# amortised over the 15-year tenor. This is a judgement call, not an exact
+# recomputation of the paper's schedule -- do not "correct" it back to 5.55%;
+# see docs/financial_assumptions.md Phase 3 for the full reasoning.
+DEBT_RATE: float = 0.0575
 DSCR_CONTRACTED: float = 1.35
 DSCR_UNCONTRACTED: float = 2.40
 MAX_GEARING_CONTRACTED: float = 0.80

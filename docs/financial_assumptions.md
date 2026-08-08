@@ -163,4 +163,39 @@ sizing LP will build a different fleet").
 
 ## Phase 3 — debt rate
 
+`ProjectFinanceInputs.debt_rate` moves from the legacy 6.50% to **5.75%**, a
+blended-over-life proxy for Gohdes (2026)'s refinancing path (555bp 5-year
+Facility A stepping up to 563bp Facility B for years 6-15, plus an allowance
+for refinancing fees) rather than the paper's raw 555bp — copying 555bp
+directly into this repo's single 15-year, no-refinancing debt structure would
+understate the true cost of a 15-year fixed rate. See the derivation comment
+on `ppa.assumptions.DEBT_RATE`. Single value changed; no other assumption
+touched this phase. Full suite green (339 passed, one absolute-value
+assertion updated to 0.0575 by hand).
+
+Sizing LP and unlevered-model figures are unaffected (debt rate only enters
+the levered `ProjectFinanceInputs` model) — reproduced bit-for-bit against
+Phase 2. **Headline LCOE delta: none** (LCOE is a pre-financing capex/opex
+figure; debt pricing does not move it).
+
+| Metric | Unit | Phase 2 | Phase 3 | Δ |
+|---|---|---|---|---|
+| Project IRR | % | 8.41% | 8.40% | -0.01pp |
+| Equity IRR | % | 8.67% | 8.89% | +0.22pp |
+| Gearing | % | 36.63% | 38.70% | +2.07pp |
+| Total debt | A$M | 294.6 | 310.4 | +5.4% |
+| Min DSCR | x | 1.4918 | 1.4918 | unchanged |
+| LCOE | A$/MWh | 131.00 | 131.00 | unchanged |
+
+Cheaper debt raises Equity IRR and supports more gearing at the same DSCR
+target (DSCR is a fixed multiple, unaffected by the rate) — the expected
+direction, not a surprise.
+
+**Optional, out of scope for this pass**: the repo already splits DSCR
+(1.35x / 2.40x) and gearing (80% / 50%) between contracted/uncontracted
+tranches; debt pricing is the one place it does not, while the paper spreads
+140bp vs 200bp. Splitting `debt_rate` into `debt_rate_contracted` /
+`debt_rate_uncontracted` would mirror the existing structure — proposed here,
+not implemented without separate sign-off.
+
 ## Phase 4 — verify against the IASR

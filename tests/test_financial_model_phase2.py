@@ -63,7 +63,10 @@ def test_defaults_match_aud_benchmarks():
     assert p.lgc_price == pytest.approx(5.0)
     assert p.solar_price_inflation == pytest.approx(0.01)
     assert p.debt_tenor == 15
-    assert p.debt_rate == pytest.approx(0.065)
+    # 5.75% blended-over-life proxy for Gohdes (2026)'s refinancing path (was
+    # 6.50%) -- TASK_financial_assumptions_refactor.md Phase 3. Do not "correct"
+    # this to the paper's raw 5.55% 5-year rate; see ppa/assumptions.py.
+    assert p.debt_rate == pytest.approx(0.0575)
     assert p.dscr_contracted == pytest.approx(1.35)
     assert p.dscr_uncontracted == pytest.approx(2.40)
     assert p.max_gearing_contracted == pytest.approx(0.80)
