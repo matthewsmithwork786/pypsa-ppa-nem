@@ -61,7 +61,6 @@ def test_scenario_and_pfi_both_read_the_single_source_module():
     assert s.discount_rate == A.DISCOUNT_RATE
     assert s.project_life_yrs == A.PROJECT_LIFE_YRS
     assert s.target_irr == A.TARGET_IRR
-    assert s.opex_rate == A.OPEX_RATE
     assert s.devex_pct_of_capex == A.DEVEX_PCT_OF_CAPEX
     assert s.connection_cost_aud_mw == A.CONNECTION_COST_AUD_MW
     assert s.wind_capex_per_kw == A.WIND_CAPEX_AUD_KW
@@ -85,7 +84,7 @@ def test_scenario_and_pfi_both_read_the_single_source_module():
     assert p.lgc_price == A.LGC_PRICE_AUD_MWH
 
 
-def test_capex_and_fixed_om_disagreement_is_documented_not_silent():
+def test_capex_disagreement_is_documented_not_silent():
     """Known, flagged disagreement (GenCost vs legacy Aus247RE_FM) -- not a
     regression. If this ever starts failing (the two sides converge), update
     docs/financial_assumptions.md Phase 4 and move the field into
@@ -95,4 +94,17 @@ def test_capex_and_fixed_om_disagreement_is_documented_not_silent():
     assert seeded.onsw_build_cost != bare.onsw_build_cost
     assert seeded.pv_build_cost != bare.pv_build_cost
     assert seeded.bess_build_cost != bare.bess_build_cost
-    assert seeded.onsw_fixed_om != bare.onsw_fixed_om
+
+
+def test_fixed_om_is_scenario_independent_and_already_aligned():
+    """Since Phase 2 (TASK_financial_assumptions_refactor.md), fixed O&M is a
+    per-technology constant in ppa.assumptions, not derived from Scenario at
+    all -- so seeded and bare PFI always agree on it, and Scenario's own LP/
+    unlevered-model cost paths read the *same* constants directly (see
+    ppa/network.py, ppa/financials.py). This is what closes the "which opex
+    applies depends on the code path" bug."""
+    seeded = project_finance_inputs_from_scenario(Scenario())
+    bare = ProjectFinanceInputs()
+    assert seeded.onsw_fixed_om == bare.onsw_fixed_om == A.WIND_FIXED_OM_AUD_MW_YR / 1e6
+    assert seeded.pv_fixed_om == bare.pv_fixed_om == A.PV_FIXED_OM_AUD_MW_YR / 1e6
+    assert seeded.bess_fixed_om == bare.bess_fixed_om == A.BESS_FIXED_OM_AUD_MWH_YR / 1e6

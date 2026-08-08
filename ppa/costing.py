@@ -23,16 +23,24 @@ def annualised_cost_per_mw(
     capex_per_mw: float,
     rate: float,
     life: int,
-    opex_rate: float,
+    fixed_om_per_mw_yr: float,
     devex_pct: float = 0.0,
 ) -> float:
     """Per-year annualised capital + fixed-O&M charge per MW (A$/MW/yr) --
     equally usable per MWh of BESS energy or per MW of connection capacity,
-    since it takes a plain already-converted `capex_per_mw` and multiplies.
+    since it takes plain already-converted `capex_per_mw` / `fixed_om_per_mw_yr`
+    figures and adds them.
 
     `capex_per_mw` must already be in A$/MW: callers convert an A$/kW input
     (×1,000) themselves, since which figure needs converting varies by call
     site (BESS also needs ×`bess_max_hours` to go from A$/kWh to A$/MW).
+
+    `fixed_om_per_mw_yr` is an ABSOLUTE per-year figure (A$/MW/yr), not a rate —
+    since TASK_financial_assumptions_refactor.md Phase 2, fixed O&M is a named
+    per-technology constant in `ppa.assumptions` (e.g. `WIND_FIXED_OM_AUD_MW_YR`),
+    not a `%`-of-capex rate folded into the capital-recovery factor. Passing 0.0
+    (e.g. for a connection asset with no published O&M figure) is a documented
+    modelling choice at the call site, not this function's business.
 
     `rate` is the discount rate used for capital recovery. Pass it in
     explicitly rather than letting this function pick — the sizing LP uses
@@ -43,7 +51,8 @@ def annualised_cost_per_mw(
 
     `devex_pct` defaults to 0.0 (no devex uplift) — correct for connection
     costs, which are never devex'd. Generation/storage capex call sites pass
-    `scenario.devex_pct_of_capex` explicitly.
+    `scenario.devex_pct_of_capex` explicitly. Devex applies to the capital
+    charge only, never to fixed O&M.
 
     This is a *per-year* figure. A caller integrating it over a sizing
     horizon longer than one year (`ppa.network.build_network`'s LP objective
@@ -51,4 +60,4 @@ def annualised_cost_per_mw(
     the same additive basis as revenue terms spanning that same horizon)
     multiplies the result by the horizon in years itself.
     """
-    return capex_per_mw * (1.0 + devex_pct) * (crf(rate, life) + opex_rate)
+    return capex_per_mw * (1.0 + devex_pct) * crf(rate, life) + fixed_om_per_mw_yr

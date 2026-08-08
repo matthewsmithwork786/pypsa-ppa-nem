@@ -155,29 +155,22 @@ class ProjectFinanceInputs:
 def project_finance_inputs_from_scenario(scenario) -> "ProjectFinanceInputs":
     """Seed :class:`ProjectFinanceInputs` from a :class:`~ppa.scenario.Scenario`.
 
-    Carries across the overlapping assumptions (costs, O&M, PPA terms, life,
-    discount rate, escalation) so the financial tab starts aligned with the run
-    that produced the energy results. Costs convert A$/kW -> A$m/MW (and
+    Carries across the overlapping assumptions (costs, PPA terms, life, discount
+    rate, escalation) so the financial tab starts aligned with the run that
+    produced the energy results. Costs convert A$/kW -> A$m/MW (and
     A$/kWh -> A$m/MWh).
 
-    O&M: `Scenario` only has one scalar `opex_rate` (%-of-capex), not PFI's
-    per-technology absolute figures, so it is converted at the *seeded* build
-    cost (`opex_rate x onsw_build_cost` etc.) -- the same basis the sizing LP
-    actually charged. Without this, a seeded PFI kept its own legacy Aus247RE_FM
-    fixed-O&M defaults regardless of what `opex_rate` the run used, which is the
-    "depends on the code path" bug TASK_financial_assumptions_refactor.md
-    Phase 1 exists to close."""
+    O&M is deliberately NOT seeded here: since Phase 2 of
+    TASK_financial_assumptions_refactor.md, both the sizing LP/unlevered model
+    (via ppa.assumptions' WIND/PV/BESS_FIXED_OM constants) and PFI's own
+    per-technology defaults derive from those same constants, so they already
+    agree without per-call conversion -- which is what stops "which opex
+    applies" depending on the code path, the bug this refactor exists to close."""
     s = scenario
-    onsw_build_cost = s.wind_capex_per_kw / 1000.0
-    pv_build_cost = s.pv_capex_per_kw / 1000.0
-    bess_build_cost = s.bess_capex_per_kwh / 1000.0
     return ProjectFinanceInputs(
-        onsw_build_cost=onsw_build_cost,
-        pv_build_cost=pv_build_cost,
-        bess_build_cost=bess_build_cost,
-        onsw_fixed_om=s.opex_rate * onsw_build_cost,
-        pv_fixed_om=s.opex_rate * pv_build_cost,
-        bess_fixed_om=s.opex_rate * bess_build_cost,
+        onsw_build_cost=s.wind_capex_per_kw / 1000.0,
+        pv_build_cost=s.pv_capex_per_kw / 1000.0,
+        bess_build_cost=s.bess_capex_per_kwh / 1000.0,
         operating_life=s.project_life_yrs,
         ppa_tariff=s.ppa_price,
         penalty_multiple=s.pen_mult,

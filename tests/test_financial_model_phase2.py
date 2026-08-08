@@ -41,7 +41,10 @@ def test_defaults_match_aud_benchmarks():
     assert p.onsw_devex == pytest.approx(0.29)
     assert p.pv_devex == pytest.approx(0.17186)
     assert p.bess_devex == pytest.approx(0.02765)
-    assert p.onsw_fixed_om == pytest.approx(0.028)
+    # Wind fixed O&M: Gohdes (2026) AJARE Table 2, A$28,512/MW/yr (was A$28,000
+    # -- 2% of the legacy Aus247RE_FM build cost) -- TASK_financial_assumptions
+    # _refactor.md Phase 2. PV/BESS are unchanged, still-unverified legacy values.
+    assert p.onsw_fixed_om == pytest.approx(0.028512)
     assert p.pv_fixed_om == pytest.approx(0.012)
     assert p.bess_fixed_om == pytest.approx(0.0105)
     assert p.cost_inflation == pytest.approx(0.025)

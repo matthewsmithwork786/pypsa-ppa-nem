@@ -10,6 +10,7 @@ pypsa.options.params.optimize.log_to_console = False
 pypsa.options.params.optimize.include_objective_constant = False
 pypsa.options.api.new_components_api = True
 
+from ppa import assumptions as A
 from ppa.costing import annualised_cost_per_mw
 from ppa.scenario import Scenario
 
@@ -72,7 +73,9 @@ def build_network(
     sizing = s.optimise_capacity
     # Annualized A$/MW/yr (or A$/MW-of-BESS/yr via fixed duration), scaled by the
     # fraction of a year the LP covers so capex and operational costs are summed
-    # over the same horizon. crf annualizes overnight capex; opex_rate adds fixed O&M.
+    # over the same horizon. crf annualizes overnight capex; fixed O&M is an
+    # absolute per-technology add-on (ppa.assumptions), not a %-of-capex rate --
+    # see TASK_financial_assumptions_refactor.md Phase 2.
     horizon_years = total_hours / 8760.0
 
     # In sizing mode the LP sizes to the project's hurdle rate (target_irr) and
@@ -82,22 +85,32 @@ def build_network(
     # inert there.
     crf_rate = s.target_irr if sizing else s.discount_rate
     devex_pct = s.devex_pct_of_capex if sizing else 0.0
+    # Fixed O&M per technology + maintenance capex (Gohdes (2026) Table 2: 0.05%
+    # of capex p.a., on top of the named fixed-O&M figure -- see ppa/assumptions.py).
+    wind_capex_per_mw = s.wind_capex_per_kw * 1_000
+    pv_capex_per_mw = s.pv_capex_per_kw * 1_000
+    bess_capex_per_mw = s.bess_capex_per_kwh * 1_000 * s.bess_max_hours
     wind_cc = annualised_cost_per_mw(
-        s.wind_capex_per_kw * 1_000, crf_rate, s.project_life_yrs, s.opex_rate, devex_pct
+        wind_capex_per_mw, crf_rate, s.project_life_yrs,
+        A.WIND_FIXED_OM_AUD_MW_YR + A.MAINTENANCE_CAPEX_PCT_OF_CAPEX_PA * wind_capex_per_mw, devex_pct,
     ) * horizon_years
     pv_cc = annualised_cost_per_mw(
-        s.pv_capex_per_kw * 1_000, crf_rate, s.project_life_yrs, s.opex_rate, devex_pct
+        pv_capex_per_mw, crf_rate, s.project_life_yrs,
+        A.PV_FIXED_OM_AUD_MW_YR + A.MAINTENANCE_CAPEX_PCT_OF_CAPEX_PA * pv_capex_per_mw, devex_pct,
     ) * horizon_years
     bess_cc = annualised_cost_per_mw(
-        s.bess_capex_per_kwh * 1_000 * s.bess_max_hours, crf_rate, s.project_life_yrs,
-        s.opex_rate, devex_pct,
+        bess_capex_per_mw, crf_rate, s.project_life_yrs,
+        A.BESS_FIXED_OM_AUD_MWH_YR * s.bess_max_hours
+        + A.MAINTENANCE_CAPEX_PCT_OF_CAPEX_PA * bess_capex_per_mw,
+        devex_pct,
     ) * horizon_years
     # Connection capital cost annualised the same way as generation capex
     # (plan W12a): strictly positive, so each extendable transport link's
     # p_nom_opt is pinned to its realised peak flow instead of degenerating.
-    # Never devex'd (devex_pct left at its 0.0 default).
+    # Never devex'd (devex_pct left at its 0.0 default). Fixed O&M is $0 -- see
+    # CONNECTION_FIXED_OM_AUD_MW_YR's docstring in ppa/assumptions.py.
     link_cc = annualised_cost_per_mw(
-        s.connection_cost_aud_mw, crf_rate, s.project_life_yrs, s.opex_rate
+        s.connection_cost_aud_mw, crf_rate, s.project_life_yrs, A.CONNECTION_FIXED_OM_AUD_MW_YR
     ) * horizon_years
     grid_connection_cap = float(s.grid_connection_max_mw) if s.grid_connection_max_mw is not None else float("inf")
     # Generous transport bound so links never constrain optimised builds

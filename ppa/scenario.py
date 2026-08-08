@@ -190,7 +190,6 @@ class Scenario:
     wind_capex_per_kw: float = A.WIND_CAPEX_AUD_KW   # A$/kW, GenCost 2025-26 T.B1 "Wind" 2025
     pv_capex_per_kw: float = A.PV_CAPEX_AUD_KW     # A$/kW, GenCost 2025-26 T.B1 "Large scale solar PV" 2025
     bess_capex_per_kwh: float = A.BESS_CAPEX_AUD_KWH   # A$/kWh, GenCost 2025-26 T.B5 4-hour total (battery 265 + BOP 120)
-    opex_rate: float = A.OPEX_RATE
     devex_pct_of_capex: float = A.DEVEX_PCT_OF_CAPEX    # development cost as a share of build capex
     project_life_yrs: int = A.PROJECT_LIFE_YRS
     discount_rate: float = A.DISCOUNT_RATE

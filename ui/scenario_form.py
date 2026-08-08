@@ -4,6 +4,7 @@ import dataclasses
 
 import streamlit as st
 
+from ppa import assumptions as _assumptions
 from ppa.data_loader import coerce_chosen_day
 from ppa.industrial_profiles import PROFILE_INFO, PROFILE_KEYS
 from ppa.scenario import Scenario
@@ -367,9 +368,17 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         bess_capex_per_kwh = cols[2].number_input("BESS CAPEX ($/kWh)", 100.0, 2000.0,
                                                 float(initial.bess_capex_per_kwh), 25.0,
                                                 key="sf_bess_capex")
-        opex_rate = cols[3].number_input("Annual OPEX (% of CAPEX)", 0.5, 10.0,
-                                       float(initial.opex_rate * 100), 0.1, format="%.1f",
-                                       key="sf_opex_rate") / 100.0
+        with cols[3]:
+            st.caption("Annual fixed O&M")
+            st.caption(
+                f"Wind A${_assumptions.WIND_FIXED_OM_AUD_MW_YR:,.0f}/MW · "
+                f"PV A${_assumptions.PV_FIXED_OM_AUD_MW_YR:,.0f}/MW · "
+                f"BESS A${_assumptions.BESS_FIXED_OM_AUD_MWH_YR:,.0f}/MWh"
+            )
+            st.caption(
+                "Per-technology benchmark, not a scenario input — see "
+                "ppa/assumptions.py."
+            )
         cols = st.columns(4)
         discount_rate = cols[0].number_input("Discount rate / WACC (%)", 1.0, 30.0,
                                            float(initial.discount_rate * 100), 0.5, format="%.1f",
@@ -630,7 +639,6 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         wind_capex_per_kw=float(wind_capex_per_kw),
         pv_capex_per_kw=float(pv_capex_per_kw),
         bess_capex_per_kwh=float(bess_capex_per_kwh),
-        opex_rate=float(opex_rate),
         devex_pct_of_capex=float(devex_pct) / 100.0,
         discount_rate=float(discount_rate),
         target_irr=float(target_irr),

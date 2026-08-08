@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from ppa import assumptions as A
 from ppa.financial_model import _irr, _npv
 from ppa.scenario import Scenario
 from ppa.results import OptimisationResult
@@ -30,7 +31,15 @@ def build_capex(scenario: Scenario) -> CapexBreakdown:
     capex_total = capex_wind + capex_pv + capex_bess
     devex_total = capex_total * s.devex_pct_of_capex
     total_investment = capex_total + devex_total
-    annual_opex = capex_total * s.opex_rate
+    # Per-technology fixed O&M (ppa.assumptions), not a %-of-capex rate --
+    # TASK_financial_assumptions_refactor.md Phase 2 -- plus Gohdes (2026)
+    # Table 2's maintenance capex (0.05% of capex p.a., all technologies).
+    annual_opex = (
+        A.WIND_FIXED_OM_AUD_MW_YR * s.onsw_mw
+        + A.PV_FIXED_OM_AUD_MW_YR * s.pv_mw
+        + A.BESS_FIXED_OM_AUD_MWH_YR * s.effective_bess_mwh
+        + A.MAINTENANCE_CAPEX_PCT_OF_CAPEX_PA * capex_total
+    )
 
     return CapexBreakdown(
         capex_wind=capex_wind,

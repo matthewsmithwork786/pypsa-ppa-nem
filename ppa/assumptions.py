@@ -61,27 +61,37 @@ PFI_WIND_DEVEX_AUD_M_MW: float = 0.29          # = 0.10 x 2.9
 PFI_PV_DEVEX_AUD_M_MW: float = 0.17186         # = 0.10 x 1.7186
 PFI_BESS_DEVEX_AUD_M_MWH: float = 0.02765      # = 0.10 x 0.2765
 
-# ── Opex — Scenario side, retired in Phase 2 ────────────────────────────────────
-# `%`-of-capex opex used by the sizing LP (`ppa.network.build_network`) and the
-# unlevered multi-year model (`ppa.financials.build_capex`). Phase 2 replaces
-# both call sites with the per-technology fixed O&M below; this constant (and
-# `Scenario.opex_rate`) is retired at that point, not before.
-OPEX_RATE: float = 0.02
-
-# ── Fixed O&M — ProjectFinanceInputs side, absolute A$m/MW (A$m/MWh for BESS) p.a. ──
-# Legacy Aus247RE_FM-derived values (2% of the legacy PFI_* build costs above,
-# pre-computed). Phase 1 is a pure refactor and must not move these — Phase 2
-# replaces WIND_FIXED_OM_AUD_MW_YR with Gohdes (2026) Table 2's 28,512 figure;
-# see docs/financial_assumptions.md.
-WIND_FIXED_OM_AUD_MW_YR: float = 28_000.0     # legacy Aus247RE_FM — superseded in Phase 2
+# ── Fixed O&M — absolute A$/MW (A$/MWh for BESS) p.a. ───────────────────────────
+# Used directly by the sizing LP (ppa.network.build_network), the unlevered
+# multi-year model (ppa.financials.build_capex) and ProjectFinanceInputs'
+# per-technology defaults (in A$m, so /1e6 at the point of use) -- one number,
+# three consumers, per TASK_financial_assumptions_refactor.md Phase 2.
+#
+# Wind: Gohdes, N. (2026), AJARE, Table 2 (aligned to the AEMO 2025-26 IASR).
+# Supersedes the legacy Aus247RE_FM-derived 28,000 (2% of Aus247RE's 2,900 A$/kW
+# build cost) that the retired `%`-of-capex opex rate produced on both the
+# Scenario and ProjectFinanceInputs sides before this phase — see
+# docs/financial_assumptions.md Phase 2 for the delta.
+#
+# PV and BESS: the paper is wind-only and gives no figure for either — these
+# retain the legacy Aus247RE_FM values (2% of the legacy PFI_* build costs) and
+# are UNVERIFIED against any published source. Flagged for Phase 4.
+WIND_FIXED_OM_AUD_MW_YR: float = 28_512.0     # Gohdes (2026) Table 2
 PV_FIXED_OM_AUD_MW_YR: float = 12_000.0       # UNVERIFIED — legacy Aus247RE_FM
 BESS_FIXED_OM_AUD_MWH_YR: float = 10_500.0    # UNVERIFIED — legacy Aus247RE_FM
-ANCILLARY_PCT_OF_REVENUE: float = 0.01        # legacy Aus247RE_FM; matches Gohdes (2026) Table 2
-# Additional O&M items from Gohdes (2026) Table 2, not yet modelled anywhere in
-# the repo. Recorded here so Phase 2 has named constants to wire up, and so
-# their absence until then is visible rather than silent.
+ANCILLARY_PCT_OF_REVENUE: float = 0.01        # Gohdes (2026) Table 2
+# Additional O&M items from Gohdes (2026) Table 2. Modelled from Phase 2 onward
+# in the unlevered multi-year model and the sizing LP only (both work in
+# absolute A$ terms already); the levered ProjectFinanceInputs model has no
+# maintenance-capex or variable-O&M line yet -- out of scope for this refactor.
 MAINTENANCE_CAPEX_PCT_OF_CAPEX_PA: float = 0.0005   # 0.05% of capex p.a., Gohdes Table 2
 WIND_VARIABLE_OM_AUD_MWH: float = 0.0               # Gohdes Table 2 (wind: nil)
+# No published O&M figure exists for a bare connection/transport asset (the
+# GenCost/Gohdes sources are generation-technology cost tables). Treated as
+# zero: ongoing network-use-of-system charges are already modelled separately
+# via Scenario.transmission_cost_aud_mwh, so a $0 fixed-O&M assumption here
+# avoids double-counting rather than guessing a number with no source.
+CONNECTION_FIXED_OM_AUD_MW_YR: float = 0.0
 
 # ── Price escalation / indexation ───────────────────────────────────────────────
 # Shared by Scenario.price_escalation_rate (multi-year dispatch/merchant prices)

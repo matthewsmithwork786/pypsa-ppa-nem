@@ -23,6 +23,7 @@ from typing import Callable
 
 import pandas as pd
 
+from ppa import assumptions as A
 from ppa.costing import annualised_cost_per_mw
 from ppa.data.timeseries_utils import build_year_timeseries, pick_weather_year
 from ppa.multi_year import _available_memory_mb, _PER_WORKER_MEM_MB
@@ -439,15 +440,16 @@ def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFr
     # total capital charge over the whole modelled horizon, not a per-year rate.
     crf_rate = scenario.target_irr
     devex_pct = scenario.devex_pct_of_capex
-    opex = scenario.opex_rate
 
     tech_rows = []
-    for label, capex_per_kw, cf_col, mw, binding in [
-        ("Onshore wind", scenario.wind_capex_per_kw, "ts_WindGen", sized.onsw_mw, sized.wind_cap_binding),
-        ("Solar PV", scenario.pv_capex_per_kw, "ts_PVGen", sized.pv_mw, sized.pv_cap_binding),
+    for label, capex_per_kw, fixed_om, cf_col, mw, binding in [
+        ("Onshore wind", scenario.wind_capex_per_kw, A.WIND_FIXED_OM_AUD_MW_YR, "ts_WindGen", sized.onsw_mw, sized.wind_cap_binding),
+        ("Solar PV", scenario.pv_capex_per_kw, A.PV_FIXED_OM_AUD_MW_YR, "ts_PVGen", sized.pv_mw, sized.pv_cap_binding),
     ]:
+        capex_per_mw = capex_per_kw * 1_000
         annualised_per_mw = annualised_cost_per_mw(
-            capex_per_kw * 1_000, crf_rate, scenario.project_life_yrs, opex, devex_pct
+            capex_per_mw, crf_rate, scenario.project_life_yrs,
+            fixed_om + A.MAINTENANCE_CAPEX_PCT_OF_CAPEX_PA * capex_per_mw, devex_pct,
         )
         achieved_cf = float(ts[cf_col].mean()) if cf_col in ts.columns else 0.0
         implied_lcoe = (
@@ -469,9 +471,12 @@ def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFr
     # storage had no row explaining the decision. Storage has no generation CF,
     # so cost is annualised per MW using the fixed duration and CF/LCOE are n/a.
     if scenario.include_bess:
+        bess_capex_per_mw = scenario.bess_capex_per_kwh * 1_000 * scenario.bess_max_hours
         bess_per_mw = annualised_cost_per_mw(
-            scenario.bess_capex_per_kwh * 1_000 * scenario.bess_max_hours,
-            crf_rate, scenario.project_life_yrs, opex, devex_pct,
+            bess_capex_per_mw, crf_rate, scenario.project_life_yrs,
+            A.BESS_FIXED_OM_AUD_MWH_YR * scenario.bess_max_hours
+            + A.MAINTENANCE_CAPEX_PCT_OF_CAPEX_PA * bess_capex_per_mw,
+            devex_pct,
         )
         tech_rows.append(
             {

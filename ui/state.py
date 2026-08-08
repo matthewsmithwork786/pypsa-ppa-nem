@@ -49,7 +49,7 @@ _SCENARIO_FORM_KEYS = [
     "sf_enable_counterfactual", "sf_onsw_mw", "sf_pv_mw", "sf_bess_mw",
     "sf_bess_mwh", "sf_ppaload_mw", "sf_ppa_price", "sf_required_delivery_share",
     "sf_pen_mult", "sf_market_buy_share", "sf_market_spread",
-    "sf_wind_capex", "sf_pv_capex", "sf_bess_capex", "sf_opex_rate",
+    "sf_wind_capex", "sf_pv_capex", "sf_bess_capex",
     "sf_discount_rate", "sf_target_irr", "sf_project_life",
     "sf_cal_forward_price", "sf_cal_hedge_fraction", "sf_chosen_day",
     "sf_lat", "sf_lon",

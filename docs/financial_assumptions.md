@@ -16,8 +16,7 @@ AEMO 2025–26 Inputs, Assumptions and Scenarios Report (IASR).
 ## Baseline (pre-refactor)
 
 Captured on `main` (commit `5629ad4`) before any assumption changes, via a one-off
-script (`scripts/_baseline_phase0.py`, not committed — reproducible from the
-commands below). Test suite: `334 passed` (`MPLCONFIGDIR=$TMPDIR python3 -m pytest
+script (`scripts/financial_assumptions_baseline.py`, committed for reproducibility). Test suite: `334 passed` (`MPLCONFIGDIR=$TMPDIR python3 -m pytest
 -q -p no:cacheprovider`).
 
 ### Sizing LP — default `Scenario()`, `optimise_capacity=True`, tsam (16 typical
@@ -92,9 +91,75 @@ exists only to be diffed against Phase 2/3, not read as a standalone appraisal.)
 
 See `ppa/assumptions.py` and `tests/test_assumptions_single_source.py`. Pure
 refactor: no values changed. Phase 0 numbers above must reproduce bit-for-bit
-(verified by re-running `scripts/_baseline_phase0.py`).
+(verified by re-running `scripts/financial_assumptions_baseline.py`).
 
 ## Phase 2 — retire `%`-of-capex opex
+
+`Scenario.opex_rate` (2% of capex) is retired. The sizing LP
+(`ppa.network.build_network`), the sizing diagnostics table
+(`ppa.sizing.sizing_diagnostics`) and the unlevered multi-year model
+(`ppa.financials.build_capex`) now all charge absolute per-technology fixed O&M
+from `ppa.assumptions` (`WIND/PV/BESS_FIXED_OM_AUD_MW(H)_YR`), plus Gohdes
+(2026) Table 2's maintenance capex (0.05% of capex p.a., all technologies).
+Wind variable O&M is nil per the same table (no code change needed). The
+levered `ProjectFinanceInputs.onsw_fixed_om` default moves from 0.028 (legacy,
+28,000 A$/MW/yr) to 0.028512 (28,512 A$/MW/yr, Gohdes Table 2); PV and BESS
+fixed O&M are unchanged (still `# UNVERIFIED`, flagged for Phase 4). The
+connection asset gets $0 fixed O&M — no published figure exists for it, and
+network-use-of-system charges are already modelled separately via
+`Scenario.transmission_cost_aud_mwh` (see `CONNECTION_FIXED_OM_AUD_MW_YR`'s
+docstring in `ppa/assumptions.py`).
+
+Acceptance: `opex_rate` appears nowhere in `ppa/`, `ui/` or `scripts/`
+(verified by `grep -rn opex_rate ppa/ ui/ scripts/`). Full suite green (339
+passed).
+
+**Headline LCOE delta**: unlevered multi-year LCOE (same sized-fleet pipeline
+as the Phase 0 baseline, real NEM data, 1-year dispatch) moves from
+**A$140.28/MWh to A$130.63/MWh** (-6.9%) — annual opex fell from A$12.572m to
+A$6.652m because the sized fleet's actual fixed-O&M-plus-maintenance charge is
+materially below the old flat 2%-of-capex assumption, on top of a larger sized
+fleet (opex is now cheaper per MW, so the LP also builds more of it). Levered
+model LCOE (default `ProjectFinanceInputs()`, same fixed `EnergyInputs`
+baseline snapshot) moves from A$128.55/MWh to **A$131.00/MWh** (+1.9%) — this
+one *rises* because wind fixed O&M rose (28,000 → 28,512 A$/MW/yr) while PV/
+BESS were untouched, and the levered model's `EnergyInputs` are fixed rather
+than re-sized, so it only sees the small per-MW increase, not any offsetting
+fleet-size effect.
+
+**Sizing LP (real data)**
+
+| Metric | Unit | Phase 0 | Phase 2 | Δ |
+|---|---|---|---|---|
+| Wind | MW | 122.99 | 137.37 | +11.7% |
+| Solar PV | MW | 129.82 | 135.29 | +4.2% |
+| BESS | MW / MWh | 12.16 / 48.65 | 18.21 / 72.83 | +49.7% / +49.7% |
+
+**Unlevered (1-yr dispatch)**
+
+| Metric | Unit | Phase 0 | Phase 2 | Δ |
+|---|---|---|---|---|
+| NPV | A$M | -436.13 | -341.09 | +95.0 |
+| IRR | % | -0.10% | 2.71% | +2.81pp |
+| LCOE | A$/MWh | 140.28 | 130.63 | -6.9% |
+| Annual opex | A$M | 12.572 | 6.652 | -47.1% |
+
+**Levered (default PFI, fixed EnergyInputs)**
+
+| Metric | Unit | Phase 0 | Phase 2 | Δ |
+|---|---|---|---|---|
+| Project IRR | % | 8.01% | 8.41% | +0.40pp |
+| Equity IRR | % | 8.14% | 8.67% | +0.53pp |
+| Gearing | % | 31.88% | 36.63% | +4.75pp |
+| Min DSCR | x | 1.4875 | 1.4918 | +0.0043 |
+| LCOE | A$/MWh | 128.55 | 131.00 | +1.9% |
+
+The sizing LP builds materially more of everything (wind/PV +4-12%, BESS
++50%) because cheaper opex makes every technology's annualised A$/MW/yr cost
+lower, so the LP's economics clear at a larger fleet against the same PPA
+delivery target — an expected, not surprising, direction per the task's own
+prediction ("Wind opex falls by roughly 56%[for the LP/unlevered side]...
+sizing LP will build a different fleet").
 
 ## Phase 3 — debt rate
 

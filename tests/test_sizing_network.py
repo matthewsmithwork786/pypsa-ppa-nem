@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from ppa import assumptions as A
 from ppa.network import build_network
 from ppa.scenario import Scenario
 from ppa.sizing import apply_sizing, optimise_capacities
@@ -141,23 +142,22 @@ def test_generator_capital_cost_includes_devex_and_target_irr():
         life = scn.project_life_yrs
         return rate / (1 - (1 + rate) ** -life)
 
+    # Fixed O&M is an absolute per-technology add-on (ppa.assumptions), not a
+    # %-of-capex rate folded into crf -- TASK_financial_assumptions_refactor.md
+    # Phase 2 -- plus Gohdes (2026) Table 2's maintenance capex (0.05% p.a.).
+    wind_capex_per_mw = scn.wind_capex_per_kw * 1000
+    pv_capex_per_mw = scn.pv_capex_per_kw * 1000
     expected_wind = (
-        scn.wind_capex_per_kw
-        * 1000
-        * (1 + scn.devex_pct_of_capex)
-        * (crf(scn.target_irr) + scn.opex_rate)
-        * horizon_years
-    )
+        wind_capex_per_mw * (1 + scn.devex_pct_of_capex) * crf(scn.target_irr)
+        + A.WIND_FIXED_OM_AUD_MW_YR + A.MAINTENANCE_CAPEX_PCT_OF_CAPEX_PA * wind_capex_per_mw
+    ) * horizon_years
     actual_wind = float(n.generators.static.capital_cost["Gen_OnshoreWind"])
     assert actual_wind == pytest.approx(expected_wind, rel=1e-6)
 
     expected_pv = (
-        scn.pv_capex_per_kw
-        * 1000
-        * (1 + scn.devex_pct_of_capex)
-        * (crf(scn.target_irr) + scn.opex_rate)
-        * horizon_years
-    )
+        pv_capex_per_mw * (1 + scn.devex_pct_of_capex) * crf(scn.target_irr)
+        + A.PV_FIXED_OM_AUD_MW_YR + A.MAINTENANCE_CAPEX_PCT_OF_CAPEX_PA * pv_capex_per_mw
+    ) * horizon_years
     actual_pv = float(n.generators.static.capital_cost["Gen_PV"])
     assert actual_pv == pytest.approx(expected_pv, rel=1e-6)
 

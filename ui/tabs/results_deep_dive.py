@@ -256,7 +256,7 @@ def _render_multi_year_deep_dive() -> None:
                     ("Devex", _fmt_m(fin.capex.devex_total), f"{s.devex_pct_of_capex:.0%} of CAPEX"),
                     ("Total CAPEX", _fmt_m(fin.capex.capex_total), ""),
                     ("Total investment", _fmt_m(fin.capex.total_investment), ""),
-                    ("Annual OPEX", _fmt_m(fin.annual_opex), f"{s.opex_rate:.0%} of CAPEX"),
+                    ("Annual OPEX", _fmt_m(fin.annual_opex), "per-technology fixed O&M + maintenance capex"),
                 ],
                 columns=["Component", "Value", "Basis"],
             )
