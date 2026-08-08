@@ -73,11 +73,16 @@ PFI_BESS_DEVEX_AUD_M_MWH: float = 0.02765      # = 0.10 x 0.2765
 # Scenario and ProjectFinanceInputs sides before this phase — see
 # docs/financial_assumptions.md Phase 2 for the delta.
 #
-# PV and BESS: the paper is wind-only and gives no figure for either — these
-# retain the legacy Aus247RE_FM values (2% of the legacy PFI_* build costs) and
-# are UNVERIFIED against any published source. Flagged for Phase 4.
+# PV: confirmed against GenCost 2025-26 Table B.9 ($12.0/kW/yr = $12,000/MW/yr,
+# an exact match) in Phase 4 -- coincidentally the same value the legacy
+# Aus247RE_FM figure already carried. Wind: GenCost's own Table B.9 gives
+# $29,000/MW/yr, within 1.7% of the Gohdes figure above -- corroborating, not
+# contradicting, Phase 2's choice. BESS: the paper is wind-only and GenCost's
+# LCOE table has no battery row (no capacity-factor/fuel-cost concept applies)
+# -- retains the legacy Aus247RE_FM value and is still UNVERIFIED against any
+# published source. See docs/financial_assumptions.md Phase 4.
 WIND_FIXED_OM_AUD_MW_YR: float = 28_512.0     # Gohdes (2026) Table 2
-PV_FIXED_OM_AUD_MW_YR: float = 12_000.0       # UNVERIFIED — legacy Aus247RE_FM
+PV_FIXED_OM_AUD_MW_YR: float = 12_000.0       # confirmed: GenCost 2025-26 Table B.9
 BESS_FIXED_OM_AUD_MWH_YR: float = 10_500.0    # UNVERIFIED — legacy Aus247RE_FM
 ANCILLARY_PCT_OF_REVENUE: float = 0.01        # Gohdes (2026) Table 2
 # Additional O&M items from Gohdes (2026) Table 2. Modelled from Phase 2 onward

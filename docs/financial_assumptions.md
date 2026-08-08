@@ -199,3 +199,84 @@ tranches; debt pricing is the one place it does not, while the paper spreads
 not implemented without separate sign-off.
 
 ## Phase 4 — verify against the IASR
+
+Sources fetched and searched directly (not from memory):
+
+1. AEMO, *2025 Inputs, Assumptions and Scenarios Report* (August 2025) — the
+   document that feeds the 2026 ISP and is referred to throughout this
+   repo/task as "the 2025-26 IASR" — `aemo.com.au/.../2025-inputs-assumptions-
+   and-scenarios-report.pdf` (235 pages, text-extracted and grepped in full).
+2. CSIRO/GHD, *GenCost 2025-26 consultation draft* (Dec 2025) —
+   `csiro.au/-/media/Energy/GenCost-2025-26-Draft/GenCost_2025-26_
+   consultation-draft_accessible-report.txt` — the actual primary source this
+   repo cites for its capex figures ("GenCost 2025-26 Final Report"; the draft
+   is the closest publicly available edition, the Final not yet published at
+   time of writing).
+
+The IASR's own capital-cost trajectories are in turn sourced from **GenCost
+2024-25 Final Report** ("AEMO's generator and storage capital cost
+trajectories are informed by the GenCost publication series", IASR p.144) — one
+edition behind what this repo cites. Per-technology dollar tables not covered
+by GenCost (MLF, per-project auxiliary load) live in AEMO's companion *Input
+and Assumptions Workbook* (.xlsx) and *Marginal Loss Factors Report*, neither
+of which was reachable this session (the IASR *consultation page* hosting
+those links 403s on both `curl` and fetch, unlike the final-docs PDF itself).
+
+**Capex — confirmed exact**, straight from GenCost 2025-26's own tables (Apx
+Table B.1, "Current policies" scenario, 2025 column; Apx Table B.5, "Battery
+storage (4 hrs)", "Current policies", 2025):
+
+| Technology | Repo (`ppa/assumptions.py`) | GenCost 2025-26, 2025, Current policies | Agreement |
+|---|---|---|---|
+| Wind capex | A$3,248/kW | **A$3,248/kW** | **Exact match.** |
+| Large-scale solar PV capex | A$1,621/kW | **A$1,621/kW** | **Exact match.** |
+| BESS capex (4 hr, total) | A$385/kWh (265 battery + 120 BOP) | **A$385/kWh (265 + 120)** | **Exact match.** |
+
+**Fixed O&M — GenCost's own LCOE-assumptions table (Apx Table B.9)**, not
+previously checked against a primary source at all:
+
+| Technology | Repo | GenCost 2025-26 Table B.9 | Agreement |
+|---|---|---|---|
+| PV fixed O&M | A$12,000/MW/yr | **A$12.0/kW/yr = A$12,000/MW/yr** | **Exact match** — the `# UNVERIFIED` flag on `PV_FIXED_OM_AUD_MW_YR` can be lifted. |
+| Wind fixed O&M | A$28,512/MW/yr (Gohdes 2026 Table 2, adopted in Phase 2) | A$29.0/kW/yr = A$29,000/MW/yr | **Close, not identical** (1.7% apart) — two independent sources (Gohdes and GenCost) landing within 2% of each other is corroborating evidence for the Phase-2 figure, not a reason to change it; kept as-is. |
+| BESS fixed O&M | A$10,500/MWh/yr | Not published in Table B.9 (battery storage has no LCOE row — no capacity factor/fuel cost concept applies) | **Still unverified** — GenCost simply does not carry this figure in the table checked; a different GenCost table or the Input and Assumptions Workbook may, but neither was found this session. |
+
+**New finding — economic life, not previously modelled as technology-specific**:
+GenCost's own Table B.9 gives **wind onshore economic life = 25 years**, distinct
+from **large-scale solar PV = 30 years**. This repo's `PROJECT_LIFE_YRS = 30`
+applies uniformly to both technologies (and to `ProjectFinanceInputs.
+operating_life`) — separately, the IASR states "the technical life assumed for
+new wind and solar projects is 30 years" (p.155), so AEMO itself carries two
+different life figures for wind depending on purpose: 25 years for GenCost's
+LCOE annuitisation, 30 years for ISP retirement/technical-life modelling. This
+repo's single flat `PROJECT_LIFE_YRS` cannot represent both purposes or a
+wind/solar split at once — recorded as a real, sourced finding and a candidate
+for a future per-technology project-life split, **not implemented in this
+pass** (changing it would move Phase 0's baseline and needs its own
+before/after measurement, per AGENTS.md §5.1).
+
+**WACC / discount rate** (IASR Table 30, "Step Change" scenario, pre-tax real):
+onshore wind 7.5%, large-scale solar PV 7.0%, battery storage (any duration)
+8.0%; system-wide ISP discount rate (for CBA NPV, distinct from per-technology
+WACC) 7.0% (Oxford Economics Australia recommendation, IASR p.158). This
+repo's flat `DISCOUNT_RATE = 0.08` for both `Scenario` and `ProjectFinanceInputs`,
+applied uniformly across technologies, sits within 0.5–1.0pp of every
+IASR figure and matches none exactly. A technology-differentiated WACC would
+be a real modelling improvement but is out of scope for this refactor —
+recorded as a follow-up.
+
+**Items confirmed as genuinely unavailable from AEMO, not merely unsearched**:
+
+| Item | Repo | Finding |
+|---|---|---|
+| Auxiliary load | Unmodelled | AEMO derives it **per-plant from participant survey data** (IASR p.54), not a published system-wide percentage — the paper's 3.0% is its own wind-fleet assumption, not an AEMO input. Left unmodelled rather than inventing a number neither source states. |
+| MLF | Unmodelled (folded into `sizing_merchant_value_share`'s 0.5 haircut) | Region/connection-point-specific, published per financial year in AEMO's separate *Marginal Loss Factors Report*, not a single flat value. Gohdes' 1.00 is his own simplification. Do not model MLF explicitly without correspondingly reducing the merchant-value haircut (see that field's docstring on the double-count risk). |
+| Tax depreciation | `tax_depreciation_rate = 0.10`, no stated source | **Not an AEMO/IASR input at all** — statutory tax depreciation is an ATO effective-life determination, outside AEMO's remit. Whether to adopt the paper's 30-year straight-line (~3.33%/yr) figure is a modelling decision for a future pass with an ATO reference in hand, not something checkable against the IASR. |
+| Gearing (contracted/uncontracted) | 80% / 50% | **Not an AEMO/IASR input** — AEMO sets technology WACCs, not project gearing ratios. The repo's fixed DSCR (1.35x/2.40x) versus the paper's *dynamic* DSCR solve against PoE99 CFADS is why the repo cannot reproduce Gohdes' 72.1%/71.7%/68.3% gearing outputs — a modelling-approach difference, not a lookup. A dynamic DSCR solve is separate follow-up work. |
+| Lock-up ratio | Unmodelled | Not an AEMO input (a project-finance covenant). Gohdes: 1.10x CFADS. Scope a follow-up issue, per the task's own instruction not to implement it here. |
+
+**No code or assumption *value* changed in this phase** (the wind-vs-PV
+economic-life split and the technology-differentiated WACC are real findings
+but deliberately not implemented here — either would move the Phase 0
+baseline and needs its own measured phase). Full suite green (339 passed,
+unchanged from Phase 3).
