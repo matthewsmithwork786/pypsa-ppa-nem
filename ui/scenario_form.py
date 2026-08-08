@@ -370,10 +370,14 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                                                 key="sf_bess_capex")
         with cols[3]:
             st.caption("Annual fixed O&M")
+            # st.caption parses markdown; three unescaped "$" signs in one
+            # string get parsed as LaTeX math spans (an odd count still
+            # corrupts the render) -- escape every one, as elsewhere in this
+            # repo (e.g. the LaTeX-currency fix already applied to charts/axes).
             st.caption(
-                f"Wind A${_assumptions.WIND_FIXED_OM_AUD_MW_YR:,.0f}/MW · "
-                f"PV A${_assumptions.PV_FIXED_OM_AUD_MW_YR:,.0f}/MW · "
-                f"BESS A${_assumptions.BESS_FIXED_OM_AUD_MWH_YR:,.0f}/MWh"
+                rf"Wind A\${_assumptions.WIND_FIXED_OM_AUD_MW_YR:,.0f}/MW · "
+                rf"PV A\${_assumptions.PV_FIXED_OM_AUD_MW_YR:,.0f}/MW · "
+                rf"BESS A\${_assumptions.BESS_FIXED_OM_AUD_MWH_YR:,.0f}/MWh"
             )
             st.caption(
                 "Per-technology benchmark, not a scenario input — see "
