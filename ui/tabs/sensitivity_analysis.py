@@ -200,7 +200,11 @@ def _tornado_panel(
             )
 
         if zero_rows:
-            names = ", ".join(r.param for r in zero_rows)
+            # st.caption parses markdown; several parameter labels carry their
+            # own "$" (e.g. "Solar fixed O&M (A$m/MW)") and joining more than
+            # one into a single caption pairs them into a LaTeX math span that
+            # silently drops the "$" -- escape every one before joining.
+            names = ", ".join(r.param.replace("$", r"\$") for r in zero_rows)
             st.caption(
                 f"**{len(zero_rows)} parameter(s) hidden** (as of negligible effect on "
                 f"{METRIC_OPTIONS[metric_key]} in this scenario): {names}."
