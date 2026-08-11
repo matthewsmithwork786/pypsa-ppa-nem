@@ -9,7 +9,7 @@ import streamlit as st
 def render_config_summary(s, expanded: bool = False) -> None:
     """Render the fleet MW (incl. load & links) and plant names actually used."""
     with st.expander("⚙️ Configuration used", expanded=expanded):
-        cols = st.columns(3)
+        cols = st.columns(4)
         with cols[0]:
             st.markdown("**Portfolio (MW)**")
             rows = [
@@ -41,3 +41,18 @@ def render_config_summary(s, expanded: bool = False) -> None:
                 st.markdown(f"- Price region: **{s.nem_price_region}**, year **{s.nem_year}**")
             else:
                 st.markdown(f"- Data source: **{s.data_source}**")
+        with cols[3]:
+            st.markdown("**Simulation & SLA**")
+            years = ", ".join(str(y) for y in (getattr(s, "nem_years", ()) or ()))
+            if years:
+                st.markdown(f"- NEM data years: **{years}**")
+            st.markdown(f"- Resolution: **{getattr(s, 'nem_resolution_minutes', 60)} min**")
+            if getattr(s, "optimise_capacity", False):
+                st.markdown(f"- Sizing year: **{getattr(s, 'capacity_sizing_year', '—')}**")
+            st.markdown(f"- Annual delivery: **{s.required_delivery_share:.0%}**")
+            if getattr(s, "sla_monthly_enabled", False):
+                st.markdown(f"- Monthly minimum: **{getattr(s, 'sla_monthly_share', 0.0):.0%}**")
+            if getattr(s, "sla_daily_enabled", False):
+                st.markdown(f"- Daily minimum: **{getattr(s, 'sla_daily_share', 0.0):.0%}**")
+            if not (getattr(s, "sla_monthly_enabled", False) or getattr(s, "sla_daily_enabled", False)):
+                st.markdown("- Tiered SLA: *none*")

@@ -173,9 +173,9 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 "Max BESS build (MW)", 0.0, 10_000.0, float(initial.max_build_bess_mw),
                 50.0, key="sf_max_build_bess",
             )
-            # `enforce_min_delivery` is set below, in "PPA contract terms" right
-            # after `required_delivery_share` — its label quotes that value, so
-            # it needs to be seen and set together with it.
+            # `enforce_min_delivery` is set below, in the "Service level agreement
+            # (SLA)" expander right after `required_delivery_share` — its label
+            # quotes that value, so it needs to be seen and set together with it.
             with st.expander("⚙️ Advanced sizing settings", expanded=False):
               _method_labels = {
                   "full_hourly": "Full year hourly",
@@ -291,44 +291,17 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             )
 
     with st.expander("PPA contract terms", expanded=True):
-        cols = st.columns(4)
+        cols = st.columns(3)
         ppaload_mw = cols[0].number_input("PPA offtake load (MW)", min_value=1.0, max_value=PPALOAD_MW_MAX,
                                            value=float(initial.ppaload_mw), step=10.0, key="sf_ppaload_mw",
                                            help="Peak rated MW. The load profile shapes how much of this is demanded each hour.")
         ppa_price = cols[1].number_input("PPA tariff (A$/MWh)", min_value=1.0, max_value=500.0,
                                           value=float(initial.ppa_price), step=5.0, key="sf_ppa_price")
-        required_delivery_share = cols[2].slider(
-            "Required delivery share (%)", 50, 100, int(initial.required_delivery_share * 100),
-            step=1, format="%d%%",
-            help="Fraction of total contracted load that must be delivered on average.",
-            key="sf_required_delivery_share",
-        ) / 100.0
-        pen_mult = cols[3].number_input(
+        pen_mult = cols[2].number_input(
             "Penalty multiplier (×tariff)", min_value=1.0, max_value=5.0,
             value=float(initial.pen_mult), step=0.1,
             key="sf_pen_mult",
         )
-
-        if optimise_capacity:
-            enforce_min_delivery = st.checkbox(
-                f"Enforce the {required_delivery_share:.0%} delivery share as a "
-                "hard constraint",
-                value=bool(initial.enforce_min_delivery),
-                key="sf_enforce_min_delivery",
-                help=(
-                    "By default the delivery requirement is only a *price* signal: the "
-                    "sizing LP weighs the penalty (PPA price x penalty multiplier) "
-                    "against the cost of building, and buys its way out of the SLA "
-                    "whenever the penalty is cheaper. At current NEM costs it usually "
-                    "is — penalty A$126/MWh against a wind LCOE near A$162/MWh — so "
-                    "sized portfolios settle around 50-65% delivery. Tick this to make "
-                    "the contractual share binding, so the LP must build enough to meet "
-                    "it. If no portfolio within the build caps can, the LP reports "
-                    "infeasible and says which limit is blocking."
-                ),
-            )
-        else:
-            enforce_min_delivery = bool(initial.enforce_min_delivery)
 
         # ── Load profile selector ─────────────────────────────────────────────
         st.markdown("**Offtaker load profile**")
@@ -446,6 +419,101 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             "BESS (%/yr)", 0.0, 10.0, float(initial.bess_degradation_rate * 100),
             0.1, format="%.1f", key="sf_bess_deg",
         ) / 100.0
+
+    with st.expander("Service level agreement (SLA)", expanded=True):
+        st.caption(
+            "The annual obligation is always active. Monthly and daily obligations are "
+            "optional and stack on top: each limits the free shortfall allowance within "
+            "that period, so a good year cannot pay for a bad month."
+        )
+
+        cols = st.columns(3)
+        required_delivery_share = cols[0].slider(
+            "Annual delivery share (%)", 50, 100, int(initial.required_delivery_share * 100),
+            step=1, format="%d%%", key="sf_required_delivery_share",
+            help="Share of total annual contracted load that must be delivered.",
+        ) / 100.0
+
+        sla_monthly_enabled = cols[1].toggle(
+            "Monthly minimum", value=bool(initial.sla_monthly_enabled),
+            key="sf_sla_monthly_enabled",
+        )
+        if sla_monthly_enabled:
+            sla_monthly_share = cols[1].slider(
+                "Monthly delivery share (%)", 0, 100,
+                int((initial.sla_monthly_share or initial.required_delivery_share) * 100),
+                step=1, format="%d%%", key="sf_sla_monthly_share",
+            ) / 100.0
+        else:
+            sla_monthly_share = float(initial.sla_monthly_share)
+
+        sla_daily_enabled = cols[2].toggle(
+            "Daily minimum", value=bool(initial.sla_daily_enabled),
+            key="sf_sla_daily_enabled",
+        )
+        if sla_daily_enabled:
+            sla_daily_share = cols[2].slider(
+                "Daily delivery share (%)", 0, 100,
+                int((initial.sla_daily_share or initial.required_delivery_share) * 100),
+                step=1, format="%d%%", key="sf_sla_daily_share",
+            ) / 100.0
+        else:
+            sla_daily_share = float(initial.sla_daily_share)
+
+        if sla_monthly_enabled and sla_monthly_share < required_delivery_share:
+            st.warning(
+                f"A {sla_monthly_share:.0%} monthly minimum is looser than the "
+                f"{required_delivery_share:.0%} annual obligation, so it will never "
+                "bind. Raise it above the annual share for it to have any effect."
+            )
+        if sla_daily_enabled and sla_daily_share < required_delivery_share:
+            st.warning(
+                f"A {sla_daily_share:.0%} daily minimum is looser than the "
+                f"{required_delivery_share:.0%} annual obligation, so it will never "
+                "bind. Raise it above the annual share for it to have any effect."
+            )
+        if sla_daily_enabled and sla_daily_share >= 0.90:
+            st.warning(
+                "Daily obligations above ~90% are frequently infeasible: a single "
+                "low-resource day cannot be covered by a portfolio of any size "
+                "without storage or market purchases."
+            )
+
+        if optimise_capacity:
+            enforce_min_delivery = st.checkbox(
+                f"Force the optimised capacity to meet the {required_delivery_share:.0%} "
+                "annual share (hard constraint)",
+                value=bool(initial.enforce_min_delivery), key="sf_enforce_min_delivery",
+                help=(
+                    "By default the delivery requirement is only a *price* signal: the "
+                    "sizing LP weighs the penalty (PPA price x penalty multiplier) "
+                    "against the cost of building, and buys its way out of the SLA "
+                    "whenever the penalty is cheaper. At current NEM costs it usually "
+                    "is — penalty A$126/MWh against a wind LCOE near A$162/MWh — so "
+                    "sized portfolios settle around 50-65% delivery. Tick this to make "
+                    "the contractual share binding, so the LP must build enough to meet "
+                    "it. If no portfolio within the build caps can, the LP reports "
+                    "infeasible and says which limit is blocking."
+                ),
+            )
+        else:
+            enforce_min_delivery = bool(initial.enforce_min_delivery)
+
+        if optimise_capacity and sla_monthly_enabled and sizing_method == "tsam":
+            st.warning(
+                "A monthly SLA cannot be enforced with the 'Typical weeks (tsam)' sizing "
+                "representation: clustering replaces the calendar with representative "
+                "weeks, so calendar months no longer exist in the sizing LP. Switch the "
+                "sizing representation to 'Full year hourly', or turn the monthly SLA off."
+            )
+
+        _res_min = int(getattr(initial, "nem_resolution_minutes", 60))
+        if _res_min < 30 and simulation_years > 2:
+            st.warning(
+                f"{_res_min}-minute resolution over {simulation_years} years builds an "
+                f"LP roughly {60 // _res_min}x the hourly size and will exhaust memory. "
+                "Reduce the simulation years to 2 or fewer, or use 30- or 60-minute resolution."
+            )
 
     with st.expander("Market data source", expanded=False):
         from ppa.data import nem_data
@@ -635,6 +703,10 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         sizing_merchant_value_share=float(merchant_share),
         connection_cost_aud_mw=float(connection_cost_aud_mw),
         enforce_min_delivery=bool(enforce_min_delivery),
+        sla_monthly_enabled=bool(sla_monthly_enabled),
+        sla_monthly_share=float(sla_monthly_share),
+        sla_daily_enabled=bool(sla_daily_enabled),
+        sla_daily_share=float(sla_daily_share),
         include_bess=include_bess,
         enable_market_buy=enable_market_buy,
         enable_market_sell=enable_market_sell,
