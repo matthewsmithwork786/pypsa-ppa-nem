@@ -8,6 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from ppa.financial_model import SOLAR_HOUR_END, SOLAR_HOUR_START
 from ppa.scenario import BASE_SCENARIO
 from ui import state
 from ui.charts import year_axis
@@ -425,42 +426,42 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
 # ── multi-year results display ────────────────────────────────────────────────
 
 def _render_results(fin, n_years: int) -> None:
-    render_config_summary(state.get_effective_scenario())
+    s = state.get_effective_scenario()
+    render_config_summary(s)
     with st.expander("Optimisation results", expanded=True):
         avg_delivery = sum(y.fulfilled_share for y in fin.yearly) / len(fin.yearly) if fin.yearly else 0.0
         cols = st.columns(6)
-        irr_str = f"{fin.irr:.1%}" if fin.irr == fin.irr else "N/A"
-        lcoe_str = f"A${fin.lcoe:.1f}/MWh" if fin.lcoe == fin.lcoe else "N/A"
-        payback_str = f"{fin.simple_payback:.1f} yrs" if fin.simple_payback < 1e8 else "N/A"
-        cols[0].metric("NPV", f"A${fin.npv/1e6:.1f}M")
-        cols[1].metric("Project IRR", irr_str)
-        cols[2].metric("LCOE", lcoe_str)
-        cols[3].metric("Simple Payback", payback_str)
-        cols[4].metric("Lifetime Net Revenue", f"A${fin.total_lifetime_revenue/1e6:.1f}M")
-        cols[5].metric(
+        cols[0].metric("Peak demand", f"{s.ppaload_mw:,.0f} MW")
+        cols[1].metric(
             "Achieved PPA delivery (avg)", f"{avg_delivery:.1%}",
             help="Average share of contracted PPA load actually delivered "
                  "from renewables/storage + market purchase, across all simulated years.",
         )
-        if fin.breakeven_ppa_price == fin.breakeven_ppa_price:  # not NaN
-            s = state.get_scenario()
-            # Escape every "$" -- two unescaped dollar signs in one markdown
-            # string are parsed by Streamlit as a LaTeX math span, swallowing
-            # everything (including ** bold markers) in between.
-            st.caption(
-                rf"Breakeven PPA price for a **{s.target_irr:.0%} target IRR**: "
-                rf"**A\${fin.breakeven_ppa_price:.1f}/MWh** (vs A\${s.ppa_price:.0f}/MWh "
-                "contracted; holds delivered volumes fixed at the simulated dispatch, unlevered project IRR basis)."
+        cols[2].metric(
+            "PPA price", f"A${s.ppa_price:,.0f}/MWh",
+            help=f"Required delivery share: {s.required_delivery_share:.0%}.",
+        )
+        cols[3].metric(
+            "Merchant sell share", f"{s.sizing_merchant_value_share:.0%}",
+            help="Share of merchant revenue credited to the sizing LP.",
+        )
+        cols[4].metric("BESS", f"{s.bess_mw:,.0f} MW / {s.bess_mwh:,.0f} MWh")
+        if fin.yearly:
+            y0 = fin.yearly[0]
+            cols[5].metric(
+                "First-year PPA revenue", f"A${y0.ppa_revenue/1e6:.1f}M",
+                help=f"Year {y0.year}: PPA revenue from delivered volumes at the contracted price.",
             )
+        else:
+            cols[5].metric("First-year PPA revenue", "—")
+
+        results = state.get_multi_year_results() or []
+        if results:
+            _render_first_year_energy_tables(results[0], s)
+        else:
+            st.info("Energy volume tables need the per-year results; re-run the optimisation.")
 
         if n_years == 1:
-            y = fin.yearly[0]
-            st.caption(
-                rf"Year {y.year} — PPA revenue A\${y.ppa_revenue/1e6:.2f}M | "
-                rf"Merchant A\${y.merch_revenue/1e6:.2f}M | "
-                rf"Delivery {y.fulfilled_share:.1%} | "
-                rf"Net CF A\${y.net_cashflow/1e6:.2f}M"
-            )
             return
 
     # st.markdown("---")
@@ -470,41 +471,76 @@ def _render_results(fin, n_years: int) -> None:
             "| Year-by-Year Table"
         ])
         with tab_charts:
-            tab_chart1, tab_chart2, tab_chart3 = st.tabs([
-                "| Cumulative NPV", 
-                "| Annual Revenue Breakdown", 
+            tab_chart1, tab_chart2 = st.tabs([
+                "| Annual Revenue & Merchant Prices", 
                 "| PPA Delivery Rate"
             ])
             with tab_chart1:
-                _render_npv_chart(fin)
-            with tab_chart2:
                 _render_revenue_chart(fin)
-            with tab_chart3:
+            with tab_chart2:
                 _render_delivery_chart(fin)
 
         with tab_table:
             _render_yearly_table(fin)
 
 
-def _render_npv_chart(fin) -> None:
-    years = [y.year for y in fin.yearly]
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=years, y=[round(v / 1e6, 2) for v in fin.cumulative_npv],
-        mode="lines+markers", name="Cumulative NPV",
-        line=dict(color="#2196F3", width=2),
-    ))
-    fig.add_hline(y=0, line_dash="dash", line_color="gray")
-    fig.update_layout(
-        title="Cumulative NPV over Project Life",
-        xaxis_title="Year", yaxis_title="NPV (A$M)", height=400,
-        xaxis=year_axis(years),
-    )
-    st.plotly_chart(fig, width="stretch")
-    csv_download_button(
-        pd.DataFrame({"year": years, "cumulative_npv_aud_m": [v / 1e6 for v in fin.cumulative_npv]}),
-        "cumulative_npv.csv", key="dl_npv",
-    )
+def _render_first_year_energy_tables(result, s) -> None:
+    """Energy-first view of the first simulated year: PPA volumes, merchant
+    volumes split by solar vs non-solar hours, and penalty volumes. Deliberately
+    no financial metrics -- those are computed once the financial modelling
+    options are set."""
+    summ = result.summary
+    res_h = result.n_period_hours / len(result.dispatch.market_sell) if len(result.dispatch.market_sell) else 1.0
+
+    idx = result.dispatch.market_sell.index
+    hour = idx.hour
+    solar_mask = (hour >= SOLAR_HOUR_START) & (hour < SOLAR_HOUR_END)
+
+    solar_sold_mwh = float(result.dispatch.market_sell.where(solar_mask, 0.0).sum()) * res_h
+    nonsolar_sold_mwh = float(result.dispatch.market_sell.where(~solar_mask, 0.0).sum()) * res_h
+
+    prices = result.market_prices
+    solar_rev = float((result.dispatch.market_sell.where(solar_mask, 0.0) * prices).sum()) * res_h
+    nonsolar_rev = float((result.dispatch.market_sell.where(~solar_mask, 0.0) * prices).sum()) * res_h
+    solar_price = solar_rev / solar_sold_mwh if solar_sold_mwh > 0 else 0.0
+    nonsolar_price = nonsolar_rev / nonsolar_sold_mwh if nonsolar_sold_mwh > 0 else 0.0
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("**First-year PPA volumes**")
+        st.dataframe(
+            pd.DataFrame({
+                "PPA load": f"{summ.total_load_mwh/1e3:.1f} GWh",
+                "PPA delivered": f"{summ.ppa_delivered_mwh/1e3:.1f} GWh",
+                "  · from renewables & storage": f"{summ.renewable_and_storage_to_ppa_mwh/1e3:.1f} GWh",
+                "  · via market purchase": f"{summ.market_buy_to_ppa_mwh/1e3:.1f} GWh",
+                "Allowed shortfall": f"{summ.allowed_shortfall_mwh/1e3:.1f} GWh",
+            }, index=["Volume"]).T,
+            width="stretch", height="content",
+        )
+    with c2:
+        st.markdown("**First-year merchant volumes (solar / non-solar)**")
+        st.dataframe(
+            pd.DataFrame({
+                "Sold to market — solar hours": f"{solar_sold_mwh/1e3:.1f} GWh",
+                "Sold to market — non-solar hours": f"{nonsolar_sold_mwh/1e3:.1f} GWh",
+                "Total sold to market": f"{summ.sold_to_market_mwh/1e3:.1f} GWh",
+                "Achieved solar-hour price": f"A${solar_price:,.0f}/MWh",
+                "Achieved non-solar-hour price": f"A${nonsolar_price:,.0f}/MWh",
+            }, index=["Volume"]).T,
+            width="stretch", height="content",
+        )
+    with c3:
+        st.markdown("**First-year penalty volumes**")
+        st.dataframe(
+            pd.DataFrame({
+                "Penalties": f"{summ.penalty_mwh/1e3:.1f} GWh",
+                "Share of PPA load": f"{summ.penalty_share_of_load:.1%}",
+                "Shortfall (allowed)": f"{summ.allowed_shortfall_mwh/1e3:.1f} GWh",
+                "Contracted penalty price": f"A${s.penalty_price:,.0f}/MWh",
+            }, index=["Volume"]).T,
+            width="stretch", height="content",
+        )
 
 
 def _render_revenue_chart(fin) -> None:
