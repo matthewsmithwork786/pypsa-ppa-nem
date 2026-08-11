@@ -22,9 +22,10 @@ import pandas as pd
 
 NEM_CACHE_DIR = Path(__file__).parent.parent.parent / "data" / "cache" / "nem"
 
-# Runtime cache: where ppa.data.remote_cache materialises files fetched from
-# Zenodo. Separate because the packaged cache may be read-only and is version
-# controlled; we never want downloads landing in a git working tree.
+# Runtime cache: where the network-enabled fetch module materialises files
+# downloaded from Zenodo. Separate because the packaged cache may be read-only
+# and is version controlled; we never want downloads landing in a git working
+# tree.
 RUNTIME_CACHE_DIR = Path(
     os.environ.get(
         "PPA_RUNTIME_CACHE_DIR",
