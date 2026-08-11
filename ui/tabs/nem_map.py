@@ -381,7 +381,7 @@ def render() -> None:
             nem_pv_duid=pv_duid,
             nem_wind_duid=wind_duid,
             nem_price_region=price_region,
-            nem_year=year,
+            nem_years=(year,),
         )
         state.set_scenario(updated)
         state.set_nem_selection({

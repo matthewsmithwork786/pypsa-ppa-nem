@@ -648,7 +648,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         cal_forward_note=cal_forward_note,
         data_source=initial.data_source,
         nem_price_region=nem_price_region,
-        nem_year=int(nem_year),
+        nem_years=(int(nem_year),),
         onsw_mw=float(onsw_mw),
         pv_mw=float(pv_mw),
         bess_mw=float(bess_mw) if include_bess else 0.0,

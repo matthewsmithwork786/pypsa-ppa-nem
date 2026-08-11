@@ -178,7 +178,30 @@ class Scenario:
     nem_price_region: str = "NSW1"
     nem_pv_duid: str = ""
     nem_wind_duid: str = ""
-    nem_year: int = 2025
+
+    # ── NEM data selection ───────────────────────────────────────────────────
+    # Historical years to cycle through in the multi-year dispatch simulation,
+    # in order, repeating. Chronological order is the meaningful one, so this is
+    # kept sorted ascending. `nem_year` (below) remains as a derived property so
+    # the ~38 existing single-year call sites keep working.
+    nem_years: tuple[int, ...] = (2025,)
+    # The ONE historical year the capacity-sizing LP optimises against. Sizing
+    # over the full multi-year horizon is possible but is what makes the LP
+    # large; the user picks a representative year instead.
+    capacity_sizing_year: int = 2025
+    # Snapshot resolution in minutes for the generation/price series: 60, 30, 15
+    # or 5. Sub-hourly multiplies LP size (and memory) by 60/resolution, so 15
+    # and 5 are guarded — see ui/scenario_form.py and ppa/multi_year.py.
+    nem_resolution_minutes: int = 60
+
+    # ── Tiered SLA ───────────────────────────────────────────────────────────
+    # `required_delivery_share` above is the ANNUAL obligation. These add
+    # tighter obligations at monthly and daily granularity. Both are OFF by
+    # default: with them off the model is bit-identical to today's.
+    sla_monthly_enabled: bool = False
+    sla_monthly_share: float = 0.0
+    sla_daily_enabled: bool = False
+    sla_daily_share: float = 0.0
 
     # Financial — Australian NEM benchmarks (AUD)
     # Capital costs from CSIRO GenCost 2025-26 Final Report (15 July 2026),
@@ -210,6 +233,18 @@ class Scenario:
     @property
     def is_nem(self) -> bool:
         return self.data_source in ("nem_map", "nem_default")
+
+    @property
+    def nem_year(self) -> int:
+        """First (earliest) selected NEM data year.
+
+        Kept as a property, not a field, so the many single-year call sites
+        (AER futures, reference_month_ts, cache_status, config summary) keep
+        working. It is deliberately absent from dataclasses.asdict(), and
+        dataclasses.replace(s, nem_year=...) will now raise — use
+        nem_years=(y,).
+        """
+        return int(self.nem_years[0]) if self.nem_years else 2025
 
     @property
     def bess_max_hours(self) -> float:
@@ -468,8 +503,6 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
 
         if s.nem_price_region not in NEM_REGIONS:
             errors.append(f"Unknown NEM region '{s.nem_price_region}'. Valid options: {NEM_REGIONS}")
-        if not (2000 <= int(s.nem_year) <= 2100):
-            errors.append(f"NEM data year {s.nem_year} is out of range.")
         if s.data_source in ("nem_map", "nem_default") and not (s.nem_pv_duid or s.nem_wind_duid):
             errors.append(
                 "No NEM plant selected -- pick a wind and/or solar plant on the Get Data "
@@ -477,6 +510,32 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
                 "generation data to read and the simulation would silently run with zero "
                 "renewable output.)"
             )
+        if not s.nem_years:
+            errors.append("Select at least one NEM data year on the Pick Plants tab.")
+        for y in s.nem_years:
+            if not (2000 <= int(y) <= 2100):
+                errors.append(f"NEM data year {y} is out of range.")
+        if s.optimise_capacity and int(s.capacity_sizing_year) not in tuple(s.nem_years):
+            errors.append(
+                "The capacity-sizing year must be one of the selected NEM data years."
+            )
+        if int(s.nem_resolution_minutes) not in (5, 15, 30, 60):
+            errors.append("Snapshot resolution must be 5, 15, 30 or 60 minutes.")
+
+    if s.sla_monthly_enabled and not (0.0 < s.sla_monthly_share <= 1.0):
+        errors.append("Monthly SLA share must be between 0 and 1 when monthly SLA is on.")
+    if s.sla_daily_enabled and not (0.0 < s.sla_daily_share <= 1.0):
+        errors.append("Daily SLA share must be between 0 and 1 when daily SLA is on.")
+    # D6: tsam destroys calendar structure, so a monthly constraint on the
+    # clustered representation would be silently meaningless rather than merely
+    # approximate.
+    if s.optimise_capacity and s.sla_monthly_enabled and s.sizing_method == "tsam":
+        errors.append(
+            "A monthly SLA cannot be enforced with the 'Typical weeks (tsam)' sizing "
+            "representation: clustering replaces the calendar with representative "
+            "weeks, so calendar months no longer exist in the sizing LP. Switch the "
+            "sizing representation to 'Full year hourly', or turn the monthly SLA off."
+        )
     if available_days and s.chosen_day not in available_days:
         errors.append(f"chosen_day '{s.chosen_day}' is not present in the timeseries data.")
     return errors
