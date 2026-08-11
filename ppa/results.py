@@ -221,6 +221,10 @@ def extract_results(
     # minimum falls more than 0.5 percentage points below the requirement, the
     # constraint and the post-solve measure disagree — surface that loudly in the
     # UI rather than raising, so an infeasible-adjacent solve stays inspectable.
+    # Deliberately NOT gated on enforce_min_delivery: extract_results is also
+    # used as a post-hoc "what if this target applied" reporting tool against an
+    # already-solved network (see tests/test_sla_reporting.py), independent of
+    # which constraint form (if any) was actually active during that solve.
     if monthly_delivery_share is not None and len(monthly_delivery_share) > 1:
         if min_monthly_delivery_share < s.sla_monthly_share - 0.005:
             warnings.append(
