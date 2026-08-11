@@ -4,6 +4,7 @@ import dataclasses
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from ppa.counterfactuals import compute_counterfactuals
@@ -164,6 +165,91 @@ def _render_dispatch_section(result, s, chosen_day: str) -> None:
             st.info("No BESS included in this scenario.")
 
 
+def _render_sla_compliance(result, s) -> None:
+    """SLA compliance section: per-period delivered share vs the tiered target,
+    plus any post-solve verification warnings (WP9). Only renders the chart for
+    a tier that was actually enabled on the scenario that produced the result —
+    a run that never turned the tiered SLA on gets no chart at all."""
+    monthly = (
+        s.sla_monthly_enabled and getattr(result, "monthly_delivery_share", None) is not None
+    )
+    daily = (
+        s.sla_daily_enabled and getattr(result, "daily_delivery_share", None) is not None
+    )
+    warnings = getattr(result, "warnings", None) or []
+    if not (monthly or daily):
+        return
+
+    st.subheader("SLA compliance")
+    for msg in warnings:
+        st.warning(msg)
+
+    if monthly:
+        series = result.monthly_delivery_share
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=series.index,
+            y=(series * 100).values,
+            name="Monthly delivery share",
+            marker_color="#4CAF50",
+        ))
+        fig.add_hline(
+            y=s.sla_monthly_share * 100,
+            line_dash="dash",
+            line_color="#B71C1C",
+            line_width=1.5,
+            annotation_text=f"SLA target ({s.sla_monthly_share:.0%})",
+            annotation_position="top left",
+            annotation_font_size=10,
+        )
+        fig.update_layout(
+            title="Monthly PPA delivery share vs SLA target",
+            xaxis_title="Month",
+            yaxis_title="Delivery share (%)",
+            yaxis=dict(range=[0, 105]),
+            height=320,
+        )
+        st.plotly_chart(fig, width="stretch", height=320)
+        st.caption(
+            f"{result.summary.n_months_below_sla} of {len(series)} month(s) below the "
+            f"{s.sla_monthly_share:.0%} target — minimum achieved "
+            f"{result.summary.min_monthly_delivery_share:.1%}."
+        )
+
+    if daily:
+        series = result.daily_delivery_share
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=series.index,
+            y=(series * 100).values,
+            mode="lines",
+            name="Daily delivery share",
+            line=dict(color="#1565C0", width=1),
+        ))
+        fig.add_hline(
+            y=s.sla_daily_share * 100,
+            line_dash="dash",
+            line_color="#B71C1C",
+            line_width=1.5,
+            annotation_text=f"SLA target ({s.sla_daily_share:.0%})",
+            annotation_position="top left",
+            annotation_font_size=10,
+        )
+        fig.update_layout(
+            title="Daily PPA delivery share vs SLA target",
+            xaxis_title="",
+            yaxis_title="Delivery share (%)",
+            yaxis=dict(range=[0, 105]),
+            height=320,
+        )
+        st.plotly_chart(fig, width="stretch", height=320)
+        st.caption(
+            f"{result.summary.n_days_below_sla} of {len(series)} day(s) below the "
+            f"{s.sla_daily_share:.0%} target — minimum achieved "
+            f"{result.summary.min_daily_delivery_share:.1%}."
+        )
+
+
 def _render_gen_stats(result, s) -> None:
     summary = result.summary
     n_hours = result.n_period_hours
@@ -318,6 +404,9 @@ def _render_multi_year_deep_dive() -> None:
             # st.subheader("Counterfactual procurement comparison")
             _render_multi_year_counterfactuals(results, fin, s)
 
+    # ── SLA compliance for the selected year ──────────────────────────────────
+    _render_sla_compliance(result, result.scenario)
+
     # ── Financial summary for selected year ───────────────────────────────────
     with st.expander(f"Financial summary for {selected_year}", expanded=False):
         yf = fin.yearly[year_idx]
@@ -401,6 +490,9 @@ def _render_single_day_deep_dive() -> None:
     # ── Generation statistics ──────────────────────────────────────────────────
     st.subheader("Generation statistics")
     _render_gen_stats(result, s)
+
+    # ── SLA compliance ─────────────────────────────────────────────────────────
+    _render_sla_compliance(result, s)
 
     # ── Financial analysis ────────────────────────────────────────────────────
     st.subheader("Financial analysis")
