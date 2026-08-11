@@ -50,7 +50,38 @@ build takes several minutes. Subsequent restarts reuse the checkout.
 The data is committed deliberately: the cloud container cannot run `nemosis`, so
 without it the app would have no generation data at all.
 
-## 5. Memory — the real constraint
+## 5. Runtime cache — data beyond the committed years
+
+All committed NEM data still ships in the image (`data/cache/`), but the multi-year
+feature reads through a layered cache first, so years or plants not in the repo can be
+fetched at runtime instead of being baked into the image.
+
+- `ppa/data/nem_data.py` resolves every file through `RUNTIME_CACHE_DIR` +
+  `_resolve()`: it looks in the packaged `data/cache/nem/` first, then
+  `$PPA_RUNTIME_CACHE_DIR` (default `~/.cache/pypsa-ppa-nem/nem`). `nem_data.py`
+  itself stays network-free — enforced by `tests/test_nem_data.py`.
+- `ppa/data/remote_cache.py` is the **only** runtime module permitted network access.
+  It fetches pinned Zenodo files by HTTP range requests (fsspec, falling back to a
+  full download when the server does not support ranges) into the runtime cache, so
+  reading a handful of plants out of a wide per-year parquet transfers a small
+  fraction of the file. Callers run `ensure_plant_years`/`ensure_price_years`
+  **before** asking `nem_data.py` to read anything.
+- **The Zenodo record is not published yet.** `ppa/data/zenodo_manifest.json`
+  currently holds a placeholder `record_id`
+  (`PLACEHOLDER_NOT_YET_PUBLISHED`); publishing the real dataset is a manual step
+  (Hanan's Zenodo account). Until that happens, any real fetch raises
+  `RemoteFetchError`, which the UI surfaces as a clean `st.error`, not a crash.
+- **First-fetch latency:** Streamlit Cloud / Cloud Run containers are ephemeral, so
+  the runtime cache is empty on every cold start and refills on demand. Expect the
+  first run after a cold start to spend time downloading whichever year/plant files
+  the scenario needs; column pruning keeps range transfers small, but a wide
+  multi-year pick is slower.
+- **Network egress:** containers must be able to reach `zenodo.org` over outbound
+  HTTPS. Streamlit Cloud and Cloud Run both allow this by default, but an
+  egress-restricted deployment will break multi-year fetching. This is a new
+  runtime requirement — the committed single-year cache needs no network at all.
+
+## 6. Memory — the real constraint
 
 The capacity-sizing LP is the memory peak of the whole app, and Streamlit Community
 Cloud is memory-limited (~1 GB historically; check your current tier). Measured
@@ -94,7 +125,7 @@ The app already defends itself:
 
 Environment variables are set under **App settings → Advanced → Environment variables**.
 
-## 6. Sanity checks after deploying
+## 7. Sanity checks after deploying
 
 Walk `docs/UAT_checklist.md`. The quickest smoke test:
 
@@ -104,7 +135,7 @@ Walk `docs/UAT_checklist.md`. The quickest smoke test:
 3. Only then try capacity sizing, and watch the memory notice in the sizing status line.
 4. **Financial Model** → export XLSX → confirm Excel opens it with no repair prompt.
 
-## 7. Local development
+## 8. Local development
 
 ```bash
 pip install -r requirements-dev.txt
@@ -114,7 +145,7 @@ streamlit run streamlit_app.py
 
 See `AGENTS.md` for environment quirks and repo conventions.
 
-## 8. Deploying to Google Cloud Run via Cloud Build
+## 9. Deploying to Google Cloud Run via Cloud Build
 
 Same repo, containerised instead of Streamlit Cloud. The repo ships:
 

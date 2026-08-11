@@ -1,7 +1,7 @@
 # Reviewer UAT checklist — Australian NEM cleanup
 
-Walk these against `streamlit run streamlit_app.py` in the `feature/au-nem-cleanup`
-branch. Tick each box only when the behaviour is observed end-to-end. Any failure
+Walk these against `streamlit run streamlit_app.py` from the current worktree.
+Tick each box only when the behaviour is observed end-to-end. Any failure
 should be reported with the tab, the step, and a screenshot/console trace.
 
 ## 1. Tab bar
@@ -68,3 +68,54 @@ should be reported with the tab, the step, and a screenshot/console trace.
       normalise, maximise/minimise, behaviour, customise, summarise, organise,
       fulfilment; "Base futures — calendar year (A$/MWh)" / "Base futures hedge").
 - [ ] No `EUR`/`€`/`ENTSO`/`CAL Y+1` wording anywhere in the counterfactual copy.
+
+## 10. Multi-year plant picking (Pick Plants)
+
+- [ ] The **Pick Plants** tab has a **"Historical years to use"** range slider. While
+      `plant_years.parquet` is not committed, only `[2025]` is offered, with a
+      caption explaining that the full range arrives when the manifest is published.
+- [ ] A **"Snapshot resolution"** selectbox offers 5/15/30/60-minute options; the
+      default is 1 hour, and a sub-hourly pick shows the LP-size/memory caption.
+- [ ] With capacity optimisation on, a **"Capacity-sizing year"** selectbox appears,
+      listing the selected years, with a caption noting the sizing LP solves against
+      that single year while the dispatch still cycles all selected years.
+- [ ] Pick a wind plant and a solar plant over a 2-year range; the plant list and the
+      map markers reflect the selected range, and running a 2-year simulation
+      succeeds.
+
+## 11. SLA terms (Set Terms)
+
+- [ ] **Set Terms** has a dedicated **"Service level agreement (SLA)"** expander
+      (separate from "PPA contract terms") with **"Monthly minimum"** and
+      **"Daily minimum"** toggles and share sliders.
+- [ ] Setting a monthly share *below* the annual obligation shows the warning that
+      the monthly minimum is looser than the annual obligation and will never bind.
+- [ ] Setting a daily share *below* the annual obligation shows the equivalent
+      warning for the daily minimum.
+- [ ] Setting a daily share **>= 90 %** shows the "frequently infeasible" warning
+      about a single low-resource day.
+- [ ] With capacity optimisation on and sizing set to **Typical weeks (tsam)**,
+      enabling the monthly SLA shows the warning that a monthly SLA cannot be
+      enforced under tsam.
+
+## 12. SLA enforcement — tsam + monthly is blocked
+
+- [ ] With sizing set to **Typical weeks (tsam)**, monthly SLA on, and capacity
+      optimisation on, **Run** is refused with a blocking error ("A monthly SLA
+      cannot be enforced with the 'Typical weeks (tsam)' sizing representation…
+      Switch the sizing representation to 'Full year hourly', or turn the monthly
+      SLA off."). This must be a hard block, not a warning the app runs past.
+- [ ] Switching the sizing representation to **Full year hourly** (or turning the
+      monthly SLA off) clears the block and the run proceeds.
+
+## 13. SLA compliance in Results (Deep Dive)
+
+- [ ] After a run with monthly SLA on, the **Deep Dive** tab shows an
+      **"SLA compliance"** section with a "Monthly PPA delivery share vs SLA target"
+      chart, annotated with the target share.
+- [ ] After a run with daily SLA on, the same section shows a "Daily PPA delivery
+      share vs SLA target" chart.
+- [ ] With no tiered SLA enabled, the SLA compliance section renders no charts
+      (not blank/erroring charts).
+- [ ] The **Optimisation** tab's SLA tiers table reports which tiers were live in
+      the sizing LP and how many SLA/delivery constraints were added.

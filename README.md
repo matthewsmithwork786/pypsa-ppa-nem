@@ -8,6 +8,8 @@ This project models renewable portfolios (wind, solar, battery storage) operatin
 
 A Streamlit web app provides an interactive interface with four predefined case studies, a customisable scenario form, and detailed results (KPIs, financial analysis, supply mix charts).
 
+The app supports multi-year portfolios: pick a range of historical weather years at 5/15/30/60-minute resolution, choose which year the capacity-sizing optimisation tunes against, and layer tiered service-level agreements (monthly and/or daily minimum delivery shares, enforced as hard constraints) on top of the annual delivery obligation.
+
 ## Setup
 
 This project uses [pixi](https://pixi.sh) for reproducible environment management.
