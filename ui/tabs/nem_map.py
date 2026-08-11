@@ -168,12 +168,12 @@ def _plant_label(row) -> str:
     )
 
 
-def _selectable_duids(plants_df: "pd.DataFrame", fuel_tech: str, allow_unready: bool) -> list:
+def _selectable_duids(plants_df: "pd.DataFrame", fuel_tech: str) -> list:
     if plants_df is None or plants_df.empty:
         return []
     df = plants_df[plants_df["fuel_tech"] == fuel_tech]
-    if not allow_unready:
-        df = df[df["simulation_ready"]]
+    # Only simulation-ready plants (a complete year of UIGF) are selectable.
+    df = df[df["simulation_ready"]]
     return list(df["duid"])
 
 
@@ -258,12 +258,31 @@ def render() -> None:
     region_filter = st.multiselect(
         "Region filter", options=regions_present, default=regions_present, key="nm_region_filter",
     )
-    allow_unready = st.toggle(
-        "Allow selecting plants without a complete year of UIGF (not simulation-ready)",
-        value=False, key="nm_allow_unready",
-    )
+
+    # Capacity-factor floors per technology. Only simulation-ready plants with a
+    # full year of UIGF are selectable; the CUF floors just hide underperformers
+    # on the map/lists.
+    cuf_min = {}
+    cuf_filters = st.columns(2)
+    for i, tech in enumerate(("Wind", "Solar")):
+        tech_cuf = pd.to_numeric(plants_df.loc[plants_df["fuel_tech"] == tech, "cuf"], errors="coerce")
+        lo, hi = (float(tech_cuf.min()), float(tech_cuf.max())) if len(tech_cuf) else (0.0, 1.0)
+        default = lo
+        cuf_min[tech] = cuf_filters[i].slider(
+            f"Min {tech} capacity factor (%)",
+            min_value=0, max_value=100,
+            value=int(default * 100) if default == default else 0,
+            step=1, format="%d%%", key=f"nm_cuf_min_{tech.lower()}",
+            help=f"Hide {tech.lower()} plants whose 2025 UIGF capacity factor is below this floor.",
+        ) / 100.0
 
     filtered = plants_df[plants_df["region"].isin(region_filter)] if region_filter else plants_df
+    for tech, floor in cuf_min.items():
+        if floor > 0:
+            tech_cuf = pd.to_numeric(filtered.loc[filtered["fuel_tech"] == tech, "cuf"], errors="coerce")
+            filtered = filtered[
+                ~((filtered["fuel_tech"] == tech) & tech_cuf.lt(floor).fillna(False))
+            ]
 
     # ── Apply pending map click BEFORE rendering the selectboxes ───────────────
     click_state = st.session_state.get("nm_map", {}) or {}
@@ -273,14 +292,14 @@ def render() -> None:
         clicked_duid = _duid_from_tooltip(clicked_tooltip, filtered)
         if clicked_duid is not None:
             row = filtered.loc[filtered["duid"] == clicked_duid].iloc[0]
-            if row["simulation_ready"] or allow_unready:
+            if row["simulation_ready"]:
                 if row["fuel_tech"] == "Wind":
                     st.session_state["nm_wind_duid"] = clicked_duid
                 elif row["fuel_tech"] == "Solar":
                     st.session_state["nm_pv_duid"] = clicked_duid
 
-    wind_options = [""] + _selectable_duids(filtered, "Wind", allow_unready)
-    pv_options = [""] + _selectable_duids(filtered, "Solar", allow_unready)
+    wind_options = [""] + _selectable_duids(filtered, "Wind")
+    pv_options = [""] + _selectable_duids(filtered, "Solar")
 
     cols = st.columns(2)
     with cols[0]:
@@ -342,7 +361,7 @@ def render() -> None:
             key="nm_map", returned_objects=["last_object_clicked_tooltip"],
         )
         st.caption(
-            "🟢 Wind · 🟡 Solar · solid = simulation-ready · dashed outline = incomplete/no UIGF. "
+            "🟢 Wind · 🟡 Solar · solid = simulation-ready · dashed outline = no complete year of UIGF (not selectable). "
             "Click a marker or use the selectboxes above (selectboxes are authoritative)."
         )
         st.caption(

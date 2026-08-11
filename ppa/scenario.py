@@ -26,7 +26,10 @@ class Scenario:
 
     # Feature toggles
     include_bess: bool = True
-    enable_market_buy: bool = True
+    # Market buy defaults OFF (and the cap to 0%): the PPA should be delivered
+    # by the contracted assets; market supplementation is an explicit escape
+    # valve, not the default behaviour.
+    enable_market_buy: bool = False
     enable_market_sell: bool = True
     enable_shortfall: bool = True
     enable_penalty: bool = True
@@ -73,10 +76,11 @@ class Scenario:
     # allows.
     sizing_method: str = "tsam"
     # Number of typical periods for the tsam method. Periods are WEEKS (168 h),
-    # not days -- measured against the exact LP, 16 typical weeks with mean
-    # representation lands the fleet within ~10% and the BESS within 4%, where
-    # 12 typical days was +46% and +164% (docs/sizing_experiments.md E11).
-    sizing_n_periods: int = 16
+    # not days. Default 40 (the top of the range): the user's measured 90% SLA
+    # gap (82% delivered with 16 weeks) tightens as the clustering captures more
+    # of the poor-resource spell a battery must ride through, so err on the side
+    # of more weeks; the slider lets users trade accuracy for speed.
+    sizing_n_periods: int = 40
     # Model each plant's UNCONSTRAINED output (AEMO UIGF from DISPATCHLOAD)
     # rather than its historical sent-out SCADA. ON by default: this is the
     # correct input, not a variant.
@@ -146,7 +150,7 @@ class Scenario:
     ppa_price: float = 100.0
     pen_mult: float = 1.5
     required_delivery_share: float = 0.75
-    market_buy_share: float = 0.05
+    market_buy_share: float = 0.0
     market_spread: float = 0.10
 
     # Operational (single-day mode)
