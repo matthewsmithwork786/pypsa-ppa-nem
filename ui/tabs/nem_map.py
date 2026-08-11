@@ -10,13 +10,15 @@ from __future__ import annotations
 import dataclasses
 import html
 import math
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 from ppa.data import nem_data
 from ui import state
-from ui.nem_cache_status import cached_cache_status
+from ui.constants import NEM_RESOLUTION_MINUTES
+from ui.nem_cache_status import cached_cache_status, price_years_covered
 
 FUEL_COLORS = {
     "Wind": "#2E7D32",   # green, matches existing convention
@@ -79,27 +81,33 @@ def _tooltip(row) -> str:
     station names across multiple DUIDs) + capacity + region + CUF + first power.
     HTML-escaped since station names may contain special characters.
 
-    CUF prefers the strict `cuf` field (energy ÷ nameplate × hours-in-year)
-    from `nem_data.scada_summary`, falling back to `mean_cf` (mean of the
-    clipped 5-min CF series). First power prefers the registry's
-    `first_power_date` (labelled "1st power"); a generation-derived date (2025-only
-    cache) is labelled "first 2025 output" per the plan. Either shows '—' when
-    unknown.
+    CUF prefers the `mean_cuf_selected_years` field (mean annual CUF over the
+    selected multi-year range, from the plant-years manifest) when present,
+    falling back to the strict `cuf` field (energy ÷ nameplate × hours-in-year,
+    from `nem_data.scada_summary`), then `mean_cf` (mean of the clipped 5-min CF
+    series). First power prefers the registry's `first_power_date` (labelled
+    "1st power"); a generation-derived date (2025-only cache) is labelled
+    "first 2025 output" per the plan. Either shows '—' when unknown.
     """
     station = html.escape(str(row["station_name"]))
     duid = html.escape(str(row["duid"]))
     region = html.escape(str(row["region"]))
     capacity = float(row["capacity_registered_mw"])
 
-    cuf_val = row.get("cuf")
-    if not _finite_value(cuf_val):
-        cuf_val = row.get("mean_cf")
+    cuf_label = "CUF"
+    cuf_val = row.get("mean_cuf_selected_years")
+    if _finite_value(cuf_val):
+        cuf_label = "mean CUF (selected years)"
+    else:
+        cuf_val = row.get("cuf")
+        if not _finite_value(cuf_val):
+            cuf_val = row.get("mean_cf")
     cuf = _format_cuf(cuf_val)
 
     first_power_label, first_power = _first_power_parts(row)
     return (
         f"{station} [{duid}] · {capacity:.0f} MW · {region} · "
-        f"CUF {cuf} · {first_power_label} {first_power}"
+        f"{cuf_label} {cuf} · {first_power_label} {first_power}"
     )
 
 
@@ -184,6 +192,50 @@ def _cached_eligible_plants(year: int, fingerprint: tuple) -> "pd.DataFrame":
     return nem_data.list_eligible_plants(year=year, check_whole_year=True)
 
 
+@st.cache_data
+def _cached_operational_plants(years: tuple, fingerprint: tuple) -> "pd.DataFrame":
+    return nem_data.plants_operational_for_years(years)
+
+
+def _operational_fingerprint(years: tuple, cache_dir: Path = nem_data.NEM_CACHE_DIR) -> tuple:
+    """Cache-invalidation token for the operational-plants frame: the sorted
+    selected years plus the mtimes of the plant-years manifest and registry, so
+    a republished manifest invalidates the cache even when the year selection is
+    unchanged.
+    """
+    files = [nem_data.plant_years_path(cache_dir), nem_data.registry_path(cache_dir)]
+    mtimes = tuple(f.stat().st_mtime_ns for f in files if f.exists())
+    return (tuple(sorted(int(y) for y in years)), mtimes)
+
+
+def _plants_for_map(eligible: "pd.DataFrame", operational: "pd.DataFrame") -> "pd.DataFrame":
+    """Combine the fleet frame with the multi-year operational subset.
+
+    Every row in `operational` is, by construction, fully operational in ALL
+    selected years: tag it ``data_status='ready'`` / ``simulation_ready=True``
+    so it gets a solid tech-colour marker and becomes selectable, and carry its
+    ``mean_cuf_selected_years`` through for the tooltip. Rows only in `eligible`
+    stay exactly as the single-year whole-year check reported them (grey dashed
+    markers, not selectable).
+
+    When `operational` is empty (manifest not yet published, or an empty year
+    selection), the frame is returned unchanged so the single-year eligibility
+    cache still drives the picker -- do not leave the map with zero plants.
+    """
+    if operational is None or operational.empty:
+        return eligible
+    df = eligible.copy()
+    op_duids = set(operational["duid"])
+    mask = df["duid"].isin(op_duids)
+    df.loc[~mask, "data_status"] = "unchecked"
+    df.loc[~mask, "simulation_ready"] = False
+    df.loc[mask, "data_status"] = "ready"
+    df.loc[mask, "simulation_ready"] = True
+    cuf_map = operational.drop_duplicates("duid").set_index("duid")["mean_cuf_selected_years"]
+    df["mean_cuf_selected_years"] = df["duid"].map(cuf_map)
+    return df
+
+
 def _label_for_duid(duid: str, plants_df: "pd.DataFrame") -> str:
     if not duid:
         return "(none)"
@@ -193,20 +245,33 @@ def _label_for_duid(duid: str, plants_df: "pd.DataFrame") -> str:
     return _plant_label(row.iloc[0])
 
 
+def _use_disabled(selected_years, filtered, wind_duid, pv_duid) -> bool:
+    """The \"Use these plants\" button is disabled when no years are selected,
+    when no plant is chosen, or when any chosen plant is not simulation-ready."""
+    if not selected_years:
+        return True
+    duids = [d for d in (wind_duid, pv_duid) if d]
+    if not duids:
+        return True
+    for duid in duids:
+        rows = filtered.loc[filtered["duid"] == duid]
+        if rows.empty or not bool(rows.iloc[0]["simulation_ready"]):
+            return True
+    return False
+
+
 def render() -> None:
     st.title("📡 Get Data")
     head = st.columns([6, 1])
     with head[0]:
         st.markdown(
             "Pick real Australian wind and/or solar plants to drive the optimiser. "
-            "Generation profiles are 2025 5-minute **AEMO UIGF** (unconstrained "
-            "availability)."
+            "Generation profiles are AEMO UIGF (unconstrained availability) at "
+            "native 5-minute resolution."
         )
     with head[1]:
         with st.popover("❓ UIGF", width="stretch"):
             st.markdown(UIGF_EXPLAINER)
-
-    year = nem_data.DEFAULT_YEAR
 
     cols = st.columns([1, 3])
     with cols[0]:
@@ -214,9 +279,83 @@ def render() -> None:
             st.cache_data.clear()
             st.rerun()
 
+    current = state.get_scenario()
+    if current is None:
+        from ppa.scenario import BASE_SCENARIO
+        current = BASE_SCENARIO
+
+    # ── Year range slider ──────────────────────────────────────────────────────
+    years_available = nem_data.available_years()
+    if not years_available:
+        years_available = [nem_data.DEFAULT_YEAR]
+        st.caption(
+            "No multi-year availability manifest is published yet, so only "
+            f"{nem_data.DEFAULT_YEAR} (the single shipped year) is available. "
+            "Once the manifest is published the full range will be offered here."
+        )
+    lo, hi = st.slider(
+        "Historical years to use",
+        min_value=min(years_available),
+        max_value=max(years_available),
+        value=(max(years_available) - 4, max(years_available)),
+        key="nm_year_range",
+        help="The dispatch simulation cycles through these years in chronological "
+             "order, repeating, for as many simulation years as you run.",
+    )
+    selected_years = tuple(y for y in years_available if lo <= y <= hi)
+
+    # ── Snapshot resolution ────────────────────────────────────────────────────
+    resolution_labels = list(NEM_RESOLUTION_MINUTES)
+    default_resolution = int(getattr(current, "nem_resolution_minutes", 60))
+    default_label = next(
+        (k for k, v in NEM_RESOLUTION_MINUTES.items() if v == default_resolution),
+        "1 hour",
+    )
+    resolution_label = st.selectbox(
+        "Snapshot resolution",
+        options=resolution_labels,
+        index=resolution_labels.index(default_label),
+        key="nm_resolution",
+        help="The resolution the generation/price series are downsampled to for "
+             "the LP. The cache always stores native 5-minute data.",
+    )
+    resolution_minutes = int(NEM_RESOLUTION_MINUTES[resolution_label])
+    if resolution_minutes < 60:
+        st.caption(
+            f"Sub-hourly resolution multiplies LP size and memory by "
+            f"60/{resolution_minutes} — 15 and 5 minutes are only practical for "
+            f"short simulation horizons."
+        )
+
+    # ── Capacity-sizing year ───────────────────────────────────────────────────
+    sizing_year = int(getattr(current, "capacity_sizing_year", nem_data.DEFAULT_YEAR))
+    if bool(getattr(current, "optimise_capacity", False)):
+        sizing_options = list(selected_years)
+        sizing_index = (
+            sizing_options.index(sizing_year)
+            if sizing_year in sizing_options
+            else len(sizing_options) - 1
+        )
+        sizing_year = st.selectbox(
+            "Capacity-sizing year",
+            options=sizing_options,
+            index=sizing_index,
+            key="nm_sizing_year",
+        )
+        st.caption(
+            "The capacity optimisation solves against this single year. The "
+            "dispatch simulation still uses all selected years."
+        )
+
+    # ── Plant list driven by the manifest ──────────────────────────────────────
+    fallback_year = selected_years[-1] if selected_years else nem_data.DEFAULT_YEAR
     try:
-        fingerprint = nem_data.cache_fingerprint(year)
-        plants_df = _cached_eligible_plants(year, fingerprint)
+        eligible = _cached_eligible_plants(
+            fallback_year, nem_data.cache_fingerprint(fallback_year)
+        )
+        operational_plants = _cached_operational_plants(
+            selected_years, _operational_fingerprint(selected_years)
+        )
     except FileNotFoundError:
         st.error(
             "NEM plant registry not found. Run `python scripts/fetch_nem_plant_registry.py` "
@@ -225,13 +364,15 @@ def render() -> None:
         )
         return
 
-    status = cached_cache_status(year)
+    plants_df = _plants_for_map(eligible, operational_plants)
+
+    status = cached_cache_status(fallback_year)
 
     with st.expander("**NEM cache status**", expanded=(status["n_simulation_ready"] == 0)):
         c = st.columns(4)
-        c[0].metric("Registry plants", status["n_registry_plants"])
-        c[1].metric("UIGF cached", status["n_scada_cached"])
-        c[2].metric("Simulation-ready", status["n_simulation_ready"])
+        c[0].metric("Years available", len(years_available))
+        c[1].metric("Plants operational (all years)", len(operational_plants))
+        c[2].metric("Simulation-ready (single year)", status["n_simulation_ready"])
         c[3].metric("Price regions cached", f"{len(status['price_regions_cached'])}/{len(nem_data.NEM_REGIONS)}")
 
         if status["missing_price_regions"]:
@@ -244,8 +385,8 @@ def render() -> None:
                 "into `data/cache/nem/{availability,price}/`:"
             )
             st.code(
-                f"python scripts/fetch_nem_availability.py --year {year}\n"
-                f"python scripts/fetch_nem_scada_prices.py --year {year}  # prices",
+                f"python scripts/fetch_nem_availability.py --year {fallback_year}\n"
+                f"python scripts/fetch_nem_scada_prices.py --year {fallback_year}  # prices",
                 language="bash",
             )
 
@@ -297,11 +438,13 @@ def render() -> None:
         index=nem_data.NEM_REGIONS.index(nem_data.DEFAULT_REGION),
         key="nm_price_region",
     )
-    price_region_cached = price_region in status["price_regions_cached"]
-    if not price_region_cached:
+    covered_price_years = price_years_covered(price_region, selected_years)
+    missing_price_years = [y for y in selected_years if y not in covered_price_years]
+    if missing_price_years:
         st.warning(
-            f"No cached price data for region {price_region}. Run "
-            f"`python scripts/fetch_nem_scada_prices.py --year {year}` to fetch it."
+            f"No cached price data for region {price_region} in "
+            f"{', '.join(map(str, missing_price_years))}. Run "
+            f"`python scripts/fetch_nem_scada_prices.py --year {fallback_year}` to fetch it."
         )
 
     # ── Map ──────────────────────────────────────────────────────────────────
@@ -338,13 +481,15 @@ def render() -> None:
             key="nm_map", returned_objects=["last_object_clicked_tooltip"],
         )
         st.caption(
-            "🟢 Wind · 🟡 Solar · solid = simulation-ready · dashed outline = no complete year of UIGF (not selectable). "
+            "🟢 Wind · 🟡 Solar · solid = operational in all selected years · "
+            "grey dashed = not fully operational in every selected year (not selectable). "
             "Click a marker or use the selectboxes above (selectboxes are authoritative)."
         )
         st.caption(
-            "Marker tooltip: CUF = energy ÷ (nameplate × hours-in-year, 2025 UIGF, AC); "
-            "“1st power” = registry commissioning date, “first 2025 output” = first sustained "
-            "UIGF availability, “—” = not available."
+            "Marker tooltip: CUF = energy ÷ (nameplate × hours-in-year, UIGF, AC); "
+            "with a multi-year range the mean across the selected years is shown. "
+            "“1st power” = registry commissioning date, “first 2025 output” = first "
+            "sustained UIGF availability, “—” = not available."
         )
 
     # ── Native 5-min CF inspection for the selected plants ──────────────────────
@@ -355,38 +500,50 @@ def render() -> None:
         if row.empty or not bool(row.iloc[0]["simulation_ready"]):
             continue
         with st.expander(f"{label} plant CF — {duid}", expanded=False):
-            cf = nem_data.capacity_factor_for_duid(duid, year=year, registry=filtered)
+            cf = nem_data.capacity_factor_for_duid(duid, year=fallback_year, registry=filtered)
             monthly = cf.groupby(cf.index.month).mean()
             st.line_chart(cf.iloc[:: max(1, len(cf) // 2000)])
             st.bar_chart(monthly)
 
     # ── Action buttons ───────────────────────────────────────────────────────
-    any_ready = any(
-        bool(filtered.loc[filtered["duid"] == d, "simulation_ready"].iloc[0])
-        for d in (wind_duid, pv_duid) if d
-    )
-    use_disabled = not (any_ready and price_region_cached and (wind_duid or pv_duid))
+    use_disabled = _use_disabled(selected_years, filtered, wind_duid, pv_duid)
 
     if st.button(
         "✅ Use these plants", type="primary", width="stretch",
         key="nm_use_plants", disabled=use_disabled,
     ):
-        current = state.get_scenario()
-        if current is None:
-            from ppa.scenario import BASE_SCENARIO
-            current = BASE_SCENARIO
+        from ppa.data import remote_cache
+
+        duids = [d for d in (wind_duid, pv_duid) if d]
+        missing = remote_cache.missing_plant_years(duids, selected_years)
+        if missing:
+            bar = st.progress(0.0, text="Downloading generation data ...")
+            try:
+                remote_cache.ensure_plant_years(
+                    duids, selected_years,
+                    progress=lambda f, msg: bar.progress(f, text=msg),
+                )
+                remote_cache.ensure_price_years([price_region], selected_years)
+            except remote_cache.RemoteFetchError as exc:
+                st.error(f"Could not download the plant data: {exc}")
+                return
         updated = dataclasses.replace(
             current,
             data_source="nem_map",
             nem_pv_duid=pv_duid,
             nem_wind_duid=wind_duid,
             nem_price_region=price_region,
-            nem_years=(year,),
+            nem_years=selected_years,
+            capacity_sizing_year=int(sizing_year),
+            nem_resolution_minutes=int(resolution_minutes),
         )
         state.set_scenario(updated)
         state.set_nem_selection({
             "pv_duid": pv_duid, "wind_duid": wind_duid,
-            "price_region": price_region, "year": year,
+            "price_region": price_region,
+            "years": list(selected_years),
+            "capacity_sizing_year": int(sizing_year),
+            "resolution_minutes": int(resolution_minutes),
         })
         state.clear_custom_upload()
         state.clear_run_outputs()
