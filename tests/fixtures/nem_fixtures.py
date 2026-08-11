@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 YEAR = 2025
@@ -122,6 +123,121 @@ def build_nem_fixture_cache(root_dir) -> Path:
         {"duid": "COALX1", "station_name": "Coal Power Station X", "region": "NSW1",
          "fuel_tech": "Black Coal", "capacity_registered_mw": 700.0, "lat": -32.5, "lon": 150.8,
          "status": "operating"},
+    ]
+    registry = pd.DataFrame(rows)
+    registry.to_parquet(registry_dir / "nem_plant_registry.parquet")
+
+    return cache_dir
+
+
+# ── Manifest (operational-year determination) fixture ────────────────────────
+
+def _compact_availability_values(series: pd.Series, year: int) -> pd.Series:
+    """Reindex a generated 5-min series onto the interval-ENDING canonical grid
+    used by the real availability cache (values-only RangeIndex parquets), so
+    `ppa.data.nem_data.load_availability` reads it back via the compact path.
+
+    The generated series is labelled interval-BEGINNING (value for [t, t+5min)).
+    Storing `series.shift(freq="5min")` places the same value at the matching
+    interval-END label, so `load_availability`'s shift back to interval-beginning
+    round-trips the series exactly -- no trailing NaN and no phase shift.
+    """
+    idx = pd.date_range(
+        start=f"{year}-01-01 00:05",
+        periods=expected_intervals(year),
+        freq="5min",
+    )
+    return series.shift(freq="5min").reindex(idx)
+
+
+def expected_intervals(year: int) -> int:
+    """288 dispatch intervals per day (5 minutes each), leap-aware."""
+    return (366 if pd.Timestamp(year, 12, 31).is_leap_year else 365) * 288
+
+
+def _write_compact_availability(
+    avail_dir: Path, duid: str, year: int, series: pd.Series
+) -> None:
+    """Write a values-only RangeIndex parquet, the real cache format."""
+    reindexed = _compact_availability_values(series, year)
+    df = pd.DataFrame({"availability": reindexed.to_numpy(dtype="float64")})
+    df.to_parquet(avail_dir / f"{duid}_{year}.parquet")
+
+
+def build_manifest_fixture_cache(root_dir) -> Path:
+    """Build a synthetic availability cache + registry for
+    `scripts/build_plant_year_manifest.py` and return the cache root.
+
+    Mirrors the real `data/cache/nem/` layout: `<DUID>_2025.parquet` files in
+    `availability/` (compact values-only format, NaN for gaps) and a registry
+    carrying `first_power_date`. Covers every branch of the `fully_operational`
+    gate:
+
+    - CLEANYR1  full clean year                                -> operational
+    - GAP20D1   full year with a contiguous 20-day NaN gap     -> gap + coverage
+    - MARCOMM1  zero output until 1 Mar, then full year        -> commissioning
+    - OCTRAMP1  full output Jan-Sep, then output collapses     -> ramp-down
+    - COV96SF1  96% coverage (scattered isolated gaps)         -> coverage only
+    - NEWLY1    clean year but first_power_date Jun 2025       -> age gate
+    """
+    cache_dir = Path(root_dir)
+    avail_dir = cache_dir / "availability"
+    registry_dir = cache_dir / "registry"
+    avail_dir.mkdir(parents=True, exist_ok=True)
+    registry_dir.mkdir(parents=True, exist_ok=True)
+
+    full_index = _full_year_index()
+    capacity = 100.0
+
+    clean = _wind_pattern(full_index, capacity)
+
+    # GAP20D1: 20 contiguous days of NaN starting 30 May (day 149).
+    gap20 = clean.copy()
+    gap_start = pd.Timestamp(f"{YEAR}-05-30 00:00")
+    gap20[(gap20.index >= gap_start) & (gap20.index < gap_start + pd.Timedelta(days=20))] = np.nan
+
+    # MARCOMM1: zero until 1 Mar, then the full pattern.
+    marcomm = clean.copy()
+    marcomm[marcomm.index < pd.Timestamp(f"{YEAR}-03-01 00:00")] = 0.0
+
+    # OCTRAMP1: full pattern Jan-Sep, then at 30% (ramping down toward retirement).
+    octramp = clean.copy()
+    octramp[octramp.index.month >= 10] = octramp[octramp.index.month >= 10] * 0.3
+
+    # COV96SF1: drop every 25th interval (~4% scattered, single-interval gaps).
+    cov96 = clean.copy()
+    drop_mask = [i % 25 == 0 for i in range(len(full_index))]
+    cov96[dropped_index := full_index[drop_mask]] = np.nan
+
+    for duid, series in [
+        ("CLEANYR1", clean),
+        ("GAP20D1", gap20),
+        ("MARCOMM1", marcomm),
+        ("OCTRAMP1", octramp),
+        ("COV96SF1", cov96),
+        ("NEWLY1", clean),
+    ]:
+        _write_compact_availability(avail_dir, duid, YEAR, series)
+
+    rows = [
+        {"duid": "CLEANYR1", "station_name": "Clean Year Wind", "region": "NSW1",
+         "fuel_tech": "Wind", "capacity_registered_mw": 100.0, "lat": -33.0, "lon": 147.0,
+         "status": "operating", "first_power_date": "2000-01-01"},
+        {"duid": "GAP20D1", "station_name": "Gap Twenty Wind", "region": "NSW1",
+         "fuel_tech": "Wind", "capacity_registered_mw": 100.0, "lat": -33.0, "lon": 147.0,
+         "status": "operating", "first_power_date": "2000-01-01"},
+        {"duid": "MARCOMM1", "station_name": "March Commission Wind", "region": "NSW1",
+         "fuel_tech": "Wind", "capacity_registered_mw": 100.0, "lat": -33.0, "lon": 147.0,
+         "status": "operating", "first_power_date": "2025-03-01"},
+        {"duid": "OCTRAMP1", "station_name": "October Rampdown Wind", "region": "NSW1",
+         "fuel_tech": "Wind", "capacity_registered_mw": 100.0, "lat": -33.0, "lon": 147.0,
+         "status": "operating", "first_power_date": "2000-01-01"},
+        {"duid": "COV96SF1", "station_name": "Coverage Ninety Six Wind", "region": "NSW1",
+         "fuel_tech": "Wind", "capacity_registered_mw": 100.0, "lat": -33.0, "lon": 147.0,
+         "status": "operating", "first_power_date": "2000-01-01"},
+        {"duid": "NEWLY1", "station_name": "Newly Built Wind", "region": "NSW1",
+         "fuel_tech": "Wind", "capacity_registered_mw": 100.0, "lat": -33.0, "lon": 147.0,
+         "status": "operating", "first_power_date": "2025-06-01"},
     ]
     registry = pd.DataFrame(rows)
     registry.to_parquet(registry_dir / "nem_plant_registry.parquet")
