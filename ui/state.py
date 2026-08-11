@@ -62,6 +62,10 @@ _SCENARIO_FORM_KEYS = [
     "sf_sizing_resolution", "sf_sizing_method", "sf_sizing_n_periods", "sf_grid_connection",
     "sf_connection_cost_aud_mw", "sf_merchant_share", "sf_enforce_min_delivery", "sf_load_profile",
     "sf_data_source", "sf_nem_price_region", "sf_nem_year",
+    "sf_nem_years", "sf_capacity_sizing_year", "sf_nem_resolution",
+    "sf_sla_monthly_enabled", "sf_sla_monthly_share",
+    "sf_sla_daily_enabled", "sf_sla_daily_share",
+    "nm_year_range", "nm_resolution",
     "sf_aer_region", "sf_aer_quarters",
     "_sf_data_source_touched", "_sf_aer_applied", "_sf_aer_pending",
 ]
