@@ -32,8 +32,11 @@ have already been made here, so they are not repeated.
 ## 2. Repo conventions that will bite you
 
 - **No-network import discipline.** `ppa/data/nem_data.py` and `ppa/data/aer_futures.py`
-  must not import `requests`/`urllib`/`httpx`/`nemosis`/`socket`/`streamlit`. All network
-  access lives in `scripts/`. Preserve this.
+  must not import `requests`/`urllib`/`httpx`/`nemosis`/`socket`/`streamlit`. All
+  acquisition-network access lives in `scripts/`. At runtime, **`ppa/data/remote_cache.py`
+  is the only module permitted network access**. `nem_data.py` must never import it;
+  callers fetch first (`ensure_plant_years`/`ensure_price_years`), then read. Preserve
+  this.
 - **Australian English is a test gate.** `tests/test_spelling_en_au.py` scans `ppa/`,
   `ui/`, `scripts/`, `streamlit_app.py`, `README.md`. It is case-insensitive and
   suppresses only the matched span of an allowlisted third-party name, not the whole
@@ -79,6 +82,10 @@ have already been made here, so they are not repeated.
 - **Commissioning plants** are excluded by comparing early-year peak to the plant's own
   annual peak (`commissioning_ramp_check`). Do not switch this to an absolute-level
   test: solar clips at 0.80 of nameplate, and heavily curtailed plants dip mid-year.
+- **tsam clustering destroys the calendar.** Monthly SLA constraints are meaningless on
+  clustered snapshots and are blocked in `validate_scenario` and again in `solve()`;
+  daily constraints are applied per representative-day block via `period_labels` and
+  are an approximation.
 
 ---
 
@@ -147,4 +154,6 @@ cd /path/to/workdir && opencode run --auto \
 everything else. Both caches are committed deliberately (Streamlit Cloud cannot fetch
 them). Note that **deleting a cache from the working tree does not reclaim history** —
 that needs a history rewrite, which invalidates every existing clone. Decide before
-pushing, not after.
+pushing, not after. The single-year availability cache may eventually be reduced or
+removed from the working tree in favour of Zenodo once a real record is published —
+**not yet**, since no such record exists (see `docs/DATA_ACQUISITION.md`).
