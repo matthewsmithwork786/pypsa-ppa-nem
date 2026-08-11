@@ -101,6 +101,51 @@ def _render_sizing_diagnostics() -> None:
         st.dataframe(diag["tech_rows"], width="stretch")
         st.markdown("**Connection links**")
         st.dataframe(diag["link_rows"], width="stretch")
+        # WP9: which SLA tiers were live in the sizing LP and how much work they
+        # did. `sla_constraint_count` comes from ppa.sizing.SizedCapacities (the
+        # solver stores it in n.meta["sla_constraint_count"]) — a positive count
+        # means the tier was a genuine constraint on the build, not just a price
+        # signal, and the daily tier is the biggest multiplier (one per day).
+        scn = state.get_effective_scenario()
+        sla_constraints = int(diag.get("sla_constraint_count", 0))
+        sla_rows = [
+            {
+                "SLA tier": "Monthly",
+                "Active": "Yes" if getattr(scn, "sla_monthly_enabled", False) else "No",
+                "Target share": (
+                    f"{scn.sla_monthly_share:.0%}"
+                    if getattr(scn, "sla_monthly_enabled", False) else "—"
+                ),
+            },
+            {
+                "SLA tier": "Daily",
+                "Active": "Yes" if getattr(scn, "sla_daily_enabled", False) else "No",
+                "Target share": (
+                    f"{scn.sla_daily_share:.0%}"
+                    if getattr(scn, "sla_daily_enabled", False) else "—"
+                ),
+            },
+            {
+                "SLA tier": "Min-delivery floor",
+                "Active": "Yes" if getattr(scn, "enforce_min_delivery", False) else "No",
+                "Target share": (
+                    f"{getattr(scn, 'required_delivery_share', 0.0):.0%}"
+                    if getattr(scn, "enforce_min_delivery", False) else "—"
+                ),
+            },
+            {"SLA tier": "Constraints added", "Active": "—", "Target share": str(sla_constraints)},
+        ]
+        st.markdown("**SLA tiers**")
+        st.dataframe(pd.DataFrame(sla_rows), width="stretch")
+        if sla_constraints > 0:
+            st.caption(
+                f"**{sla_constraints}** SLA/delivery constraint(s) were live in the sizing LP — "
+                "each Active tier adds one shortfall cap (+ one min-delivery floor) per period, "
+                "so the daily tier alone multiplies the constraint count by the number of days. "
+                "Whether a tier binds at the optimum is visible on the Deep Dive tab: the "
+                "achieved share sitting at the target means the constraint is what stopped the "
+                "LP doing something cheaper."
+            )
         _delivery_sizing = diag.get("sizing_delivery_share")
         _delivery_full = diag.get("delivery_share_full")
         if _delivery_sizing is not None and _delivery_full is not None:

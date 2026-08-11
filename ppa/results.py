@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -47,6 +47,14 @@ class SummaryVolumes:
     allowed_shortfall_share_actual: float
     buy_share_of_ppa_delivery: float
     penalty_share_of_load: float
+    # Tiered SLA reporting (WP9): worst achieved per-period delivery share and
+    # how many periods fell below the scenario's target. Defaults keep an old
+    # pickled run_store payload readable — an unused tier must never LOOK like a
+    # violation, so the min starts at 1.0 when the tier is off.
+    min_monthly_delivery_share: float = 1.0
+    min_daily_delivery_share: float = 1.0
+    n_months_below_sla: int = 0
+    n_days_below_sla: int = 0
 
 
 @dataclass
@@ -71,6 +79,12 @@ class OptimisationResult:
     n_period_hours: float
     market_prices: pd.Series = None  # type: ignore[assignment]
     link_utilisation: pd.DataFrame = None  # type: ignore[assignment]
+    # Per-period delivered share D/L (index = period end, value = delivery share).
+    # None when the corresponding SLA tier was off on the scenario that produced
+    # this result. `warnings` carries post-solve SLA verification messages.
+    monthly_delivery_share: pd.Series = None  # type: ignore[assignment]
+    daily_delivery_share: pd.Series = None  # type: ignore[assignment]
+    warnings: list[str] = field(default_factory=list)
 
 
 def _extract_link_utilisation(n: pypsa.Network) -> pd.DataFrame:
@@ -159,6 +173,71 @@ def extract_results(
     )
     penalty_share_of_load = penalty_mwh / total_load_mwh if total_load_mwh > 0 else 0.0
 
+    # ── Tiered SLA reporting ──────────────────────────────────────────────────
+    # Per-period delivered share D/L, mirroring the solver's SLA constraints
+    # (`MinDelivery_Limit_M*` / `_D*`): delivered MWh is the IPPGen_to_PPAOfftake
+    # link flow, load is ts["ppaload_mw"], each weighted by resolution_h. This is
+    # the post-solve check of AGENTS.md §5.2 — if the constraint and this check
+    # ever disagree by more than solver tolerance, that disagreement IS the bug.
+    delivered_mwh = ppa_delivery * resolution_h
+    load_mwh = ts["ppaload_mw"] * resolution_h
+
+    def _period_delivery_share(periods: pd.Index) -> pd.Series:
+        """Delivered/load per period, indexed by the period-end timestamp."""
+        deliv = delivered_mwh.groupby(periods).sum()
+        load = load_mwh.groupby(periods).sum()
+        share = deliv / load.replace(0.0, np.nan)
+        share = share.dropna()
+        share.index = share.index.to_timestamp(how="end")
+        return share
+
+    monthly_delivery_share: pd.Series | None = None
+    daily_delivery_share: pd.Series | None = None
+    min_monthly_delivery_share = 1.0
+    min_daily_delivery_share = 1.0
+    n_months_below_sla = 0
+    n_days_below_sla = 0
+    warnings: list[str] = []
+
+    # A single-period run leaves the min at 1.0 (not the achieved share) so an
+    # unused/trivially-sized field never reads as a violation; the period series
+    # itself is still reported for inspection.
+    if s.sla_monthly_enabled:
+        monthly_delivery_share = _period_delivery_share(ts.index.to_period("M"))
+        if len(monthly_delivery_share) > 1:
+            min_monthly_delivery_share = float(monthly_delivery_share.min())
+            n_months_below_sla = int(
+                (monthly_delivery_share < s.sla_monthly_share - 1e-6).sum()
+            )
+    if s.sla_daily_enabled:
+        daily_delivery_share = _period_delivery_share(ts.index.to_period("D"))
+        if len(daily_delivery_share) > 1:
+            min_daily_delivery_share = float(daily_delivery_share.min())
+            n_days_below_sla = int(
+                (daily_delivery_share < s.sla_daily_share - 1e-6).sum()
+            )
+
+    # Verification (AGENTS.md §5.2): when a tier is enabled and the achieved
+    # minimum falls more than 0.5 percentage points below the requirement, the
+    # constraint and the post-solve measure disagree — surface that loudly in the
+    # UI rather than raising, so an infeasible-adjacent solve stays inspectable.
+    if monthly_delivery_share is not None and len(monthly_delivery_share) > 1:
+        if min_monthly_delivery_share < s.sla_monthly_share - 0.005:
+            warnings.append(
+                f"Monthly SLA: minimum achieved delivery share "
+                f"{min_monthly_delivery_share:.1%} is more than 0.5pp below the "
+                f"required {s.sla_monthly_share:.0%} "
+                f"({n_months_below_sla} of {len(monthly_delivery_share)} month(s) below target)."
+            )
+    if daily_delivery_share is not None and len(daily_delivery_share) > 1:
+        if min_daily_delivery_share < s.sla_daily_share - 0.005:
+            warnings.append(
+                f"Daily SLA: minimum achieved delivery share "
+                f"{min_daily_delivery_share:.1%} is more than 0.5pp below the "
+                f"required {s.sla_daily_share:.0%} "
+                f"({n_days_below_sla} of {len(daily_delivery_share)} day(s) below target)."
+            )
+
     summary = SummaryVolumes(
         total_load_mwh=total_load_mwh,
         ppa_delivered_mwh=ppa_delivered_mwh,
@@ -175,6 +254,10 @@ def extract_results(
         allowed_shortfall_share_actual=allowed_shortfall_share_actual,
         buy_share_of_ppa_delivery=buy_share_of_ppa_delivery,
         penalty_share_of_load=penalty_share_of_load,
+        min_monthly_delivery_share=min_monthly_delivery_share,
+        min_daily_delivery_share=min_daily_delivery_share,
+        n_months_below_sla=n_months_below_sla,
+        n_days_below_sla=n_days_below_sla,
     )
 
     # ── Revenue ───────────────────────────────────────────────────────────────
@@ -210,6 +293,9 @@ def extract_results(
         n_period_hours=len(ts) * resolution_h,
         market_prices=ts["ts_MktPrice"],
         link_utilisation=_extract_link_utilisation(n),
+        monthly_delivery_share=monthly_delivery_share,
+        daily_delivery_share=daily_delivery_share,
+        warnings=warnings,
     )
 
 
