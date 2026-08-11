@@ -10,6 +10,9 @@ if TYPE_CHECKING:
     from ppa.financials import MultiYearFinancialResult
 
 SCENARIO_KEY = "scenario"
+RESULT_KEY = "optimisation_result"
+FINANCIAL_KEY = "financial_result"
+COUNTERFACTUAL_KEY = "counterfactual_result"
 TIMESERIES_KEY = "timeseries"
 ACTIVE_CASE_STUDY_KEY = "active_case_study_id"
 MULTI_YEAR_RESULTS_KEY = "multi_year_results"
