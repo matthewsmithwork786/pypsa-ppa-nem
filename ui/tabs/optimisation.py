@@ -201,6 +201,12 @@ def _render_scenario_summary(s) -> None:
             st.markdown(f"- Offtake: **{s.ppaload_mw:.0f} MW** flat")
             st.markdown(f"- Tariff: **A${s.ppa_price:.0f}/MWh**")
             st.markdown(f"- Required delivery: **{s.required_delivery_share:.0%}**")
+            if s.sla_monthly_enabled:
+                st.markdown(f"- Monthly minimum: **{s.sla_monthly_share:.0%}**")
+            if s.sla_daily_enabled:
+                st.markdown(f"- Daily minimum: **{s.sla_daily_share:.0%}**")
+            if not (s.sla_monthly_enabled or s.sla_daily_enabled):
+                st.markdown("- Tiered SLA: *none*")
             if s.enable_penalty:
                 st.markdown(f"- Penalty: **{s.pen_mult:.1f}×** = A${s.penalty_price:.0f}/MWh")
             else:
