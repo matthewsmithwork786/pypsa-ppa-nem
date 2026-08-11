@@ -69,3 +69,10 @@ def test_the_checker_actually_catches_the_bug_that_shipped():
     # Rebinding must reset the count, not keep the old one.
     rebound = "cols = st.columns(4)\ncols = st.columns(2)\nx = cols[3]\n"
     assert _column_index_problems(rebound)
+
+
+def test_app_title():
+    """The app title and H1 must use the Australia product name verbatim."""
+    app = Path(__file__).resolve().parents[1] / "streamlit_app.py"
+    source = app.read_text()
+    assert "PyPSA based PPA explorer - Australia" in source

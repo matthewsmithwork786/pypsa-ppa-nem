@@ -259,30 +259,7 @@ def render() -> None:
         "Region filter", options=regions_present, default=regions_present, key="nm_region_filter",
     )
 
-    # Capacity-factor floors per technology. Only simulation-ready plants with a
-    # full year of UIGF are selectable; the CUF floors just hide underperformers
-    # on the map/lists.
-    cuf_min = {}
-    cuf_filters = st.columns(2)
-    for i, tech in enumerate(("Wind", "Solar")):
-        tech_cuf = pd.to_numeric(plants_df.loc[plants_df["fuel_tech"] == tech, "cuf"], errors="coerce")
-        lo, hi = (float(tech_cuf.min()), float(tech_cuf.max())) if len(tech_cuf) else (0.0, 1.0)
-        default = lo
-        cuf_min[tech] = cuf_filters[i].slider(
-            f"Min {tech} capacity factor (%)",
-            min_value=0, max_value=100,
-            value=int(default * 100) if default == default else 0,
-            step=1, format="%d%%", key=f"nm_cuf_min_{tech.lower()}",
-            help=f"Hide {tech.lower()} plants whose 2025 UIGF capacity factor is below this floor.",
-        ) / 100.0
-
     filtered = plants_df[plants_df["region"].isin(region_filter)] if region_filter else plants_df
-    for tech, floor in cuf_min.items():
-        if floor > 0:
-            tech_cuf = pd.to_numeric(filtered.loc[filtered["fuel_tech"] == tech, "cuf"], errors="coerce")
-            filtered = filtered[
-                ~((filtered["fuel_tech"] == tech) & tech_cuf.lt(floor).fillna(False))
-            ]
 
     # ── Apply pending map click BEFORE rendering the selectboxes ───────────────
     click_state = st.session_state.get("nm_map", {}) or {}

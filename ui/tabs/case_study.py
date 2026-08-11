@@ -1,92 +1,44 @@
-"""Case Setup — select a preset and customise all scenario parameters."""
+"""Case Setup — customise all scenario parameters."""
 from __future__ import annotations
 
 import dataclasses
 
 import streamlit as st
 
-from ppa.scenario import CASE_STUDIES, BASE_SCENARIO, load_case_study
+from ppa.scenario import BASE_SCENARIO
 from ui import state
 from ui.scenario_form import render_scenario_form
-
-
-def _render_case_study_card(cs, is_active: bool) -> bool:
-    border_color = "#1565C0" if is_active else "#E0E0E0"
-    bg_color = "#E3F2FD" if is_active else "#FAFAFA"
-    badge = " ✓ Active" if is_active else ""
-    st.markdown(
-        f"""
-<div style="border: 2px solid {border_color}; border-radius: 10px; padding: 16px;
-            background: {bg_color}; height: 100%;">
-  <div style="font-size: 2rem; margin-bottom: 6px;">{cs.icon}</div>
-  <div style="font-weight: 700; font-size: 1.05rem; color: #1A237E;">{cs.name}{badge}</div>
-  <div style="font-size: 0.85rem; color: #546E7A; margin-bottom: 8px;">{cs.subtitle}</div>
-  <div style="font-size: 0.88rem; color: #424242; line-height: 1.5;">{cs.storyline}</div>
-  <div style="font-size: 0.90rem; color: #424242; line-height: 1.5;"><br/><b>{cs.question}</b></div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-    st.markdown("")
-    return st.button(
-        "Reload" if is_active else "Load this scenario",
-        key=f"load_cs_{cs.id}",
-        width="stretch",
-        type="primary" if is_active else "secondary",
-    )
 
 
 def render() -> None:
     st.title("🔬 Case Selection and Adjustment")
     st.markdown(
-        "Choose a predefined scenario to explore, then customise any parameters below — "
-        "including **simulation horizon** and **technology degradation**. "
+        "Set the commercial terms of the PPA and the portfolio, then click **Apply changes**. "
         "Head to **Get Data** to fetch data, then **Optimisation** to run."
     )
-    # st.markdown("---")
 
-    # ── Case study cards ──────────────────────────────────────────────────────
-    st.subheader("Predefined case studies")
-    active_id = state.get_active_case_study_id()
-    cols = st.columns(len(CASE_STUDIES), vertical_alignment="bottom")
-    for col, cs in zip(cols, CASE_STUDIES):
-        with col:
-            if _render_case_study_card(cs, is_active=(cs.id == active_id)):
-                state.set_scenario(load_case_study(cs))
-                state.set_active_case_study_id(cs.id)
-                state.clear_custom_upload()
-                state.clear_run_outputs()
-                st.rerun()
+    if not state.has_scenario():
+        state.set_scenario(BASE_SCENARIO)
 
-    # ── Customise parameters ──────────────────────────────────────────────────
-    with st.expander("Customise parameters", expanded=False):
-        st.markdown(
-            "Controls are pre-filled from the active case study. "
-            "Adjust any value, then click **Apply changes**."
+    current = state.get_scenario()
+    updated = render_scenario_form(current)
+
+    if dataclasses.asdict(updated) != dataclasses.asdict(current):
+        st.warning(
+            "⚠️ You have unapplied changes — click **Apply changes** below, "
+            "otherwise Get Data / Optimisation will keep using the previous "
+            "settings (e.g. an unapplied PPA tariff or tsam-weeks edit)."
         )
-        if not state.has_scenario():
+
+    cols = st.columns(2)
+    with cols[0]:
+        if st.button("Apply changes", type="primary", width="stretch"):
+            state.set_scenario(updated)
+            state.clear_run_outputs()
+            st.success("Scenario updated. Head to Optimisation to run.")
+    with cols[1]:
+        if st.button("Reset to base defaults", type="secondary", width="stretch"):
             state.set_scenario(BASE_SCENARIO)
-
-        current = state.get_scenario()
-        updated = render_scenario_form(current)
-
-        if dataclasses.asdict(updated) != dataclasses.asdict(current):
-            st.warning(
-                "⚠️ You have unapplied changes — click **Apply changes** below, "
-                "otherwise Get Data / Optimisation will keep using the previous "
-                "settings (e.g. an unapplied PPA tariff or tsam-weeks edit)."
-            )
-
-        cols = st.columns(2)
-        with cols[0]:
-            if st.button("Apply changes", type="primary", width="stretch"):
-                state.set_scenario(updated)
-                state.clear_run_outputs()
-                st.success("Scenario updated. Head to Optimisation to run.")
-        with cols[1]:
-            if st.button("Reset to base defaults", type="secondary", width="stretch"):
-                state.set_scenario(BASE_SCENARIO)
-                state.set_active_case_study_id("")
-                state.clear_custom_upload()
-                state.clear_run_outputs()
-                st.rerun()
+            state.clear_custom_upload()
+            state.clear_run_outputs()
+            st.rerun()
