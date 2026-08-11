@@ -1,6 +1,8 @@
 """Case Setup — select a preset and customise all scenario parameters."""
 from __future__ import annotations
 
+import dataclasses
+
 import streamlit as st
 
 from ppa.scenario import CASE_STUDIES, BASE_SCENARIO, load_case_study
@@ -67,6 +69,13 @@ def render() -> None:
 
         current = state.get_scenario()
         updated = render_scenario_form(current)
+
+        if dataclasses.asdict(updated) != dataclasses.asdict(current):
+            st.warning(
+                "⚠️ You have unapplied changes — click **Apply changes** below, "
+                "otherwise Get Data / Optimisation will keep using the previous "
+                "settings (e.g. an unapplied PPA tariff or tsam-weeks edit)."
+            )
 
         cols = st.columns(2)
         with cols[0]:

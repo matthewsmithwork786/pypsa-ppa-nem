@@ -11,6 +11,9 @@ import streamlit as st
 from ppa.scenario import BASE_SCENARIO
 from ui import state
 from ui.charts import year_axis
+from ui.config_summary import render_config_summary
+from ui.constants import NEM_RESOLUTION_MINUTES
+from ui.exports import csv_download_button
 
 
 def restore_from_query_params() -> None:
@@ -422,6 +425,7 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
 # ── multi-year results display ────────────────────────────────────────────────
 
 def _render_results(fin, n_years: int) -> None:
+    render_config_summary(state.get_effective_scenario())
     with st.expander("Optimisation results", expanded=True):
         avg_delivery = sum(y.fulfilled_share for y in fin.yearly) / len(fin.yearly) if fin.yearly else 0.0
         cols = st.columns(6)
@@ -497,6 +501,10 @@ def _render_npv_chart(fin) -> None:
         xaxis=year_axis(years),
     )
     st.plotly_chart(fig, width="stretch")
+    csv_download_button(
+        pd.DataFrame({"year": years, "cumulative_npv_aud_m": [v / 1e6 for v in fin.cumulative_npv]}),
+        "cumulative_npv.csv", key="dl_npv",
+    )
 
 
 def _render_revenue_chart(fin) -> None:
@@ -514,6 +522,18 @@ def _render_revenue_chart(fin) -> None:
         xaxis=year_axis(years),
     )
     st.plotly_chart(fig, width="stretch")
+    csv_download_button(
+        pd.DataFrame({
+            "year": years,
+            "ppa_revenue_aud_m": [y.ppa_revenue / 1e6 for y in fin.yearly],
+            "merchant_revenue_aud_m": [y.merch_revenue / 1e6 for y in fin.yearly],
+            "market_buy_cost_aud_m": [y.market_buy_cost / 1e6 for y in fin.yearly],
+            "penalty_cost_aud_m": [y.penalty_cost / 1e6 for y in fin.yearly],
+            "transmission_cost_aud_m": [y.transmission_cost / 1e6 for y in fin.yearly],
+            "opex_aud_m": [y.opex / 1e6 for y in fin.yearly],
+        }),
+        "annual_revenue_breakdown.csv", key="dl_revenue",
+    )
 
 
 def _render_delivery_chart(fin) -> None:
@@ -531,6 +551,10 @@ def _render_delivery_chart(fin) -> None:
         xaxis=year_axis(years),
     )
     st.plotly_chart(fig, width="stretch")
+    csv_download_button(
+        pd.DataFrame({"year": years, "delivery_rate_pct": [round(y.fulfilled_share, 3) * 100 for y in fin.yearly]}),
+        "ppa_delivery_rate.csv", key="dl_delivery",
+    )
 
 
 def _render_yearly_table(fin) -> None:

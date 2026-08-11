@@ -15,6 +15,8 @@ from ppa.results import (
     filter_dispatch_range,
 )
 from ui import state
+from ui.config_summary import render_config_summary
+from ui.exports import csv_download_button
 from ui.charts import (
     make_supply_mix_24h_chart,
     make_soc_chart,
@@ -42,6 +44,20 @@ def _downsample_series(series: pd.Series) -> pd.Series:
     return series.iloc[::step]
 
 
+_MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+
+
+def _month_filtered(obj, month: int | None):
+    """Restrict a Series/DataFrame to one calendar month, or return it as-is
+    for 'All months' (month=None)."""
+    if month is None:
+        return obj
+    return obj[obj.index.month == month]
+
+
 def _render_dispatch_section(result, s, chosen_day: str) -> None:
     supply_mix = build_supply_mix_df(result.dispatch)
     ts_index = supply_mix.index
@@ -50,9 +66,20 @@ def _render_dispatch_section(result, s, chosen_day: str) -> None:
     default_start = min(pd.Timestamp(chosen_day), last_day)
     default_end = min(default_start + pd.Timedelta(days=7), last_day)
 
+    # Month filter for the (cheap, whole-period) average-24h view -- independent
+    # of the date-range slider below, which only scopes the (expensive) full
+    # time-series view.
+    months_present = sorted(ts_index.month.unique())
+    avg_month = st.selectbox(
+        "Average 24h view — restrict to month",
+        options=[None] + months_present,
+        format_func=lambda m: "All months (full year)" if m is None else _MONTH_NAMES[m - 1],
+        key="dd_avg_month",
+    )
+
     if last_day > first_day:
         start, end = st.slider(
-            "Date range to inspect",
+            "Time series view — date range to inspect",
             min_value=first_day.date(),
             max_value=last_day.date(),
             value=(default_start.date(), default_end.date()),
@@ -64,6 +91,8 @@ def _render_dispatch_section(result, s, chosen_day: str) -> None:
 
     range_mix = filter_dispatch_range(supply_mix, start, end)
     window_label = f"{start.strftime('%d %b')} – {end.strftime('%d %b')}"
+    avg_mix = _month_filtered(supply_mix, avg_month)
+    avg_label = "All year" if avg_month is None else _MONTH_NAMES[avg_month - 1]
 
     tab_chart1, tab_chart2, tab_chart3 = st.tabs([
         "| Actual hourly supply mix",
@@ -71,7 +100,15 @@ def _render_dispatch_section(result, s, chosen_day: str) -> None:
         "| BESS SoC",
     ])
     with tab_chart1:
-        tab_ts, tab_avg = st.tabs(["| Time series", "| Average 24 h"])
+        # Average 24h loads instantly (24 points) even for a full year of hourly
+        # data, so it renders first; the full time-series chart (up to 8,760+
+        # points) is the heavier second tab.
+        tab_avg, tab_ts = st.tabs(["| Average 24 h", "| Time series"])
+        with tab_avg:
+            fig = make_supply_mix_24h_chart(build_24h_avg(avg_mix), s.ppaload_mw)
+            fig.update_layout(title=f"Average supply mix by time of day — {avg_label}")
+            st.plotly_chart(fig, width="stretch", height=400)
+            csv_download_button(build_24h_avg(avg_mix), "supply_mix_avg_24h.csv", key="dl_mix_avg")
         with tab_ts:
             fig = make_supply_mix_24h_chart(
                 range_mix.assign(slot=range_mix.index),
@@ -80,15 +117,18 @@ def _render_dispatch_section(result, s, chosen_day: str) -> None:
             )
             fig.update_layout(title=f"Supply mix — {window_label}")
             st.plotly_chart(fig, width="stretch", height=400)
-        with tab_avg:
-            fig = make_supply_mix_24h_chart(build_24h_avg(range_mix), s.ppaload_mw)
-            fig.update_layout(title=f"Average supply mix by time of day — {window_label}")
-            st.plotly_chart(fig, width="stretch", height=400)
+            csv_download_button(range_mix, "supply_mix_timeseries.csv", key="dl_mix_ts")
 
     with tab_chart2:
         if getattr(result, "market_prices", None) is not None:
             price_range = filter_dispatch_range(result.market_prices, start, end)
-            tab_ts, tab_avg = st.tabs(["| Time series", "| Average 24 h"])
+            avg_prices = _month_filtered(result.market_prices, avg_month)
+            tab_avg, tab_ts = st.tabs(["| Average 24 h", "| Time series"])
+            with tab_avg:
+                fig_price = make_price_24h_chart(build_24h_band(avg_prices))
+                fig_price.update_layout(title=f"Average day-ahead price — {avg_label}")
+                st.plotly_chart(fig_price, width="stretch", height=400)
+                csv_download_button(build_24h_band(avg_prices), "price_avg_24h.csv", key="dl_price_avg")
             with tab_ts:
                 fig_price = make_price_series_chart(
                     _downsample_series(price_range),
@@ -96,16 +136,22 @@ def _render_dispatch_section(result, s, chosen_day: str) -> None:
                     rangeslider=True,
                 )
                 st.plotly_chart(fig_price, width="stretch", height=400)
-            with tab_avg:
-                fig_price = make_price_24h_chart(build_24h_band(price_range))
-                st.plotly_chart(fig_price, width="stretch", height=400)
+                csv_download_button(price_range, "price_timeseries.csv", key="dl_price_ts")
         else:
             st.info("No market price data available for this scenario.")
 
     with tab_chart3:
         if s.include_bess and s.effective_bess_mwh > 0:
             soc_range = filter_dispatch_range(result.dispatch.soc, start, end)
-            tab_ts, tab_avg = st.tabs(["| Time series", "| Average 24 h"])
+            avg_soc = _month_filtered(result.dispatch.soc, avg_month)
+            tab_avg, tab_ts = st.tabs(["| Average 24 h", "| Time series"])
+            with tab_avg:
+                fig_soc = make_soc_24h_chart(
+                    build_24h_band(avg_soc), s.effective_bess_mwh
+                )
+                fig_soc.update_layout(title=f"Average BESS SoC by time of day — {avg_label}")
+                st.plotly_chart(fig_soc, width="stretch", height=400)
+                csv_download_button(build_24h_band(avg_soc), "bess_soc_avg_24h.csv", key="dl_soc_avg")
             with tab_ts:
                 fig_soc = make_soc_chart(
                     _downsample_series(soc_range),
@@ -113,11 +159,7 @@ def _render_dispatch_section(result, s, chosen_day: str) -> None:
                     rangeslider=True,
                 )
                 st.plotly_chart(fig_soc, width="stretch", height=400)
-            with tab_avg:
-                fig_soc = make_soc_24h_chart(
-                    build_24h_band(soc_range), s.effective_bess_mwh
-                )
-                st.plotly_chart(fig_soc, width="stretch", height=400)
+                csv_download_button(soc_range, "bess_soc_timeseries.csv", key="dl_soc_ts")
         else:
             st.info("No BESS included in this scenario.")
 
@@ -243,8 +285,51 @@ def _render_multi_year_deep_dive() -> None:
     # capacities the results were actually produced with, not the slider values.
     s = state.get_effective_scenario()
 
+    render_config_summary(s)
+
+    # ── Year + day selectors ──────────────────────────────────────────────────
+    year_options = [y.year for y in fin.yearly]
+    cols = st.columns(4)
+    selected_year = cols[0].selectbox("**Year to analyse:**", year_options, key="dd_year")
+    year_idx = year_options.index(selected_year)
+    result = results[year_idx]
+
+    available_days = sorted(result.dispatch.wind_gen.index.normalize().unique().strftime("%Y-%m-%d"))
+
+    # ── Detailed results (generation/dispatch first — this is what people come
+    # here for; financial roll-ups follow below) ──────────────────────────────
+    with st.expander("Detailed results", expanded=True):
+        tab_chart1, tab_chart2, tab_chart3 = st.tabs([
+            "| Hourly dispatch",
+            "| Generation statistics",
+            "| Counterfactual procurement comparison",
+        ])
+        with tab_chart1:
+            # st.subheader(f"Hourly dispatch — {chosen_day}")
+            cols = st.columns(4)
+            chosen_day = cols[0].selectbox("Day to inspect", available_days, index=0, key="dd_chosen_day1")
+            _render_dispatch_section(result, result.scenario, chosen_day)
+        with tab_chart2:
+            # ── Generation statistics ─────────────────────────────────────────────────
+            st.caption(f"High-level generation statistics for {selected_year}")
+            _render_gen_stats(result, result.scenario)
+        with tab_chart3:
+            # ── Counterfactual procurement comparison ─────────────────────────────────
+            # st.subheader("Counterfactual procurement comparison")
+            _render_multi_year_counterfactuals(results, fin, s)
+
+    # ── Financial summary for selected year ───────────────────────────────────
+    with st.expander(f"Financial summary for {selected_year}", expanded=False):
+        yf = fin.yearly[year_idx]
+        cols = st.columns(5)
+        cols[0].metric("PPA Revenue", f"A${yf.ppa_revenue / 1e6:.2f}M")
+        cols[1].metric("Merchant Revenue", f"A${yf.merch_revenue / 1e6:.2f}M")
+        cols[2].metric("Net Cash Flow", f"A${yf.net_cashflow / 1e6:.2f}M")
+        cols[3].metric("Delivery Rate", f"{yf.fulfilled_share:.1%}")
+        cols[4].metric("Wind+PV Gen", f"{(yf.wind_gen_mwh + yf.pv_gen_mwh) / 1e3:.0f} GWh")
+
     # ── Lifetime project economics ────────────────────────────────────────────
-    with st.expander("Lifetime project economics", expanded=True):
+    with st.expander("Lifetime project economics", expanded=False):
         cols = st.columns(2)
         with cols[0]:
             st.markdown("**CAPEX & OPEX**")
@@ -267,7 +352,6 @@ def _render_multi_year_deep_dive() -> None:
             lcoe_str = f"A${fin.lcoe:.2f}/MWh" if fin.lcoe == fin.lcoe else "n/a"
             payback_str = f"{fin.simple_payback:.1f} yrs" if fin.simple_payback < 1e8 else "n/a"
             avg_delivery = sum(y.fulfilled_share for y in fin.yearly) / len(fin.yearly) if fin.yearly else 0.0
-            be_str = f"A${fin.breakeven_ppa_price:.2f}/MWh" if fin.breakeven_ppa_price == fin.breakeven_ppa_price else "n/a"
             econ_df = pd.DataFrame(
                 [
                     ("NPV", _fmt_m(fin.npv), f"at {s.discount_rate:.0%} WACC"),
@@ -278,54 +362,132 @@ def _render_multi_year_deep_dive() -> None:
                     ("Total lifetime generation", f"{fin.total_lifetime_generation_mwh / 1e3:.0f} GWh", ""),
                     ("Achieved PPA delivery (avg)", f"{avg_delivery:.1%}",
                      f"vs {s.required_delivery_share:.0%} required"),
-                    ("Breakeven PPA for target IRR", be_str,
+                    ("Breakeven PPA for target IRR",
+                     f"A${fin.breakeven_ppa_price:.2f}/MWh" if fin.breakeven_ppa_price == fin.breakeven_ppa_price else "n/a",
                      f"at {s.target_irr:.0%} vs A${s.ppa_price:.0f}/MWh contracted"),
                 ],
                 columns=["Metric", "Value", "Note"],
             )
             st.dataframe(econ_df, hide_index=True, width="stretch")
 
-    # ── Year + day selectors ──────────────────────────────────────────────────
-    year_options = [y.year for y in fin.yearly]
-    cols = st.columns(4)
-    selected_year = cols[0].selectbox("**Year to analyse:**", year_options, key="dd_year")
-    year_idx = year_options.index(selected_year)
-    result = results[year_idx]
 
-    available_days = sorted(result.dispatch.wind_gen.index.normalize().unique().strftime("%Y-%m-%d"))
+def _render_single_day_deep_dive() -> None:
+    result = state.get_result()
+    s = result.scenario
+    fin = state.get_financial()
+    ts = state.get_timeseries()
 
-    # ── Financial summary for selected year ───────────────────────────────────
-    # st.markdown("---")
-    with st.expander(f"Financial summary for {selected_year}", expanded=False):
-        yf = fin.yearly[year_idx]
-        cols = st.columns(5)
-        cols[0].metric("PPA Revenue", f"A${yf.ppa_revenue / 1e6:.2f}M")
-        cols[1].metric("Merchant Revenue", f"A${yf.merch_revenue / 1e6:.2f}M")
-        cols[2].metric("Net Cash Flow", f"A${yf.net_cashflow / 1e6:.2f}M")
-        cols[3].metric("Delivery Rate", f"{yf.fulfilled_share:.1%}")
-        cols[4].metric("Wind+PV Gen", f"{(yf.wind_gen_mwh + yf.pv_gen_mwh) / 1e3:.0f} GWh")
+    render_config_summary(s)
 
-    # ── Daily dispatch ────────────────────────────────────────────────────────
-    # st.markdown("---")
-    with st.expander(f"Detailed results", expanded=False):
-        tab_chart1, tab_chart2, tab_chart3 = st.tabs([
-            "| Hourly dispatch", 
-            "| Generation statistics", 
-            "| Counterfactual procurement comparison",
-        ])
-        with tab_chart1:
-            # st.subheader(f"Hourly dispatch — {chosen_day}")
-            cols = st.columns(4)
-            chosen_day = cols[0].selectbox("Day to inspect", available_days, index=0, key="dd_chosen_day1")
-            _render_dispatch_section(result, result.scenario, chosen_day)
-        with tab_chart2:
-            # ── Generation statistics ─────────────────────────────────────────────────
-            st.caption(f"High-level generation statistics for {selected_year}")
-            _render_gen_stats(result, result.scenario)
-        with tab_chart3:
-            # ── Counterfactual procurement comparison ─────────────────────────────────
-            # st.subheader("Counterfactual procurement comparison")
-            _render_multi_year_counterfactuals(results, fin, s)
+    # ── Dispatch detail (generation first — financial roll-ups follow below) ──
+    st.subheader("Daily dispatch detail")
+
+    if ts is not None:
+        from ppa.data_loader import coerce_chosen_day, prepare_timeseries, get_available_days
+        ts_prep = prepare_timeseries(ts, s)
+        available_days = get_available_days(ts)
+        default_idx = available_days.index(coerce_chosen_day(ts, s.chosen_day)) if available_days else 0
+        chosen_day = st.selectbox("Select a day to inspect", available_days, index=default_idx, key="dd_chosen_day2")
+
+        _render_dispatch_section(result, s, chosen_day)
+
+        if getattr(result, "market_prices", None) is None:
+            # _render_dispatch_section's price tab needs result.market_prices;
+            # fall back to the raw timeseries price column when it's absent.
+            st.subheader("Market spot price")
+            fig_price = make_price_series_chart(ts_prep)
+            st.plotly_chart(fig_price, width="stretch", height=400)
+
+    # ── Generation statistics ──────────────────────────────────────────────────
+    st.subheader("Generation statistics")
+    _render_gen_stats(result, s)
+
+    # ── Financial analysis ────────────────────────────────────────────────────
+    st.subheader("Financial analysis")
+
+    if fin is None:
+        st.info(
+            "Financial analysis was not run. Enable **Run financial analysis** in the scenario "
+            "form and re-run the optimisation.",
+            icon="💰",
+        )
+    else:
+        cols = st.columns(2)
+        with cols[0]:
+            st.markdown("**CAPEX & OPEX**")
+            capex_df = pd.DataFrame(
+                [
+                    ("Onshore wind", _fmt_m(fin.capex.capex_wind), f"{s.onsw_mw:.0f} MW × A${s.wind_capex_per_kw:,.0f}/kW"),
+                    ("Solar PV", _fmt_m(fin.capex.capex_pv), f"{s.pv_mw:.0f} MW × A${s.pv_capex_per_kw:,.0f}/kW"),
+                    ("BESS", _fmt_m(fin.capex.capex_bess), f"{s.effective_bess_mwh:.0f} MWh × A${s.bess_capex_per_kwh:,.0f}/kWh"),
+                    ("Devex", _fmt_m(fin.capex.devex_total), f"{s.devex_pct_of_capex:.0%} of CAPEX"),
+                    ("Total CAPEX", _fmt_m(fin.capex.capex_total), ""),
+                    ("Total investment", _fmt_m(fin.capex.total_investment), ""),
+                    ("Annual OPEX", _fmt_m(fin.capex.annual_opex), f"{s.opex_rate:.0%} of CAPEX"),
+                ],
+                columns=["Component", "Value", "Basis"],
+            )
+            st.dataframe(capex_df, hide_index=True, width="stretch", height="content")
+
+        with cols[1]:
+            st.markdown("**Project economics**")
+            irr_str = f"{fin.project_irr:.1%}" if not np.isnan(fin.project_irr) else "n/a"
+            lcoe_str = f"A${fin.lcoe:.2f}/MWh" if not np.isnan(fin.lcoe) else "n/a"
+            be_str = f"A${fin.breakeven_ppa_price:.2f}/MWh" if not np.isnan(fin.breakeven_ppa_price) else "n/a"
+            econ_df = pd.DataFrame(
+                [
+                    ("Scale factor (period → annual)", f"×{fin.scale_factor:.2f}", ""),
+                    ("Annual generation (indicative)", f"{fin.annual_gen_mwh:,.0f} MWh", ""),
+                    ("Annual PPA revenue", _fmt_m(fin.annual_ppa_rev), f"A${s.ppa_price:.0f}/MWh"),
+                    ("Annual merchant revenue", _fmt_m(fin.annual_merch_rev), f"avg A${fin.avg_merch_price:.2f}/MWh"),
+                    ("Annual market purchase cost", _fmt_m(fin.annual_buy_cost), f"avg A${fin.avg_buy_price:.2f}/MWh"),
+                    ("Annual net revenue", _fmt_m(fin.annual_net_rev), ""),
+                    ("Annual OPEX", _fmt_m(fin.annual_opex), ""),
+                    ("Annual pre-tax cashflow", _fmt_m(fin.annual_cf), ""),
+                    ("LCOE", lcoe_str, f"at {s.discount_rate:.0%} WACC"),
+                    ("Simple payback", f"{fin.simple_payback:.1f} yrs", ""),
+                    ("Project IRR", irr_str, f"pre-tax, {s.project_life_yrs}-yr life"),
+                    ("NPV at WACC", _fmt_m(fin.npv_at_wacc), f"at {s.discount_rate:.0%}"),
+                    (f"Breakeven PPA for {s.target_irr:.0%} IRR", be_str, f"vs A${s.ppa_price:.0f}/MWh contracted"),
+                ],
+                columns=["Metric", "Value", "Note"],
+            )
+            st.dataframe(econ_df, hide_index=True, width="stretch", height="content")
+
+    # ── Counterfactual procurement comparison ──────────────────────────────────
+    if state.has_counterfactual():
+        cf = state.get_counterfactual()
+        # st.markdown("---")
+        st.subheader("Counterfactual procurement comparison")
+        st.markdown(
+            "How does the PPA cost compare to what the offtaker would have paid "
+            "under alternative sourcing strategies? All figures are for the modelled period."
+        )
+        if s.cal_forward_source == "aer_indicative":
+            st.caption(s.cal_forward_note)
+
+        cols = st.columns([1, 2])
+        with cols[0]:
+            fig_cf = make_counterfactual_bar_chart(cf, s)
+            st.plotly_chart(fig_cf, width="stretch", height=400)
+        with cols[1]:
+            fig_cum = make_cumulative_cost_chart(cf)
+            st.plotly_chart(fig_cum, width="stretch", height=400)
+
+        cf_table = pd.DataFrame(
+            [
+                ("Spot-only", f"A${cf.spot_avg_price:.2f}", f"A${cf.spot_cost / 1e6:.3f}M",
+                 f"A${cf.spot_cost - cf.ppa_offtaker_cost:+,.0f}"),
+                (f"Base futures (A${s.cal_forward_price:.0f}/MWh)", f"A${cf.cal_avg_price:.2f}",
+                 f"A${cf.cal_cost / 1e6:.3f}M", f"A${cf.cal_cost - cf.ppa_offtaker_cost:+,.0f}"),
+                (f"Blended ({s.cal_hedge_fraction:.0%} hedged)", f"A${cf.blended_avg_price:.2f}",
+                 f"A${cf.blended_cost / 1e6:.3f}M", f"A${cf.blended_cost - cf.ppa_offtaker_cost:+,.0f}"),
+                ("PPA (offtaker)", f"A${cf.ppa_effective_price:.2f}",
+                 f"A${cf.ppa_offtaker_cost / 1e6:.3f}M", "—"),
+            ],
+            columns=["Strategy", "Effective A$/MWh", "Period total", "vs PPA (A$, + = more expensive)"],
+        )
+        st.dataframe(cf_table, hide_index=True, width="stretch")
 
 
 def render() -> None:
@@ -335,6 +497,15 @@ def render() -> None:
         n = len(state.get_multi_year_financial().yearly)
         st.caption(f"Showing results from last optimisation run ({n} year(s)).")
         _render_multi_year_deep_dive()
+
+        if state.has_result():
+            # st.markdown("---")
+            with st.expander("Single-day reference deep dive", expanded=False):
+                _render_single_day_deep_dive()
+
+    elif state.has_result():
+        st.caption("Showing results from last single-day reference run.")
+        _render_single_day_deep_dive()
 
     else:
         st.info(

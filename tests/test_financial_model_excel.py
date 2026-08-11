@@ -254,6 +254,7 @@ def _fake_year_results(n_years: int = 2, n_hours: int = 24,
             market_sell=_ser([0.7] * n_hours),
             ppa_delivery=_ser([0.9] * n_hours),
             penalty_gen=_ser([0.02] * n_hours),
+            allowed_shortfall=_ser([0.03] * n_hours),
         )
         results.append(SimpleNamespace(
             scenario=SimpleNamespace(first_sim_year=first_year),
