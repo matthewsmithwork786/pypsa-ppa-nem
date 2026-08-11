@@ -1,7 +1,7 @@
 import streamlit as st
 
 st.set_page_config(
-    page_title="PyPSA PPA Explorer",
+    page_title="PyPSA based PPA explorer - Australia",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -23,7 +23,7 @@ optimisation.restore_from_query_params()
 
 st.markdown(
     """
-    # PyPSA-based PPA Explorer
+    # PyPSA based PPA explorer - Australia
     """
 )
 with st.popover("Disclaimer", width="stretch", icon="⚠️"):
