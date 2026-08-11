@@ -722,3 +722,22 @@ drift anywhere in the pipeline (`Scenario.nem_year` becoming a derived property,
 defaults). `tsam` had to be `pip install`-ed into the shared `.pixi` env for this run (see
 merge commit notes on WP4/WP8) — it is declared in `pixi.toml`'s `[pypi-dependencies]` but
 was not actually installed in this checkout.
+
+**Follow-on finding, not part of this feature — flagged for a separate fix:** with `tsam`
+actually installed, `tests/test_sla_constraints.py::test_tsam_daily_sla_holds_per_representative_day`
+(previously always `pytest.importorskip`-skipped, so never actually run in any environment)
+fails with `IndexError: index N is out of bounds for axis 0 with size N` inside tsam's own
+`_rescaleClusterPeriods` (`tsam/timeseriesaggregation.py`), triggered from
+`ppa.sizing_tsam.cluster_typical_periods`'s call to `tsam.aggregate(..., extreme_periods=True)`
+— code that predates this feature branch entirely, so this is **not a regression from
+WP1–WP11**. Reproduced directly (outside pytest):
+`cluster_typical_periods(ts, n_periods=N)` raises for `N ∈ {4, 8, 16}`, succeeds for
+`N ∈ {20, 40}` (the `Scenario.sizing_n_periods` default), and succeeds at any `N` with
+`extreme_periods=False`. `validate_scenario` currently allows `sizing_n_periods` anywhere in
+`[4, 40]`, so a user picking a low period count for a faster tsam sizing run can hit this
+crash in production today, independent of anything in this feature. `tsam` was left
+uninstalled in the shared `.pixi` env afterwards (restoring the state every WP in this
+feature was actually reviewed against) — this needs its own investigation (a tsam version
+bump, if one exists that's still compatible with the `highspy==1.15.0` pin, or a defensive
+`extreme_periods` fallback in `cluster_typical_periods`) before `tsam` is safe to install by
+default.
