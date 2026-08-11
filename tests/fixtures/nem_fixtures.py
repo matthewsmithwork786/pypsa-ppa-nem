@@ -278,7 +278,7 @@ def build_manifest_fixture_cache(root_dir) -> Path:
     avail_dir.mkdir(parents=True, exist_ok=True)
     registry_dir.mkdir(parents=True, exist_ok=True)
 
-    full_index = _full_year_index()
+    full_index = _full_year_index(YEAR)
     capacity = 100.0
 
     clean = _wind_pattern(full_index, capacity)
