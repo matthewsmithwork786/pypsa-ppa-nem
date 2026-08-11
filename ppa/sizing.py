@@ -151,7 +151,12 @@ def clamp_sizing_years(requested_years: int, resolution_h: float = 1.0) -> tuple
     if mem_mb is None:
         return requested_years, None
 
-    per_year_mem_mb = _PER_WORKER_MEM_MB / max(1.0, float(resolution_h))
+    # Memory grows roughly linearly with snapshots, so a year at `resolution_h`
+    # hours per snapshot costs ~that much / resolution_h: 5-min (0.0833 h) rows
+    # cost ~12x the hourly figure, 2-hour rows cost half. No floor on the
+    # divisor -- applying one makes fine resolutions silently behave like
+    # hourly, which defeats the clamp's whole purpose.
+    per_year_mem_mb = _PER_WORKER_MEM_MB / max(1e-9, float(resolution_h))
     fit_years = max(1, int(mem_mb // per_year_mem_mb))
     if fit_years >= requested_years:
         return requested_years, None
@@ -160,7 +165,7 @@ def clamp_sizing_years(requested_years: int, resolution_h: float = 1.0) -> tuple
         f"Sizing LP horizon reduced from {requested_years} to {fit_years} year(s) "
         f"to fit available memory (~{mem_mb / 1024:.1f} GB free, "
         f"~{per_year_mem_mb / 1024:.1f} GB per simulated year at "
-        f"{resolution_h:.0f}h resolution). "
+        f"{resolution_h:g}h resolution). "
         "Optimised capacities are sized on the reduced horizon; the full "
         f"{requested_years}-year simulation still runs with those capacities."
     )
@@ -174,6 +179,7 @@ def build_sizing_timeseries(
     prices_by_year: dict[int, pd.Series],
     n_sizing_years: int,
     load_mw_by_year: dict[int, pd.Series] | None = None,
+    resolution_minutes: int = 60,
 ) -> pd.DataFrame:
     """Concatenate per-year timeseries into one sizing-LP horizon.
 
@@ -208,6 +214,7 @@ def build_sizing_timeseries(
             price_escalation_rate=scenario.price_escalation_rate,
             load_profile=scenario.load_profile,
             load_mw_by_year=load_kw,
+            resolution_minutes=resolution_minutes,
         )
         # Bake technology degradation into the capacity factors for this year
         ts["ts_PVGen"] = ts["ts_PVGen"] * (1.0 - scenario.pv_degradation_rate) ** idx
@@ -235,6 +242,8 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
     slight de-rating that approximates multi-year usable-capacity fade.
     """
     method = scenario.sizing_method
+    resolution_minutes = int(getattr(scenario, "nem_resolution_minutes", 60))
+    resolution_h = resolution_minutes / 60.0
     if method == "tsam":
         from ppa.sizing_tsam import cluster_typical_periods
 
@@ -247,9 +256,11 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         period_labels = weights.attrs.get("period_labels")
         n_years = max(1, round(float(weights.sum()) / 8760))
     else:  # full_hourly
-        n_years = max(1, round(len(ts) / 8760))
+        # len(ts) is in snapshots; each snapshot is resolution_minutes/60 hours,
+        # so a sub-hourly year has 8760 * 60 / resolution_minutes rows. Getting
+        # this wrong silently rescales every capex term via horizon_years.
+        n_years = max(1, round(len(ts) / (8760 * 60 / resolution_minutes)))
         period_labels = None
-    resolution_h = 1
 
     avg_bess_factor = (
         sum((1.0 - scenario.bess_degradation_rate) ** i for i in range(n_years)) / n_years
@@ -276,7 +287,7 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         # zero (docs/sizing_experiments.md E9).
         n = build_network(ts, sizing_scn, snapshot_weightings=weights)
     else:  # full_hourly
-        n = build_network(ts, sizing_scn, resolution_h=1.0)
+        n = build_network(ts, sizing_scn, resolution_h=resolution_h)
 
     status, condition = solve(n, sizing_scn, ts, period_labels=period_labels)
 
@@ -462,7 +473,9 @@ def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFr
     profile, implied LCOE, and the PPA tariff / penalty / average spot for
     comparison, plus which caps bind at the optimum.
     """
-    horizon_years = len(ts) / 8760.0
+    # len(ts) is in snapshots; × resolution_h converts to real hours (0.5 at 30
+    # min), so the reported horizon stays in years at any resolution.
+    horizon_years = len(ts) * sized.resolution_h / 8760.0
 
     # target_irr, not discount_rate: this table only ever explains a sizing
     # run, and ppa.network.build_network uses target_irr whenever sizing=True

@@ -268,6 +268,15 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
 
     orig_scenario = scenario  # pre-sizing, user-facing scenario -- persisted below
 
+    res_min = int(getattr(scenario, "nem_resolution_minutes", 60))
+    resolution_h = res_min / 60.0
+    if res_min < 30 and scenario.simulation_years > 2:
+        raise RuntimeError(
+            f"{res_min}-minute resolution over {scenario.simulation_years} years builds an "
+            f"LP roughly {60 // res_min}x the hourly size and will exhaust memory. "
+            "Reduce the simulation years to 2 or fewer, or use 30- or 60-minute resolution."
+        )
+
     if scenario.data_source == "custom_csv":
         from ppa.data_loader import custom_timeseries_dicts
 
@@ -311,7 +320,7 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
         )
         if cycle_note:
             st.info(cycle_note)
-        n_sizing_years, notice = clamp_sizing_years(n_sizing_years)
+        n_sizing_years, notice = clamp_sizing_years(n_sizing_years, resolution_h)
         if notice:
             st.warning(notice)
         # Warn BEFORE the solve: an out-of-memory kill arrives as a silent
@@ -329,6 +338,7 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
         sizing_ts = build_sizing_timeseries(
             scenario, pv_by_year, wind_by_year, prices_by_year, n_sizing_years,
             load_mw_by_year=load_by_year,
+            resolution_minutes=res_min,
         )
 
         _t0 = time.monotonic()
@@ -389,6 +399,7 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
         max_workers=max_workers,
         progress_callback=_on_progress,
         run_id=run_id,
+        resolution_h=resolution_h,
     )
     dispatch_seconds = time.monotonic() - _t_dispatch
     state.set_multi_year_results(results)
