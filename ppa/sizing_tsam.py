@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import warnings
 
+import numpy as np
 import pandas as pd
 
 
@@ -51,6 +52,14 @@ def cluster_typical_periods(
       it to `build_network(..., snapshot_weightings=weights)` so costs, energy
       and storage integrate over real hours.
 
+    The period-block labels ride along as `weights.attrs["period_labels"]`: a
+    `pd.Series` of one integer per clustered snapshot identifying its
+    `(cluster_id, day_within_period)` block (extra extreme periods at the end
+    are labelled too). `ppa.solver.solve` uses these — NOT the synthetic
+    calendar index, which corresponds to nothing real — to build daily SLA
+    groups. `None` when there was nothing to cluster (window shorter than one
+    period).
+
     `extreme_periods=True` preserves peak-load and dark-lull periods (via
     tsam's `addPeakMax`/`addPeakMin`) so the sized fleet must still cover the
     hours that matter instead of optimising only for the average day.
@@ -78,6 +87,7 @@ def cluster_typical_periods(
         # Nothing to cluster — hand back the window itself, weighted one hour
         # per row so downstream cost/energy integration is unchanged.
         weights = pd.Series(1.0, index=ts.index, dtype=float)
+        weights.attrs["period_labels"] = None
         return ts.copy(), weights
     n_periods = max(1, min(int(n_periods), available_periods))
 
@@ -148,4 +158,22 @@ def cluster_typical_periods(
     clustered.index.name = "snapshot"
     weights = pd.Series([float(occ[c]) for c in cluster_ids], dtype=float)
     weights.index = clustered.index
+
+    # WP8 period-block labels for daily SLA groups in `ppa.solver.solve`. tsam
+    # returns each cluster's rows in chronological order, so a per-cluster
+    # cumulative count is the hour-within-period. days_per_period is derived
+    # from hours_per_period (168 -> 7) rather than hard-coded; a period that is
+    # not a whole number of days cannot be sliced into meaningful representative
+    # days, so it falls back to one group per period (an approximation, but a
+    # bounded one). Extreme periods appended by tsam are extra clusters and are
+    # labelled exactly like the ordinary ones.
+    cids = np.asarray(cluster_ids, dtype=int)
+    hour_in_period = pd.Series(cluster_ids).groupby(cluster_ids).cumcount()
+    days_per_period = hours_per_period // 24
+    if hours_per_period % 24 == 0:
+        labels = cids * days_per_period + (hour_in_period // 24).to_numpy()
+    else:
+        labels = cids
+    period_labels = pd.Series(labels, index=clustered.index, dtype=int)
+    weights.attrs["period_labels"] = period_labels
     return clustered, weights

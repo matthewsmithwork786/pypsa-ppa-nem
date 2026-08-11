@@ -61,6 +61,10 @@ class SizedCapacities:
     wind_link_binding: bool = False
     pvbess_link_binding: bool = False
     sell_link_binding: bool = False
+    # Number of SLA/delivery constraints the solver added (annual + monthly +
+    # daily shortfall caps and min-delivery floors) — surfaces in the sizing
+    # diagnostics so a build-time regression can be traced to the SLA tier.
+    sla_constraint_count: int = 0
 
 
 def weather_cycle_years(
@@ -237,9 +241,14 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         ts, weights = cluster_typical_periods(
             ts, n_periods=max(4, int(scenario.sizing_n_periods))
         )
+        # WP8: the clusterer knows the true period boundaries, so it labels each
+        # snapshot with its (cluster, day-within-period) block. Read it BEFORE
+        # handing `weights` to build_network — pandas operations may drop attrs.
+        period_labels = weights.attrs.get("period_labels")
         n_years = max(1, round(float(weights.sum()) / 8760))
     else:  # full_hourly
         n_years = max(1, round(len(ts) / 8760))
+        period_labels = None
     resolution_h = 1
 
     avg_bess_factor = (
@@ -269,7 +278,7 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
     else:  # full_hourly
         n = build_network(ts, sizing_scn, resolution_h=1.0)
 
-    status, condition = solve(n, sizing_scn, ts)
+    status, condition = solve(n, sizing_scn, ts, period_labels=period_labels)
 
     # max(0, ·) clamps solver noise (e.g. -0.0 / -1e-9) at zero builds
     if "p_nom_opt" in n.generators.static.columns:
@@ -299,6 +308,28 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         """
         if "infeasible" not in str(condition).lower():
             return ""
+        # The tiered daily/monthly SLA is the most likely new cause: a single
+        # low-resource period that no portfolio within the caps can cover makes
+        # the WHOLE LP infeasible, where an annual SLA would just spread the
+        # shortfall across other days.
+        if scenario.sla_daily_enabled:
+            return (
+                f" A daily SLA of {scenario.sla_daily_share:.0%} requires at least "
+                "that share of EVERY day's load to be delivered. A single "
+                "low-resource day that no portfolio within the build caps can "
+                "cover makes the whole LP infeasible. Lower the daily share, "
+                "enable market buy, raise the BESS cap, or turn the daily SLA off "
+                "and rely on the monthly/annual one."
+            )
+        if scenario.sla_monthly_enabled:
+            return (
+                f" A monthly SLA of {scenario.sla_monthly_share:.0%} requires at "
+                "least that share of EVERY month's load to be delivered. A single "
+                "low-resource month that no portfolio within the build caps can "
+                "cover makes the whole LP infeasible. Lower the monthly share, "
+                "enable market buy, raise the BESS cap, or turn the monthly SLA "
+                "off and rely on the annual one."
+            )
         if scenario.enforce_min_delivery:
             return (
                 f" The hard minimum-delivery constraint requires "
@@ -361,6 +392,7 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         wind_link_binding=_at_cap(wind_link_mw, sizing_scn.grid_connection_max_mw),
         pvbess_link_binding=_at_cap(pvbess_link_mw, sizing_scn.grid_connection_max_mw),
         sell_link_binding=_at_cap(sell_link_mw, sizing_scn.grid_connection_max_mw),
+        sla_constraint_count=int(n.meta.get("sla_constraint_count", 0)),
     )
 
 
@@ -515,6 +547,7 @@ def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFr
         "sizing_method": scenario.sizing_method,
         "sizing_delivery_share": sized.sizing_delivery_share,
         "delivery_share_full": None,
+        "sla_constraint_count": sized.sla_constraint_count,
     }
 
 
