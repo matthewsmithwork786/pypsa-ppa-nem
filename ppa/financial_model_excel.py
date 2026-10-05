@@ -121,7 +121,8 @@ def export_financial_model(
     _write_notes(wb)
 
     # Sheet order: headline sheets first, the bulky combined Hourly sheet last.
-    _order = {"Outputs": 0, "Inputs": 1, "Energy": 2, "Model": 3, "Notes": 4, "Hourly": 5}
+    _order = {"Outputs": 0, "Inputs": 1, "Energy": 2, "Annual Energy": 3,
+              "Model": 4, "Notes": 5, "Hourly": 6}
     wb._sheets.sort(key=lambda ws: _order.get(ws.title, 99))
     wb.active = 0
 
@@ -252,6 +253,7 @@ _AGG_ROWS = {
     "sell_nonsolar_price": 12,
     "purchase_price": 13,
     "marketbuy_gwh": 14,
+    "transmission_cost_aud": 15,
 }
 _HOURLY_HEADER_ROW = 16
 _HOURLY_DATA_START = 17
@@ -263,6 +265,7 @@ _HOURLY_COLS = [
     "BESS charge (MWh)", "Total generation (MWh)", "Market buy (MWh)",
     "Market sell (MWh)", "PPA delivered (MWh)", "Penalty (MWh)", "Price (A$/MWh)",
     "Load (MWh)",
+    "Net sale price (A$/MWh)", "Purchase price (A$/MWh)", "Transmission cost (A$)",
 ]
 _C_YEAR, _C_HOUR = "A", "C"
 _C_TOTAL, _C_BUY, _C_SELL = "H", "I", "J"
@@ -332,6 +335,7 @@ def _write_hourly_sheet(wb: Workbook, year_results: list) -> dict[str, list[str]
         "sell_nonsolar_price": "Merchant capture — non-solar hours",
         "purchase_price": "Market purchase price",
         "marketbuy_gwh": "Market purchase volume",
+        "transmission_cost_aud": "Transmission cost",
     }
     _AGG_UNITS = {
         "scale": "×",
@@ -345,6 +349,7 @@ def _write_hourly_sheet(wb: Workbook, year_results: list) -> dict[str, list[str]
         "sell_nonsolar_price": "A$/MWh",
         "purchase_price": "A$/MWh",
         "marketbuy_gwh": "GWh p.a.",
+        "transmission_cost_aud": "A$ p.a.",
     }
     for key, label in _AGG_LABELS.items():
         r = _AGG_ROWS[key]
@@ -361,7 +366,8 @@ def _write_hourly_sheet(wb: Workbook, year_results: list) -> dict[str, list[str]
     sell_rng = rng(_C_SELL)
     total_rng = rng(_C_TOTAL)
     buy_rng = rng(_C_BUY)
-    price_rng = rng(_C_PRICE)
+    sell_price_rng = rng("O")
+    buy_price_rng = rng("P")
     ppa_rng = rng(_C_PPA)
     pen_rng = rng(_C_PEN)
 
@@ -376,8 +382,10 @@ def _write_hourly_sheet(wb: Workbook, year_results: list) -> dict[str, list[str]
             c.number_format = fmt
             c.fill = _PREFILL
 
+        res = year_results[j - 1]
+        duration = getattr(res, "n_period_hours", n_rows[j - 1]) / n_rows[j - 1]
         aggcell(_AGG_ROWS["scale"],
-                f"=8760/COUNTIF({year_rng},{crit})", "0.0000")
+                f"=8760/(COUNTIF({year_rng},{crit})*{duration})", "0.0000")
         aggcell(_AGG_ROWS["ppa_gwh"],
                 f"=SUMIFS({ppa_rng},{year_rng},{crit})*{scale_cell}/1000")
         solar_sell = f'SUMIFS({sell_rng},{year_rng},{crit},{hour_rng},">=9",{hour_rng},"<17")'
@@ -396,16 +404,22 @@ def _write_hourly_sheet(wb: Workbook, year_results: list) -> dict[str, list[str]
                 f"-{cl}${_AGG_ROWS['total_solar_gwh']}")
         # Volume-weighted capture prices (solar / non-solar hours), guarded for /0
         aggcell(_AGG_ROWS["sell_solar_price"],
-                f"=IFERROR(SUMPRODUCT({solar_w}*{yr_mask}*{sell_rng}*{price_rng})"
-                f"/SUMPRODUCT({solar_w}*{yr_mask}*{sell_rng}),0)", "0.00")
+                f"=IFERROR(SUMPRODUCT({solar_w}*{yr_mask}*{sell_rng}*{sell_price_rng})"
+                f"/SUMPRODUCT({solar_w}*{yr_mask}*{sell_rng}),"
+                f"IFERROR(SUMPRODUCT({solar_w}*{yr_mask}*{sell_price_rng})"
+                f"/SUMPRODUCT({solar_w}*{yr_mask}),0))", "0.00")
         aggcell(_AGG_ROWS["sell_nonsolar_price"],
-                f"=IFERROR(SUMPRODUCT({nonsolar_w}*{yr_mask}*{sell_rng}*{price_rng})"
-                f"/SUMPRODUCT({nonsolar_w}*{yr_mask}*{sell_rng}),0)", "0.00")
+                f"=IFERROR(SUMPRODUCT({nonsolar_w}*{yr_mask}*{sell_rng}*{sell_price_rng})"
+                f"/SUMPRODUCT({nonsolar_w}*{yr_mask}*{sell_rng}),"
+                f"IFERROR(SUMPRODUCT({nonsolar_w}*{yr_mask}*{sell_price_rng})"
+                f"/SUMPRODUCT({nonsolar_w}*{yr_mask}),0))", "0.00")
         aggcell(_AGG_ROWS["purchase_price"],
-                f"=IFERROR(SUMPRODUCT({yr_mask}*{buy_rng}*{price_rng})"
+                f"=IFERROR(SUMPRODUCT({yr_mask}*{buy_rng}*{buy_price_rng})"
                 f"/SUMPRODUCT({yr_mask}*{buy_rng}),0)", "0.00")
         aggcell(_AGG_ROWS["marketbuy_gwh"],
                 f"=SUMIFS({buy_rng},{year_rng},{crit})*{scale_cell}/1000")
+        aggcell(_AGG_ROWS["transmission_cost_aud"],
+                f"=SUMIFS({rng('Q')},{year_rng},{crit})*{scale_cell}")
 
         for k in refs:
             refs[k].append(f"'Hourly'!{cl}${_AGG_ROWS[k]}")
@@ -420,17 +434,22 @@ def _write_hourly_sheet(wb: Workbook, year_results: list) -> dict[str, list[str]
     for idx, res in enumerate(year_results, start=1):
         d = res.dispatch
         prices = res.market_prices
-        wind = d.wind_gen.to_numpy()
-        pv = d.pv_gen.to_numpy()
-        bess_dis = d.bess_dispatch.to_numpy()
-        bess_chg = d.bess_store.to_numpy()
-        buy = d.market_buy.to_numpy()
-        sell = d.market_sell.to_numpy()
-        ppa = d.ppa_delivery.to_numpy()
-        pen = d.penalty_gen.to_numpy()
-        shortfall = d.allowed_shortfall.to_numpy()
+        # The source dispatch is MW, while the sheet promises interval MWh.
+        duration = getattr(res, "n_period_hours", len(d.wind_gen)) / len(d.wind_gen)
+        wind = d.wind_gen.to_numpy() * duration
+        pv = d.pv_gen.to_numpy() * duration
+        bess_dis = d.bess_dispatch.to_numpy() * duration
+        bess_chg = d.bess_store.to_numpy() * duration
+        buy = d.market_buy.to_numpy() * duration
+        sell = d.market_sell.to_numpy() * duration
+        ppa = d.ppa_delivery.to_numpy() * duration
+        pen = d.penalty_gen.to_numpy() * duration
+        shortfall = d.allowed_shortfall.to_numpy() * duration
         price = prices.to_numpy()
-        total = wind + pv + bess_dis
+        total = wind + pv
+        spread = getattr(res.scenario, "market_spread", 0.0)
+        certificate_price = getattr(res.scenario, "lgc_price_aud_mwh", 0.0)
+        transmission_rate = getattr(res.scenario, "transmission_cost_aud_mwh", 0.0)
         # Actual PPA load, reconstructed from the dispatch balance at
         # Bus_PPAOfftake (ppa_delivery + allowed_shortfall + penalty_gen == load).
         load = ppa + shortfall + pen
@@ -452,6 +471,9 @@ def _write_hourly_sheet(wb: Workbook, year_results: list) -> dict[str, list[str]
             ws.cell(cur, 12, round(float(pen[i]), 3))
             ws.cell(cur, 13, round(float(price[i]), 3))
             ws.cell(cur, 14, round(float(load[i]), 3))
+            ws.cell(cur, 15, round(float(price[i] - spread), 3))
+            ws.cell(cur, 16, round(float(price[i] + spread + certificate_price), 3))
+            ws.cell(cur, 17, round(float(ppa[i] * transmission_rate), 3))
             cur += 1
     ws.freeze_panes = f"A{_HOURLY_DATA_START}"
 
@@ -527,6 +549,7 @@ def _write_energy(
     field("Merchant capture — non-solar hours", "sell_nonsolar_price", e.sell_nonsolar_price, "A$/MWh")
     field("Market purchase price", "purchase_price", e.purchase_price, "A$/MWh")
     field("Market purchase volume", "marketbuy_gwh", e.marketbuy_gwh, "GWh p.a.")
+    field("Transmission cost", "transmission_cost_aud", e.transmission_cost_aud, "A$ p.a.")
 
     return cells
 
@@ -546,6 +569,37 @@ def _write_model(
     n = p.model_duration
     tl = _build_timeline(p)
     sc = result.schedule
+
+    # Full multi-year solves carry actual annual volumes/prices. Preserve them
+    # in the export rather than silently replaying the average Energy sheet.
+    annual_refs: dict[str, list[str]] = {}
+    if result.annual_energy:
+        yearly = wb.create_sheet("Annual Energy")
+        yearly.column_dimensions["A"].width = 32
+        yearly.cell(1, 1, "Operating year").font = _HEADER
+        keys = (
+            "ppa_gwh", "excess_solar_gwh", "excess_nonsolar_gwh", "penalty_gwh",
+            "total_solar_gwh", "total_nonsolar_gwh", "sell_solar_price",
+            "sell_nonsolar_price", "purchase_price", "marketbuy_gwh",
+            "transmission_cost_aud",
+        )
+        for annual_idx, energy in enumerate(result.annual_energy):
+            column = get_column_letter(annual_idx + 2)
+            yearly.cell(1, annual_idx + 2, annual_idx + 1).font = _HEADER
+            for row_idx, key in enumerate(keys, start=2):
+                yearly.cell(row_idx, 1, key)
+                yearly.cell(row_idx, annual_idx + 2, getattr(energy, key)).fill = _PREFILL
+                annual_refs.setdefault(key, []).append(f"'Annual Energy'!${column}${row_idx}")
+        _text(wb["Energy"]["B2"],
+              f"Scenario: {e.name}. Representative averages for display; Model uses "
+              "each actual operating year's data from Annual Energy. Later years hold "
+              "the final simulated year flat, matching the Python model.")
+
+    def energy_ref(year: int, key: str) -> str:
+        if key not in annual_refs:
+            return E[key]
+        operating_idx = min(max(year - tl.ops_start, 0), len(result.annual_energy) - 1)
+        return annual_refs[key][operating_idx]
 
     ws.column_dimensions["A"].width = 2
     ws.column_dimensions["B"].width = 42
@@ -692,33 +746,38 @@ def _write_model(
     # ── Volumes & prices (shown first; revenue multiplies these rows) ────────
     label_row("vols", "Volumes & prices", section=True)
     label_row("ppa_vol", "PPA delivered volume", "GWh")
-    put_formula("ppa_vol", lambda pr, cl: f"={cl}{R['ppa_flag']}*{E['ppa_gwh']}")
+    put_formula("ppa_vol", lambda pr, cl: f"={cl}{R['ppa_flag']}*{energy_ref(pr, 'ppa_gwh')}")
     label_row("merch_solar_vol", "Merchant volume — solar hours", "GWh")
     put_formula("merch_solar_vol", lambda pr, cl: (
-        f"={cl}{R['ppa_flag']}*{E['excess_solar_gwh']}+{cl}{R['nonppa_flag']}*{E['total_solar_gwh']}"
+        f"={cl}{R['ppa_flag']}*{energy_ref(pr, 'excess_solar_gwh')}+{cl}{R['nonppa_flag']}*{energy_ref(pr, 'total_solar_gwh')}"
     ))
     label_row("merch_nonsolar_vol", "Merchant volume — non-solar hours", "GWh")
     put_formula("merch_nonsolar_vol", lambda pr, cl: (
-        f"={cl}{R['ppa_flag']}*{E['excess_nonsolar_gwh']}+{cl}{R['nonppa_flag']}*{E['total_nonsolar_gwh']}"
+        f"={cl}{R['ppa_flag']}*{energy_ref(pr, 'excess_nonsolar_gwh')}+{cl}{R['nonppa_flag']}*{energy_ref(pr, 'total_nonsolar_gwh')}"
     ))
     label_row("merch_vol", "Merchant volume — total", "GWh")
     put_formula("merch_vol", lambda pr, cl: f"={cl}{R['merch_solar_vol']}+{cl}{R['merch_nonsolar_vol']}")
     label_row("pen_vol", "Penalty generation volume", "GWh")
-    put_formula("pen_vol", lambda pr, cl: f"={cl}{R['ppa_flag']}*{E['penalty_gwh']}")
+    put_formula("pen_vol", lambda pr, cl: f"={cl}{R['ppa_flag']}*{energy_ref(pr, 'penalty_gwh')}")
+    label_row("market_buy_vol", "Market purchase volume", "GWh")
+    put_formula("market_buy_vol", lambda pr, cl: f"={cl}{R['ppa_flag']}*{energy_ref(pr, 'marketbuy_gwh')}")
     row += 1
     label_row("ppa_price", "Average PPA price", "A$/MWh")
     put_formula("ppa_price", lambda pr, cl: f"={I['ppa_tariff']}*{cl}{R['ppa_idx']}")
     esc = p.escalate_merchant_prices
     label_row("merch_solar_price", "Average merchant price — solar hours", "A$/MWh")
     put_formula("merch_solar_price",
-                lambda pr, cl: f"={E['sell_solar_price']}*{cl}{R['solar_idx']}" if esc else f"={E['sell_solar_price']}")
+                lambda pr, cl: f"={energy_ref(pr, 'sell_solar_price')}*{cl}{R['solar_idx']}" if esc else f"={energy_ref(pr, 'sell_solar_price')}")
     label_row("merch_nonsolar_price", "Average merchant price — non-solar hours", "A$/MWh")
     put_formula("merch_nonsolar_price",
-                lambda pr, cl: f"={E['sell_nonsolar_price']}*{cl}{R['nonsolar_idx']}" if esc else f"={E['sell_nonsolar_price']}")
+                lambda pr, cl: f"={energy_ref(pr, 'sell_nonsolar_price')}*{cl}{R['nonsolar_idx']}" if esc else f"={energy_ref(pr, 'sell_nonsolar_price')}")
     label_row("pen_price", "Average penalty price", "A$/MWh")
     put_formula("pen_price", lambda pr, cl: f"={I['ppa_tariff']}*{I['penalty_multiple']}*{cl}{R['ppa_idx']}")
     label_row("lgc_price", "LGC / GO price", "A$/MWh")
     put_formula("lgc_price", lambda pr, cl: f"={I['lgc_price']}*{cl}{R['ppa_idx']}")
+    label_row("purchase_price", "Average market purchase price", "A$/MWh")
+    put_formula("purchase_price",
+                lambda pr, cl: f"={energy_ref(pr, 'purchase_price')}*{cl}{R['nonsolar_idx']}" if esc else f"={energy_ref(pr, 'purchase_price')}")
 
     # ── Revenue (live formulas over the volume/price rows) ───────────────────
     label_row("revenue", "Revenue", "A$M", section=True)
@@ -744,8 +803,18 @@ def _write_model(
     put_formula("penalty_cost", lambda pr, cl: (
         f"={cl}{R['pen_vol']}*1000*{cl}{R['pen_price']}/1000000"
     ))
+    label_row("market_purchase_cost", "Market purchase cost", "A$M")
+    put_formula("market_purchase_cost", lambda pr, cl: (
+        f"={cl}{R['market_buy_vol']}*1000*{cl}{R['purchase_price']}/1000000"
+    ))
+    label_row("transmission_cost", "Transmission cost", "A$M")
+    put_formula("transmission_cost", lambda pr, cl: (
+        f"={cl}{R['ppa_flag']}*{energy_ref(pr, 'transmission_cost_aud')}*{cl}{R['cost_idx']}/1000000"
+    ))
     label_row("net_contracted", "Net contracted revenue", "A$M")
-    put_formula("net_contracted", lambda pr, cl: f"={cl}{R['ppa_rev']}-{cl}{R['penalty_cost']}")
+    put_formula("net_contracted", lambda pr, cl: (
+        f"={cl}{R['ppa_rev']}-{cl}{R['penalty_cost']}-{cl}{R['market_purchase_cost']}-{cl}{R['transmission_cost']}"
+    ))
     label_row("net_uncontracted", "Net uncontracted revenue", "A$M")
     put_formula("net_uncontracted", lambda pr, cl: f"={cl}{R['merch_rev']}+{cl}{R['lgc_rev']}")
     label_row("total_rev", "Total revenue", "A$M")

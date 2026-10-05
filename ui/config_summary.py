@@ -43,6 +43,9 @@ def render_config_summary(s, expanded: bool = False) -> None:
                 st.markdown(f"- Data source: **{s.data_source}**")
         with cols[3]:
             st.markdown("**Simulation & SLA**")
+            st.markdown(f"- Dispatch: **{s.dispatch_years} solved year(s)**")
+            if s.dispatch_mode == "representative_year":
+                st.markdown(f"- Financial projection: **{s.simulation_years} years** (fixed volumes)")
             years = ", ".join(str(y) for y in (getattr(s, "nem_years", ()) or ()))
             if years:
                 st.markdown(f"- NEM data years: **{years}**")

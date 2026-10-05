@@ -29,9 +29,11 @@ st.markdown(
 with st.popover("Disclaimer", width="stretch", icon="⚠️"):
     st.write(
         """
-        The content of this document/web page is intended for the exclusive use of **Open Energy Transition (OET)**'s client and other contractually agreed recipients.
-        It may only be made available in whole or in part to third parties with the client's consent and on a non-reliance basis.
-        **Open Energy Transition** is not liable to third parties for the completeness and accuracy of the information provided therein.
+        This open-source explorer is for testing and scenario analysis. Historical
+        profiles and model assumptions do not constitute a forecast or investment
+        advice. Check the dispatch mode, data coverage and commercial assumptions
+        before using the results. Fast mode repeats one solved operating year;
+        it does not verify future-year delivery or model technology degradation.
         """
     )
 

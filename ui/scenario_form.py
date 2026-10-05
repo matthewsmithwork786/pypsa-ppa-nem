@@ -148,6 +148,12 @@ def render_scenario_form(initial: Scenario) -> Scenario:
     
     include_bess = cols[0].toggle("Include BESS", value=initial.include_bess, key="sf_include_bess")
     enable_market_buy = cols[1].toggle("Enable market buy", value=initial.enable_market_buy, key="sf_enable_market_buy")
+    if enable_market_buy:
+        st.caption(
+            "Market purchases include the bid-offer spread and an LGC at the assumed "
+            "certificate price, matching the bundled PPA. This is certificate accounting; "
+            "it does not establish time-matched renewable provenance."
+        )
     enable_market_sell = cols[2].toggle("Enable market sell", value=initial.enable_market_sell, key="sf_enable_market_sell")
     enable_shortfall = cols[3].toggle("Enable shortfall allowance", value=initial.enable_shortfall, key="sf_enable_shortfall")
     
@@ -386,13 +392,29 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                                        float(initial.devex_pct_of_capex * 100), 0.5, format="%.1f",
                                        key="sf_devex_pct")
         project_life_yrs = cols[3].number_input("Project life (years)", 5, 40,
-                                            int(initial.project_life_yrs), 1, key="sf_project_life")
+                                            int(initial.project_life_yrs), 1, key="sf_project_life",
+                                            help=("Life used for sizing annualisation and full-mode appraisal. "
+                                                  "Fast-mode financial life uses Financial projection years below."))
 
     with st.expander("Simulation", expanded=True):
+        mode_labels = {
+            "representative_year": "Fast: solve one year, project financials",
+            "full_multi_year": "Full: solve every operating year",
+        }
+        dispatch_mode = st.radio(
+            "Dispatch mode", list(mode_labels),
+            index=list(mode_labels).index(initial.dispatch_mode),
+            format_func=mode_labels.get, key="sf_dispatch_mode",
+        )
+        if dispatch_mode == "representative_year":
+            from ppa.simulation import REPRESENTATIVE_YEAR_NOTE
+
+            st.info(REPRESENTATIVE_YEAR_NOTE)
         cols = st.columns(4)
         simulation_years = int(cols[0].number_input(
-            "Simulation years", 1, 40, int(initial.simulation_years), 1, key="sf_sim_years",
-            help="1 = single full-year run; >1 = multi-year parallel simulation.",
+            "Financial projection years" if dispatch_mode == "representative_year" else "Simulation years",
+            1, 40, int(initial.simulation_years), 1, key="sf_sim_years",
+            help="Fast mode solves one year regardless of this horizon. Full mode solves every year.",
         ))
         first_sim_year = int(cols[1].number_input(
             "First simulation year", 2024, 2040, int(initial.first_sim_year), 1,
@@ -405,19 +427,22 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             help="Annual compound escalation applied to base market prices.",
         ) / 100.0
 
-        st.caption("Technology degradation (compound annual, applied from year 2 onward)")
+        st.caption("Technology degradation (used only in full multi-year dispatch)")
         cols = st.columns(4)
         pv_degradation_rate = cols[0].number_input(
             "PV (%/yr)", 0.0, 5.0, float(initial.pv_degradation_rate * 100),
             0.05, format="%.2f", key="sf_pv_deg",
+            disabled=dispatch_mode == "representative_year",
         ) / 100.0
         wind_degradation_rate = cols[1].number_input(
             "Wind (%/yr)", 0.0, 5.0, float(initial.wind_degradation_rate * 100),
             0.05, format="%.2f", key="sf_wind_deg",
+            disabled=dispatch_mode == "representative_year",
         ) / 100.0
         bess_degradation_rate = cols[2].number_input(
             "BESS (%/yr)", 0.0, 10.0, float(initial.bess_degradation_rate * 100),
             0.1, format="%.1f", key="sf_bess_deg",
+            disabled=dispatch_mode == "representative_year",
         ) / 100.0
 
     with st.expander("Service level agreement (SLA)", expanded=True):
@@ -508,7 +533,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             )
 
         _res_min = int(getattr(initial, "nem_resolution_minutes", 60))
-        if _res_min < 30 and simulation_years > 2:
+        if _res_min < 30 and dispatch_mode == "full_multi_year" and simulation_years > 2:
             st.warning(
                 f"{_res_min}-minute resolution over {simulation_years} years builds an "
                 f"LP roughly {60 // _res_min}x the hourly size and will exhaust memory. "
@@ -720,7 +745,9 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         cal_forward_note=cal_forward_note,
         data_source=initial.data_source,
         nem_price_region=nem_price_region,
-        nem_years=(int(nem_year),),
+        nem_years=(initial.nem_years if initial.data_source == "nem_map" else (int(nem_year),)),
+        capacity_sizing_year=(initial.capacity_sizing_year if initial.data_source == "nem_map" else int(nem_year)),
+        use_unconstrained_cf=bool(use_unconstrained_cf),
         onsw_mw=float(onsw_mw),
         pv_mw=float(pv_mw),
         bess_mw=float(bess_mw) if include_bess else 0.0,
@@ -742,6 +769,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         chosen_day=str(chosen_day),
         transmission_cost_aud_mwh=float(transmission_cost_aud_mwh),
         simulation_years=simulation_years,
+        dispatch_mode=dispatch_mode,
         first_sim_year=first_sim_year,
         price_escalation_rate=float(price_escalation_rate),
         pv_degradation_rate=float(pv_degradation_rate),

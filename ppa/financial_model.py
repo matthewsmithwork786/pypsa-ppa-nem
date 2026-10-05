@@ -74,6 +74,7 @@ class EnergyInputs:
     name: str = "PyPSA scenario"
     wind_plant_name: str = ""
     pv_plant_name: str = ""
+    transmission_cost_aud: float = 0.0  # annual delivery charge, A$
 
 
 @dataclass
@@ -241,24 +242,33 @@ def energy_inputs_from_result(
     hour = pd.Series(idx.hour, index=idx)
     solar_mask = (hour >= SOLAR_HOUR_START) & (hour < SOLAR_HOUR_END)
 
-    total_gen = d.wind_gen + d.pv_gen + d.bess_dispatch
+    # Dispatch series are MW; summary volumes are already integrated MWh.
+    interval_hours = n_hours / len(idx) if len(idx) and n_hours else 1.0
+    total_gen = d.wind_gen + d.pv_gen
+    spread = getattr(s, "market_spread", 0.0)
+    sell_prices = prices - spread
+    # PPA purchases are bundled with certificates, matching the dispatch LP.
+    buy_prices = prices + spread + getattr(s, "lgc_price_aud_mwh", 0.0)
 
     def _gwh(series, mask=None) -> float:
         ser = series if mask is None else series.where(mask, 0.0)
-        return float(ser.sum()) * to_gwh
+        return float(ser.sum()) * interval_hours * to_gwh
 
     # Merchant capture price by hour-bucket (revenue-weighted)
     def _price(mask) -> float:
         vol = float(d.market_sell.where(mask, 0.0).sum())
-        rev = float((d.market_sell.where(mask, 0.0) * prices).sum())
-        return rev / vol if vol > 0 else float((prices.where(mask, 0.0)).mean() or 0.0)
+        rev = float((d.market_sell.where(mask, 0.0) * sell_prices).sum())
+        # With no sales, use the bucket's spot capture price as the fallback
+        # for the post-contract generation revenue (exclude other hours).
+        fallback = sell_prices.loc[mask].mean()
+        return rev / vol if vol > 0 else (float(fallback) if pd.notna(fallback) else 0.0)
 
     sell_solar = _price(solar_mask)
     sell_nonsolar = _price(~solar_mask)
 
     buy_vol = float(d.market_buy.sum())
     buy_price = (
-        float((d.market_buy * prices).sum()) / buy_vol if buy_vol > 0 else 0.0
+        float((d.market_buy * buy_prices).sum()) / buy_vol if buy_vol > 0 else 0.0
     )
 
     wind_plant_name = pv_plant_name = ""
@@ -285,10 +295,13 @@ def energy_inputs_from_result(
         sell_solar_price=sell_solar,
         sell_nonsolar_price=sell_nonsolar,
         purchase_price=buy_price,
-        marketbuy_gwh=buy_vol * to_gwh,
+        marketbuy_gwh=buy_vol * interval_hours * to_gwh,
         name=s.name,
         wind_plant_name=wind_plant_name,
         pv_plant_name=pv_plant_name,
+        transmission_cost_aud=(
+            summ.ppa_delivered_mwh * scale * getattr(s, "transmission_cost_aud_mwh", 0.0)
+        ),
     )
 
 
@@ -342,6 +355,7 @@ def energy_inputs_from_results(results: list) -> EnergyInputs:
         name=first.name,
         wind_plant_name=first.wind_plant_name,
         pv_plant_name=first.pv_plant_name,
+        transmission_cost_aud=avg("transmission_cost_aud"),
     )
 
 
@@ -517,12 +531,16 @@ def run_project_finance(
     total_nonsolar_arr = year_array("total_nonsolar_gwh")
     sell_solar_price_arr = year_array("sell_solar_price")
     sell_nonsolar_price_arr = year_array("sell_nonsolar_price")
+    purchase_price_arr = year_array("purchase_price")
+    market_buy_arr = year_array("marketbuy_gwh")
+    transmission_cost_arr = year_array("transmission_cost_aud")
 
     ppa_vol = ppa_flag * ppa_gwh_arr                     # GWh
     merch_solar_vol = ppa_flag * excess_solar_arr + nonppa_flag * total_solar_arr
     merch_nonsolar_vol = ppa_flag * excess_nonsolar_arr + nonppa_flag * total_nonsolar_arr
     merch_vol = merch_solar_vol + merch_nonsolar_vol
     pen_vol = ppa_flag * penalty_gwh_arr                 # GWh
+    market_buy_vol = ppa_flag * market_buy_arr           # PPA firming only
 
     ppa_price = ppa_idx * p.ppa_tariff                   # A$/MWh (indexed)
     # Real per-year merchant prices already embed the dispatch model's actual
@@ -534,6 +552,7 @@ def run_project_finance(
     merch_nonsolar_price = nonsolar_idx * sell_nonsolar_price_arr
     pen_price = ppa_idx * p.penalty_tariff
     lgc_price = ppa_idx * p.lgc_price
+    purchase_price = nonsolar_idx * purchase_price_arr
 
     GWh = 1000.0  # GWh → MWh
     M = 1e6       # A$/A$m
@@ -543,8 +562,10 @@ def run_project_finance(
     merch_nonsolar_rev = merch_nonsolar_vol * GWh * merch_nonsolar_price / M
     lgc_rev = merch_vol * GWh * lgc_price / M           # LGC applies to all merchant volume
     penalty_cost = pen_vol * GWh * pen_price / M        # cost (positive A$m)
+    market_purchase_cost = market_buy_vol * GWh * purchase_price / M
+    transmission_cost = ppa_flag * transmission_cost_arr * cost_idx / M
 
-    net_contracted_rev = ppa_rev - penalty_cost
+    net_contracted_rev = ppa_rev - penalty_cost - market_purchase_cost - transmission_cost
     net_uncontracted_rev = merch_solar_rev + merch_nonsolar_rev + lgc_rev
     total_rev = net_contracted_rev + net_uncontracted_rev
 
@@ -560,7 +581,9 @@ def run_project_finance(
     # ── Schedule 3: Debt sizing ──────────────────────────────────────────────
     # Opex allocated to tranches in proportion to revenue
     with np.errstate(divide="ignore", invalid="ignore"):
-        contracted_frac = np.where(total_rev > 0, net_contracted_rev / total_rev, 0.0)
+        contracted_frac = np.clip(
+            np.where(total_rev > 0, net_contracted_rev / total_rev, 0.0), 0.0, 1.0
+        )
     contracted_opex = opex * contracted_frac
     uncontracted_opex = opex - contracted_opex
 
@@ -568,8 +591,17 @@ def run_project_finance(
     cfads_uncontracted = net_uncontracted_rev - uncontracted_opex
 
     # Target debt service = CFADS / DSCR, only during debt repayment window
-    tgt_ds_contracted = debt_flag * cfads_contracted / p.dscr_contracted
-    tgt_ds_uncontracted = debt_flag * cfads_uncontracted / p.dscr_uncontracted
+    # A loss in one tranche consumes the other tranche's cash before servicing
+    # debt. Positive tranches cannot support more than the project's net CFADS.
+    positive_contracted = np.maximum(cfads_contracted, 0.0)
+    positive_uncontracted = np.maximum(cfads_uncontracted, 0.0)
+    positive_total = positive_contracted + positive_uncontracted
+    available_fraction = np.divide(
+        np.maximum(cfads_contracted + cfads_uncontracted, 0.0), positive_total,
+        out=zeros(), where=positive_total > 0,
+    )
+    tgt_ds_contracted = debt_flag * positive_contracted * available_fraction / p.dscr_contracted
+    tgt_ds_uncontracted = debt_flag * positive_uncontracted * available_fraction / p.dscr_uncontracted
 
     # Max debt by DSCR = NPV of target debt service discounted at debt rate to ops_start
     def npv_to_ops(series: np.ndarray) -> float:
@@ -761,15 +793,19 @@ def run_project_finance(
         "merch_nonsolar_vol": merch_nonsolar_vol,
         "merch_vol": merch_vol,
         "pen_vol": pen_vol,
+        "market_buy_vol": market_buy_vol,
         "ppa_price": ppa_price,
         "merch_solar_price": merch_solar_price,
         "merch_nonsolar_price": merch_nonsolar_price,
         "pen_price": pen_price,
         "lgc_price": lgc_price,
+        "purchase_price": purchase_price,
         "ppa_rev": ppa_rev,
         "merch_solar_rev": merch_solar_rev,
         "merch_nonsolar_rev": merch_nonsolar_rev,
         "penalty_cost": penalty_cost,
+        "market_purchase_cost": market_purchase_cost,
+        "transmission_cost": transmission_cost,
         "net_contracted_rev": net_contracted_rev,
         "net_uncontracted_rev": net_uncontracted_rev,
         "total_rev": total_rev,

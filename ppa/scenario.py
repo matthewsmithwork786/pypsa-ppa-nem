@@ -158,6 +158,9 @@ class Scenario:
 
     # Multi-year simulation
     simulation_years: int = 25
+    # The web app solves one representative year by default, then projects its
+    # fixed energy volumes over simulation_years. Full dispatch remains opt-in.
+    dispatch_mode: str = "representative_year"
     first_sim_year: int = 2025
     price_escalation_rate: float = A.PRICE_ESCALATION_RATE  # annual escalation applied to base market prices
 
@@ -229,6 +232,11 @@ class Scenario:
     connection_cost_aud_mw: float = A.CONNECTION_COST_AUD_MW
 
     # ── Derived properties ─────────────────────────────────────────────────────
+
+    @property
+    def dispatch_years(self) -> int:
+        """Years actually solved; the remaining horizon is a projection."""
+        return 1 if self.dispatch_mode == "representative_year" else self.simulation_years
 
     @property
     def is_nem(self) -> bool:
@@ -444,6 +452,10 @@ def load_case_study(cs: CaseStudy) -> Scenario:
 
 def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> list[str]:
     errors: list[str] = []
+    if s.dispatch_mode not in ("representative_year", "full_multi_year"):
+        errors.append("Choose representative-year or full multi-year dispatch.")
+    if not 1 <= s.simulation_years <= 40:
+        errors.append("The projection/simulation horizon must be between 1 and 40 years.")
     if s.optimise_capacity:
         # Fixed MW inputs are ignored; only the build caps matter.
         if s.max_build_wind_mw < 0 or s.max_build_pv_mw < 0 or s.max_build_bess_mw < 0:
@@ -539,5 +551,3 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
     if available_days and s.chosen_day not in available_days:
         errors.append(f"chosen_day '{s.chosen_day}' is not present in the timeseries data.")
     return errors
-
-

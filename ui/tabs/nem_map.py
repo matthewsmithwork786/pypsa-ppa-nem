@@ -260,6 +260,23 @@ def _use_disabled(selected_years, filtered, wind_duid, pv_duid) -> bool:
     return False
 
 
+def _year_range_default(years_available: list[int], current_years) -> tuple[int, int]:
+    """Keep existing selections when offered; otherwise choose the latest years."""
+    selected = sorted(set(years_available).intersection(current_years))
+    if selected:
+        return selected[0], selected[-1]
+    latest = years_available[-5:]
+    return latest[0], latest[-1]
+
+
+def _has_cached_generation(year: int, status: dict,
+                           cache_dir: Path = nem_data.NEM_CACHE_DIR) -> bool:
+    """Shipped UIGF is sufficient; sent-out generation is an optional source."""
+    return bool(status.get("n_scada_cached", 0)) or any(
+        (Path(cache_dir) / "availability").glob(f"*_{year}.parquet")
+    )
+
+
 def render() -> None:
     st.title("📡 Get Data")
     head = st.columns([6, 1])
@@ -293,15 +310,23 @@ def render() -> None:
             f"{nem_data.DEFAULT_YEAR} (the single shipped year) is available. "
             "Once the manifest is published the full range will be offered here."
         )
-    lo, hi = st.slider(
-        "Historical years to use",
-        min_value=min(years_available),
-        max_value=max(years_available),
-        value=(max(years_available) - 4, max(years_available)),
-        key="nm_year_range",
-        help="The dispatch simulation cycles through these years in chronological "
-             "order, repeating, for as many simulation years as you run.",
-    )
+    years_available = sorted(set(years_available))
+    default_range = _year_range_default(years_available, current.nem_years)
+    if len(years_available) == 1:
+        lo = hi = years_available[0]
+        st.caption(f"Historical year available: **{lo}**.")
+    else:
+        # Offer only published years, including manifests with gaps.
+        stored_range = st.session_state.get("nm_year_range")
+        if stored_range is not None and any(y not in years_available for y in stored_range):
+            st.session_state.pop("nm_year_range", None)
+        lo, hi = st.select_slider(
+            "Historical years to use", options=years_available,
+            value=default_range, key="nm_year_range",
+            help="Full multi-year dispatch cycles through the selected years in "
+                 "chronological order. Representative-year mode uses the first "
+                 "selected year for dispatch and projects its financial results.",
+        )
     selected_years = tuple(y for y in years_available if lo <= y <= hi)
 
     # ── Snapshot resolution ────────────────────────────────────────────────────
@@ -336,6 +361,8 @@ def render() -> None:
             if sizing_year in sizing_options
             else len(sizing_options) - 1
         )
+        if st.session_state.get("nm_sizing_year", sizing_year) not in sizing_options:
+            st.session_state.pop("nm_sizing_year", None)
         sizing_year = st.selectbox(
             "Capacity-sizing year",
             options=sizing_options,
@@ -378,9 +405,9 @@ def render() -> None:
         if status["missing_price_regions"]:
             st.caption(f"Missing price regions: {', '.join(status['missing_price_regions'])}")
 
-        if status["n_scada_cached"] == 0:
+        if not _has_cached_generation(fallback_year, status):
             st.warning(
-                "No generation/price data cached yet. Run the acquisition scripts in a "
+                "No generation data cached yet. Run the acquisition scripts in a "
                 "non-sandboxed environment with network access, then copy the output "
                 "into `data/cache/nem/{availability,price}/`:"
             )
@@ -418,6 +445,12 @@ def render() -> None:
 
     wind_options = [""] + _selectable_duids(filtered, "Wind")
     pv_options = [""] + _selectable_duids(filtered, "Solar")
+    for key, options, initial in (
+        ("nm_wind_duid", wind_options, current.nem_wind_duid),
+        ("nm_pv_duid", pv_options, current.nem_pv_duid),
+    ):
+        if key not in st.session_state or st.session_state[key] not in options:
+            st.session_state[key] = initial if initial in options else ""
 
     cols = st.columns(2)
     with cols[0]:
@@ -435,7 +468,9 @@ def render() -> None:
 
     price_region = st.selectbox(
         "Price region", options=nem_data.NEM_REGIONS,
-        index=nem_data.NEM_REGIONS.index(nem_data.DEFAULT_REGION),
+        index=nem_data.NEM_REGIONS.index(current.nem_price_region)
+        if current.nem_price_region in nem_data.NEM_REGIONS
+        else nem_data.NEM_REGIONS.index(nem_data.DEFAULT_REGION),
         key="nm_price_region",
     )
     covered_price_years = price_years_covered(price_region, selected_years)

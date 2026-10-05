@@ -38,6 +38,9 @@ def restore_from_query_params() -> None:
 
     from ppa import run_registry, run_store
 
+    if not run_store.valid_run_id(run_id):
+        st.query_params.pop("run", None)
+        return
     run_registry.touch(run_id)
 
     payload = run_store.load(run_id)
@@ -231,7 +234,10 @@ def _render_scenario_summary(s) -> None:
             st.markdown("**Simulation**")
             if s.transmission_cost_aud_mwh > 0:
                 st.markdown(f"- Transmission: **A${s.transmission_cost_aud_mwh:.1f}/MWh** delivered")
-            if s.simulation_years == 1:
+            if s.dispatch_mode == "representative_year":
+                st.markdown(f"- Mode: **1 solved year → {s.simulation_years}-year financial projection**")
+                st.caption("Fixed energy volumes; no later-year degradation or dispatch re-solve.")
+            elif s.simulation_years == 1:
                 st.markdown(f"- Mode: **1-year** ({s.first_sim_year})")
             else:
                 st.markdown(
@@ -239,11 +245,12 @@ def _render_scenario_summary(s) -> None:
                     f"({s.first_sim_year}–{s.first_sim_year + s.simulation_years - 1})"
                 )
             st.markdown(f"- Price escalation: **{s.price_escalation_rate:.1%}/yr**")
-            st.markdown(
-                f"- Degradation: PV {s.pv_degradation_rate:.1%} | "
-                f"Wind {s.wind_degradation_rate:.1%} | "
-                f"BESS {s.bess_degradation_rate:.1%}"
-            )
+            if s.dispatch_mode == "full_multi_year":
+                st.markdown(
+                    f"- Degradation: PV {s.pv_degradation_rate:.1%} | "
+                    f"Wind {s.wind_degradation_rate:.1%} | "
+                    f"BESS {s.bess_degradation_rate:.1%}"
+                )
 
 
 # ── data status (compact) ─────────────────────────────────────────────────────
@@ -318,10 +325,14 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
     from ppa.financials import run_multi_year_financial_analysis
 
     orig_scenario = scenario  # pre-sizing, user-facing scenario -- persisted below
+    from ppa.simulation import REPRESENTATIVE_YEAR_NOTE, scenario_for_dispatch
+
+    if scenario.dispatch_mode == "representative_year":
+        st.info(REPRESENTATIVE_YEAR_NOTE)
 
     res_min = int(getattr(scenario, "nem_resolution_minutes", 60))
     resolution_h = res_min / 60.0
-    if res_min < 30 and scenario.simulation_years > 2:
+    if res_min < 30 and scenario.dispatch_years > 2:
         raise RuntimeError(
             f"{res_min}-minute resolution over {scenario.simulation_years} years builds an "
             f"LP roughly {60 // res_min}x the hourly size and will exhaust memory. "
@@ -363,14 +374,16 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
             sizing_memory_advice,
             run_sizing_subprocess,
             sizing_diagnostics,
-            weather_cycle_years,
         )
 
-        n_sizing_years, cycle_note = weather_cycle_years(
-            scenario.simulation_years, len(pv_by_year), len(prices_by_year)
-        )
-        if cycle_note:
-            st.info(cycle_note)
+        # The sizing control names one historical year, independently of the
+        # operating-life projection. Do not concatenate the 25-year horizon.
+        sizing_year = scenario.capacity_sizing_year if scenario.is_nem else min(pv_by_year)
+        sizing_pv = {sizing_year: pv_by_year[sizing_year]}
+        sizing_wind = {sizing_year: wind_by_year[sizing_year]}
+        sizing_prices = {sizing_year: prices_by_year[sizing_year]}
+        sizing_load = {sizing_year: load_by_year[sizing_year]} if load_by_year else None
+        n_sizing_years = 1
         n_sizing_years, notice = clamp_sizing_years(n_sizing_years, resolution_h)
         if notice:
             st.warning(notice)
@@ -387,8 +400,8 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
             ),
         )
         sizing_ts = build_sizing_timeseries(
-            scenario, pv_by_year, wind_by_year, prices_by_year, n_sizing_years,
-            load_mw_by_year=load_by_year,
+            scenario, sizing_pv, sizing_wind, sizing_prices, n_sizing_years,
+            load_mw_by_year=sizing_load,
             resolution_minutes=res_min,
         )
 
@@ -423,8 +436,8 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
         gc.collect()
         horizon_msg = (
             f"Sizing LP: {sized.sizing_years_used} year(s). The subsequent hourly "
-            f"dispatch simulation still solves all {scenario.simulation_years} "
-            "year(s) — that is where most of the runtime goes."
+            f"dispatch simulation solves {scenario.dispatch_years} "
+            "year(s)."
             if sized.horizon_clamped
             else ""
         )
@@ -441,7 +454,7 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
 
     _t_dispatch = time.monotonic()
     results = run_multi_year(
-        scenario=scenario,
+        scenario=scenario_for_dispatch(scenario),
         pv_cf_by_year=pv_by_year,
         wind_cf_by_year=wind_by_year,
         prices_by_year=prices_by_year,
@@ -482,7 +495,12 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
 
     progress_bar.progress(1.0, text="Optimisation complete!")
     timing = f" (sizing {sizing_seconds:.0f}s + dispatch {dispatch_seconds:.0f}s)" if sizing_seconds is not None else f" ({dispatch_seconds:.0f}s)"
-    status_text.success(f"Completed {scenario.simulation_years} year(s) successfully{timing}.")
+    if scenario.dispatch_mode == "representative_year":
+        status_text.success(
+            f"Solved 1 dispatch year; prepared {scenario.simulation_years} projected financial years{timing}."
+        )
+    else:
+        status_text.success(f"Completed {scenario.simulation_years} year(s) successfully{timing}.")
 
 
 # ── multi-year results display ────────────────────────────────────────────────
@@ -490,6 +508,8 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
 def _render_results(fin, n_years: int) -> None:
     s = state.get_effective_scenario()
     render_config_summary(s)
+    if s.dispatch_mode == "representative_year":
+        st.caption(f"Financial projection: {n_years} operating years based on one solved dispatch year.")
     with st.expander("Optimisation results", expanded=True):
         avg_delivery = sum(y.fulfilled_share for y in fin.yearly) / len(fin.yearly) if fin.yearly else 0.0
         cols = st.columns(6)
@@ -704,7 +724,8 @@ def render() -> None:
             )
         with cols[1]:
             max_workers = st.selectbox(
-                "Parallel workers", [1, 2, 4, 8, 16, 24, 30], index=2, key="opt_max_workers",
+                "Parallel workers", [1, 2, 4, 8, 16, 24, 30], index=0, key="opt_max_workers",
+                disabled=s.dispatch_mode == "representative_year",
                 help=(
                     "Max parallel year-solves. Automatically capped to the available "
                     "CPU and RAM (~1.2 GB per worker), so memory-limited hosts like "
@@ -723,10 +744,15 @@ def render() -> None:
         from ppa import run_registry
 
         run_id = run_registry.new_run_id()
-        st.query_params["run"] = run_id
         try:
-            _run_simulation(s, int(max_workers), run_id)
+            from ppa.simulation import solve_slot
+
+            with solve_slot():
+                state.clear_run_outputs()
+                st.query_params["run"] = run_id
+                _run_simulation(s, int(max_workers), run_id)
         except Exception as exc:
+            st.query_params.pop("run", None)
             st.error(f"Optimisation failed: {exc}")
         else:
             st.rerun()

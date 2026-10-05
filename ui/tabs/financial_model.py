@@ -352,11 +352,16 @@ def render() -> None:
     # year -- see ppa.financial_model.run_project_finance's `annual_energy`.
     annual_energy = per_year_energy_inputs(results_list) if multi_year else None
 
-    scenario = state.get_scenario()
+    scenario = state.get_effective_scenario()
     seed = (
         project_finance_inputs_from_scenario(scenario)
         if scenario is not None else ProjectFinanceInputs()
     )
+    if scenario is not None and scenario.dispatch_mode == "representative_year":
+        from ppa.simulation import REPRESENTATIVE_YEAR_NOTE
+
+        seed = dataclasses.replace(seed, operating_life=scenario.simulation_years)
+        st.info(f"{scenario.simulation_years}-year financial projection. " + REPRESENTATIVE_YEAR_NOTE)
 
     # ── Energy interface (pre-filled, from PyPSA) ─────────────────────────────
     with st.expander("⚡ Energy inputs from PyPSA (pre-filled)", expanded=False):

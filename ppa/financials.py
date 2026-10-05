@@ -99,7 +99,10 @@ def run_multi_year_financial_analysis(
     """
     Compute project-level financials from per-year LP results.
 
-    Each year's revenue is computed from the actual optimised dispatch.
+    Each year's revenue is computed from the actual optimised dispatch. In
+    representative-year mode a single dispatch is reused as compact annual
+    financial records: quantities stay fixed and spot prices escalate, without
+    allocating duplicate hourly frames or running further LPs.
     CAPEX is invested at year 0; OPEX is charged each year.
     """
     s = scenario
@@ -114,18 +117,43 @@ def run_multi_year_financial_analysis(
     total_revenue = 0.0
     total_gen_mwh = 0.0
 
-    for idx, res in enumerate(year_results):
+    representative = (
+        getattr(s, "dispatch_mode", "full_multi_year") == "representative_year"
+        and len(year_results) == 1
+        and s.simulation_years > 1
+    )
+    n_records = s.simulation_years if representative else len(year_results)
+    for idx in range(n_records):
+        res = year_results[0] if representative else year_results[idx]
         rev = res.revenue
         summ = res.summary
-        net_rev = rev.net_revenue
+        merch_revenue = rev.excess_revenue
+        market_buy_cost = rev.market_purchase_cost
+        if representative:
+            # The dispatch LP escalates spot prices, while the bid-offer spread
+            # and certificate price remain fixed. Apply the same convention to
+            # repeated dispatch, preserving its certificate/spread cashflows.
+            factor = (1.0 + s.price_escalation_rate) ** idx
+            spot_sales = rev.excess_revenue - summ.sold_to_market_mwh * (
+                s.lgc_price_aud_mwh - s.market_spread
+            )
+            spot_purchases = rev.market_purchase_cost - summ.market_buy_to_ppa_mwh * (
+                s.market_spread + s.lgc_price_aud_mwh
+            )
+            merch_revenue += (factor - 1.0) * spot_sales
+            market_buy_cost += (factor - 1.0) * spot_purchases
+        net_rev = (
+            rev.ppa_revenue + merch_revenue - market_buy_cost
+            - rev.penalty_cost - rev.transmission_cost
+        )
         net_cf = net_rev - annual_opex
 
         yearly.append(
             YearlyFinancials(
                 year=first_sim_year + idx,
                 ppa_revenue=rev.ppa_revenue,
-                merch_revenue=rev.excess_revenue,
-                market_buy_cost=rev.market_purchase_cost,
+                merch_revenue=merch_revenue,
+                market_buy_cost=market_buy_cost,
                 penalty_cost=rev.penalty_cost,
                 transmission_cost=rev.transmission_cost,
                 net_revenue=net_rev,
@@ -138,14 +166,24 @@ def run_multi_year_financial_analysis(
         )
         cashflows.append(net_cf)
         total_revenue += net_rev
-        total_gen_mwh += summ.wind_generation_mwh + summ.pv_generation_mwh + summ.bess_dispatch_mwh
+        # Battery discharge shifts previously generated energy; it is not new
+        # generation and must not increase the lifetime generation/LCOE base.
+        total_gen_mwh += summ.wind_generation_mwh + summ.pv_generation_mwh
 
     # Extend cashflows to project_life_yrs if fewer years were simulated.
     # The average of the simulated years is used for the remaining periods so that
     # NPV/IRR always reflect the full project life regardless of simulation_years.
-    n_sim = len(year_results)
-    n_life = s.project_life_yrs
-    if n_sim < n_life:
+    n_sim = n_records
+    # Fast mode's requested projection horizon is the financial life, including
+    # a one-year projection. Do not silently extend a short projection to the
+    # separate lifetime assumption used to annualise the sizing objective.
+    n_life = (
+        s.simulation_years
+        if getattr(s, "dispatch_mode", "full_multi_year") == "representative_year"
+        and len(year_results) == 1
+        else s.project_life_yrs
+    )
+    if n_sim and n_sim < n_life:
         avg_simulated_cf = sum(cashflows[1:]) / n_sim
         cashflows.extend([avg_simulated_cf] * (n_life - n_sim))
 
@@ -155,8 +193,8 @@ def run_multi_year_financial_analysis(
     irr = _irr(cashflows_arr)
 
     # ── LCOE (using WACC annuity over project life) ───────────────────────────
-    annuity_wacc = (1 - (1 + s.discount_rate) ** -s.project_life_yrs) / s.discount_rate
-    avg_annual_gen = total_gen_mwh / len(year_results) if year_results else 0.0
+    annuity_wacc = (1 - (1 + s.discount_rate) ** -n_life) / s.discount_rate
+    avg_annual_gen = total_gen_mwh / n_records if n_records else 0.0
     lcoe = (
         (total_investment / annuity_wacc + annual_opex) / avg_annual_gen
         if avg_annual_gen > 0

@@ -587,7 +587,13 @@ def render() -> None:
 
     if state.has_multi_year_results() and state.has_multi_year_financial():
         n = len(state.get_multi_year_financial().yearly)
-        st.caption(f"Showing results from last optimisation run ({n} year(s)).")
+        n_solved = len(state.get_multi_year_results())
+        st.caption(f"Showing {n_solved} solved dispatch year(s) and {n} annual financial records.")
+        s = state.get_effective_scenario()
+        if s.dispatch_mode == "representative_year":
+            from ppa.simulation import REPRESENTATIVE_YEAR_NOTE
+
+            st.info(REPRESENTATIVE_YEAR_NOTE)
         _render_multi_year_deep_dive()
 
         if state.has_result():

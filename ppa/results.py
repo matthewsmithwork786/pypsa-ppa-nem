@@ -266,15 +266,19 @@ def extract_results(
 
     # ── Revenue ───────────────────────────────────────────────────────────────
     ppa_revenue = ppa_delivered_mwh * s.ppa_price
-    excess_revenue = float((market_sell * ts["ts_MktPrice"]).sum()) * resolution_h
-    market_purchase_cost = float((market_buy * ts["ts_MktPrice"]).sum()) * resolution_h
+    excess_revenue = float((market_sell * (
+        ts["ts_MktPrice"] + s.lgc_price_aud_mwh - s.market_spread
+    )).sum()) * resolution_h
+    market_purchase_cost = float((market_buy * (
+        ts["ts_MktPrice"] + s.market_spread + s.lgc_price_aud_mwh
+    )).sum()) * resolution_h
     penalty_cost = penalty_mwh * s.penalty_price
     transmission_cost = ppa_delivered_mwh * s.transmission_cost_aud_mwh
     net_revenue = (
         ppa_revenue + excess_revenue - market_purchase_cost - penalty_cost - transmission_cost
     )
 
-    total_gen_mwh = wind_generation_mwh + pv_generation_mwh + bess_dispatch_mwh
+    total_gen_mwh = wind_generation_mwh + pv_generation_mwh
     effective_capture_price = net_revenue / total_gen_mwh if total_gen_mwh > 0 else 0.0
 
     revenue = RevenueBreakdown(

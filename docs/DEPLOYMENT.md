@@ -1,5 +1,10 @@
 # Deploying to Streamlit Community Cloud
 
+**For the current free-hosting pilot, follow [STREAMLIT_TESTING.md](STREAMLIT_TESTING.md).**
+It documents the deployment branch and default one-year dispatch / 25-year
+financial projection. The older runtime/memory notes below describe earlier
+configurations; their benchmark numbers are not guarantees for this release.
+
 ## 1. What is already set up
 
 | File | Purpose |

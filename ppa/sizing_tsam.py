@@ -35,6 +35,46 @@ def tsam_available() -> bool:
         return False
 
 
+def _aggregate_with_aligned_occurrences(data, n_periods, hours_per_period,
+                                        representation, extreme_periods):
+    """Keep zero-occurrence cluster IDs aligned during tsam 3.4.2 rescaling.
+
+    Moving the sole member of a base cluster into an extreme cluster leaves
+    the base representative in place but removes its ID from the occurrence
+    dictionary. Upstream rescaling indexes that shortened dictionary as a
+    dense array, corrupting weights or raising IndexError. Fill the missing
+    IDs with zero before calling the unchanged upstream rescaler. This local
+    subclass affects only our aggregation; extremes, representation, partial
+    final-period weights and column-mean preservation are unchanged.
+    """
+    from tsam.config import REPRESENTATION_MAPPING
+    from tsam.exceptions import LegacyAPIWarning
+    from tsam.timeseriesaggregation import TimeSeriesAggregation
+
+    class AlignedAggregation(TimeSeriesAggregation):
+        def _rescaleClusterPeriods(self, clusterOrder, clusterPeriods, extremeClusterIdx):
+            counts = self._clusterPeriodNoOccur
+            self._clusterPeriodNoOccur = {
+                i: counts.get(i, 0) for i in range(len(clusterPeriods))
+            }
+            return super()._rescaleClusterPeriods(
+                clusterOrder, clusterPeriods, extremeClusterIdx
+            )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", LegacyAPIWarning)
+        aggregation = AlignedAggregation(
+            timeSeries=data, noTypicalPeriods=n_periods,
+            hoursPerPeriod=hours_per_period, clusterMethod="hierarchical",
+            representationMethod=REPRESENTATION_MAPPING[representation],
+            extremePeriodMethod="new_cluster_center" if extreme_periods else "None",
+            addPeakMax=["ppaload_mw", "ts_PVGen", "ts_WindGen"] if extreme_periods else [],
+            addPeakMin=["ts_PVGen", "ts_WindGen"] if extreme_periods else [],
+        )
+        representatives = aggregation.createTypicalPeriods()
+    return representatives, aggregation.clusterPeriodNoOccur
+
+
 def cluster_typical_periods(
     ts: pd.DataFrame,
     n_periods: int = 16,
@@ -73,8 +113,6 @@ def cluster_typical_periods(
             "Typical-days sizing needs the optional 'tsam' package. "
             "Install it (`pixi add --pypi tsam` or `pip install tsam`)."
         )
-    import tsam
-    from tsam.config import ClusterConfig, ExtremeConfig
 
     # You cannot ask for more clusters than there are periods to cluster. The
     # period-reference path solves a user-chosen window (a calendar month is
@@ -110,42 +148,16 @@ def cluster_typical_periods(
     # Weeks beat days because a 168 h period contains the real day-to-day
     # sequence, so the LP sees consecutive poor-resource days rather than
     # 24 h fragments stitched together by cyclic state of charge.
-    cluster = ClusterConfig(method="hierarchical", representation=representation)
-    extremes = (
-        ExtremeConfig(
-            method="new_cluster",
-            # Peak generation hours matter as much as peak load: the connection
-            # links (wind_link_mw / pvbess_link_mw) size to whatever peak flow
-            # the sizing LP actually sees, so without max_value on the
-            # generation columns tsam could cluster away the single hour that
-            # sets the true annual peak, sizing the link below what the full
-            # hourly run then needs (reported as "link undersized").
-            max_value=["ppaload_mw", "ts_PVGen", "ts_WindGen"],
-            min_value=["ts_PVGen", "ts_WindGen"],
-        )
-        if extreme_periods
-        else None
+    # Peak generation is retained alongside load/dark-lull extremes: it sets
+    # the connection capacity required by the subsequent full hourly solve.
+    reps, occ = _aggregate_with_aligned_occurrences(
+        data, n_periods, hours_per_period, representation, extreme_periods
     )
-
-    # tsam v3 sorts the result columns alphabetically and warns that v4 will
-    # follow input order; we reorder to `cols` below regardless, so silence it.
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            category=FutureWarning,
-            message=".*sorted alphabetically.*",
-        )
-        result = tsam.aggregate(
-            data,
-            n_clusters=n_periods,
-            period_duration=hours_per_period,
-            cluster=cluster,
-            extremes=extremes,
-        )
-
-    reps = result.cluster_representatives
+    # Empty base clusters no longer represent any historical hours. Keeping
+    # their rows would create daily SLA groups with zero total load/weight.
+    # Their members are already assigned to retained extreme clusters.
+    reps = reps.loc[reps.index.get_level_values(0).map(lambda cid: occ[cid] > 0)]
     cluster_ids = reps.index.get_level_values(0)
-    occ = result.cluster_weights
 
     # Normalise column order to the input's (tsam v3 sorts alphabetically; v4
     # follows input order — make it deterministic either way). Give the clustered

@@ -32,12 +32,15 @@ there only if you want to:
 * *Financial assumptions*: capex, discount rate, target IRR, project life.
 * *Simulation*: horizon, price escalation, technology degradation.
 
-Leave **capacity co-optimisation** on to have the optimiser size wind, solar and
-storage for you; turn it off to test a fleet you specify yourself.
+**Capacity co-optimisation** is off by default for a quick first test. Turn it on
+to size wind, solar and storage; otherwise enter the fleet capacities yourself.
 
 ### ③ ⚙️ Run
-Solve the model. A fixed-capacity run takes a few seconds per simulated year;
-adding capacity sizing costs roughly 20 seconds more.
+The default **Fast** mode solves one operating year, then repeats its energy
+volumes over the **25-year financial projection**. Financial prices and costs
+can escalate; later-year degradation and changing dispatch are not simulated.
+Choose **Full** mode to solve every operating year instead. Capacity sizing is
+a separate solve and can take substantially longer than fixed-capacity dispatch.
 
 ### 📊 Results
 Dispatch and delivery, the full project-finance model (CAPEX, LCOE, IRR, NPV,

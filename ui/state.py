@@ -56,7 +56,7 @@ _SCENARIO_FORM_KEYS = [
     "sf_discount_rate", "sf_target_irr", "sf_project_life",
     "sf_cal_forward_price", "sf_cal_hedge_fraction", "sf_chosen_day",
     "sf_lat", "sf_lon",
-    "sf_sim_years", "sf_first_sim_year", "sf_escalation",
+    "sf_sim_years", "sf_first_sim_year", "sf_escalation", "sf_dispatch_mode",
     "sf_pv_deg", "sf_wind_deg", "sf_bess_deg",
     "sf_optimise_capacity", "sf_max_build_wind", "sf_max_build_pv", "sf_max_build_bess",
     "sf_sizing_resolution", "sf_sizing_method", "sf_sizing_n_periods", "sf_grid_connection",
@@ -65,7 +65,8 @@ _SCENARIO_FORM_KEYS = [
     "sf_nem_years", "sf_capacity_sizing_year", "sf_nem_resolution",
     "sf_sla_monthly_enabled", "sf_sla_monthly_share",
     "sf_sla_daily_enabled", "sf_sla_daily_share",
-    "nm_year_range", "nm_resolution",
+    "nm_year_range", "nm_resolution", "nm_sizing_year",
+    "nm_wind_duid", "nm_pv_duid", "nm_price_region",
     "sf_aer_region", "sf_aer_quarters",
     "_sf_data_source_touched", "_sf_aer_applied", "_sf_aer_pending",
 ]
@@ -276,6 +277,9 @@ def clear_run_outputs() -> None:
     pattern used at every scenario-change site, plus the cached timeseries (relevant
     once a NEM/custom-CSV selection changes the data source).
     """
-    for key in (MULTI_YEAR_RESULTS_KEY, MULTI_YEAR_FINANCIAL_KEY, OPTIMISED_SIZES_KEY,
+    st.query_params.pop("run", None)
+    for key in (RESULT_KEY, FINANCIAL_KEY, COUNTERFACTUAL_KEY, PROJECT_FINANCE_KEY,
+                MULTI_YEAR_RESULTS_KEY, MULTI_YEAR_FINANCIAL_KEY, OPTIMISED_SIZES_KEY,
                 SIZING_DIAGNOSTICS_KEY, TIMESERIES_KEY):
         st.session_state.pop(key, None)
+    reset_financial_model_inputs()
