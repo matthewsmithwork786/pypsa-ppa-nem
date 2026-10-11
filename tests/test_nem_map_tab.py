@@ -73,17 +73,17 @@ def test_marker_style_differs_by_data_status():
     assert style_no_scada != style_incomplete
 
 
-def test_selectable_duids_respects_allow_unready():
+def test_selectable_duids_returns_simulation_ready_only():
     df = pd.DataFrame([
         {"duid": "A", "fuel_tech": "Wind", "simulation_ready": True},
         {"duid": "B", "fuel_tech": "Wind", "simulation_ready": False},
         {"duid": "C", "fuel_tech": "Solar", "simulation_ready": True},
     ])
-    ready_only = nem_map._selectable_duids(df, "Wind", allow_unready=False)
+    ready_only = nem_map._selectable_duids(df, "Wind")
     assert ready_only == ["A"]
 
-    all_wind = nem_map._selectable_duids(df, "Wind", allow_unready=True)
-    assert set(all_wind) == {"A", "B"}
+    solar = nem_map._selectable_duids(df, "Solar")
+    assert solar == ["C"]
 
 
 # ── Regression: @st.cache_data cache-key bug (leading-underscore param) ──────

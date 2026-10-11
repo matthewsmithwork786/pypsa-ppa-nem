@@ -190,6 +190,7 @@ def _solve_one_year(
     sim_year: int,
     ts: pd.DataFrame,
     scenario_fields: dict,
+    resolution_h: float = 1.0,
 ) -> tuple[int, OptimisationResult]:
     """Solve a single year's LP. Returns (sim_year_idx, result).
 
@@ -200,11 +201,16 @@ def _solve_one_year(
     pickling dies with "it is not the same object as ppa.scenario.Scenario". A
     dict is a builtin type with no such identity check; rebuilding from the
     module-level Scenario class sidesteps the whole problem.
+
+    `resolution_h` (hours per snapshot, e.g. 0.5 at 30 min) is passed as an
+    explicit argument, not smuggled through the scenario dict, so it stays
+    honest across the process boundary and both build_network and extract_results
+    integrate energy over real hours.
     """
     scenario = Scenario(**scenario_fields)
-    n = build_network(ts, scenario)
+    n = build_network(ts, scenario, resolution_h=resolution_h)
     status, condition = solve(n, scenario, ts)
-    result = extract_results(n, scenario, ts, status, condition)
+    result = extract_results(n, scenario, ts, status, condition, resolution_h=resolution_h)
 
     # Release the network and its linopy model before returning.
     #
@@ -240,6 +246,7 @@ def run_multi_year(
     max_workers: int = 4,
     progress_callback: Callable[[int, int, int], None] | None = None,
     run_id: str | None = None,
+    resolution_h: float = 1.0,
 ) -> list[OptimisationResult]:
     """
     Run `scenario.simulation_years` independent year-simulations in parallel.
@@ -270,6 +277,9 @@ def run_multi_year(
     available_price_years = sorted(prices_by_year.keys())
     available_load_years = sorted(load_mw_by_year) if load_mw_by_year else []
 
+    # Hours per snapshot (e.g. 0.5 at 30 min) → minutes, for build_year_timeseries.
+    resolution_minutes = max(1, int(round(60.0 * resolution_h)))
+
     # Pre-build all timeseries and per-year scenarios on the main thread
     timeseries_by_idx: dict[int, pd.DataFrame] = {}
     scenario_by_idx: dict[int, Scenario] = {}
@@ -294,6 +304,7 @@ def run_multi_year(
             price_escalation_rate=scenario.price_escalation_rate,
             load_profile=scenario.load_profile,
             load_mw_by_year=load_kw,
+            resolution_minutes=resolution_minutes,
         )
         timeseries_by_idx[idx] = ts
         scenario_by_idx[idx] = degraded
@@ -333,12 +344,20 @@ def run_multi_year(
         for idx in range(n_years):
             if results[idx] is not None:
                 continue  # already solved before the pool died
-            year_idx, result = _solve_one_year(
+            # resolution_h crosses as an explicit positional argument (kept off
+            # the scenario dict). The 4-arg form is the resolution_h == 1.0
+            # default, retained so a caller/test double that predates the
+            # argument keeps working; the sub-hourly 5-arg form is used
+            # whenever resolution actually differs.
+            args = (
                 idx,
                 first_sim_year + idx,
                 timeseries_by_idx[idx],
                 dataclasses.asdict(scenario_by_idx[idx]),
             )
+            if resolution_h != 1.0:
+                args += (resolution_h,)
+            year_idx, result = _solve_one_year(*args)
             _record(year_idx, result)
 
     if workers <= 1:
@@ -380,6 +399,7 @@ def run_multi_year(
                         first_sim_year + idx,
                         timeseries_by_idx[idx],
                         dataclasses.asdict(scenario_by_idx[idx]),
+                        resolution_h,
                     ): idx
                     for idx in range(n_years)
                 }

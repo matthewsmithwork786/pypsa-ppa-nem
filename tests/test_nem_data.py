@@ -38,6 +38,13 @@ def test_no_network_imports_in_source():
     assert not bad, f"nem_data.py imports forbidden network-capable modules: {bad}"
 
 
+def test_nem_data_does_not_import_remote_cache():
+    """nem_data must stay a pure local cache reader: it may not reference the
+    network-capable fetch module. Callers invoke ensure_plant_years first."""
+    source = (REPO_ROOT / "ppa" / "data" / "nem_data.py").read_text()
+    assert "remote_cache" not in source
+
+
 # ── Real registry (present in repo) ──────────────────────────────────────────
 
 def test_real_registry_loads_with_required_columns():

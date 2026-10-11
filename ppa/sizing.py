@@ -61,6 +61,10 @@ class SizedCapacities:
     wind_link_binding: bool = False
     pvbess_link_binding: bool = False
     sell_link_binding: bool = False
+    # Number of SLA/delivery constraints the solver added (annual + monthly +
+    # daily shortfall caps and min-delivery floors) — surfaces in the sizing
+    # diagnostics so a build-time regression can be traced to the SLA tier.
+    sla_constraint_count: int = 0
 
 
 def weather_cycle_years(
@@ -147,7 +151,12 @@ def clamp_sizing_years(requested_years: int, resolution_h: float = 1.0) -> tuple
     if mem_mb is None:
         return requested_years, None
 
-    per_year_mem_mb = _PER_WORKER_MEM_MB / max(1.0, float(resolution_h))
+    # Memory grows roughly linearly with snapshots, so a year at `resolution_h`
+    # hours per snapshot costs ~that much / resolution_h: 5-min (0.0833 h) rows
+    # cost ~12x the hourly figure, 2-hour rows cost half. No floor on the
+    # divisor -- applying one makes fine resolutions silently behave like
+    # hourly, which defeats the clamp's whole purpose.
+    per_year_mem_mb = _PER_WORKER_MEM_MB / max(1e-9, float(resolution_h))
     fit_years = max(1, int(mem_mb // per_year_mem_mb))
     if fit_years >= requested_years:
         return requested_years, None
@@ -156,7 +165,7 @@ def clamp_sizing_years(requested_years: int, resolution_h: float = 1.0) -> tuple
         f"Sizing LP horizon reduced from {requested_years} to {fit_years} year(s) "
         f"to fit available memory (~{mem_mb / 1024:.1f} GB free, "
         f"~{per_year_mem_mb / 1024:.1f} GB per simulated year at "
-        f"{resolution_h:.0f}h resolution). "
+        f"{resolution_h:g}h resolution). "
         "Optimised capacities are sized on the reduced horizon; the full "
         f"{requested_years}-year simulation still runs with those capacities."
     )
@@ -170,6 +179,7 @@ def build_sizing_timeseries(
     prices_by_year: dict[int, pd.Series],
     n_sizing_years: int,
     load_mw_by_year: dict[int, pd.Series] | None = None,
+    resolution_minutes: int = 60,
 ) -> pd.DataFrame:
     """Concatenate per-year timeseries into one sizing-LP horizon.
 
@@ -204,6 +214,7 @@ def build_sizing_timeseries(
             price_escalation_rate=scenario.price_escalation_rate,
             load_profile=scenario.load_profile,
             load_mw_by_year=load_kw,
+            resolution_minutes=resolution_minutes,
         )
         # Bake technology degradation into the capacity factors for this year
         ts["ts_PVGen"] = ts["ts_PVGen"] * (1.0 - scenario.pv_degradation_rate) ** idx
@@ -231,16 +242,25 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
     slight de-rating that approximates multi-year usable-capacity fade.
     """
     method = scenario.sizing_method
+    resolution_minutes = int(getattr(scenario, "nem_resolution_minutes", 60))
+    resolution_h = resolution_minutes / 60.0
     if method == "tsam":
         from ppa.sizing_tsam import cluster_typical_periods
 
         ts, weights = cluster_typical_periods(
             ts, n_periods=max(4, int(scenario.sizing_n_periods))
         )
+        # WP8: the clusterer knows the true period boundaries, so it labels each
+        # snapshot with its (cluster, day-within-period) block. Read it BEFORE
+        # handing `weights` to build_network — pandas operations may drop attrs.
+        period_labels = weights.attrs.get("period_labels")
         n_years = max(1, round(float(weights.sum()) / 8760))
     else:  # full_hourly
-        n_years = max(1, round(len(ts) / 8760))
-    resolution_h = 1
+        # len(ts) is in snapshots; each snapshot is resolution_minutes/60 hours,
+        # so a sub-hourly year has 8760 * 60 / resolution_minutes rows. Getting
+        # this wrong silently rescales every capex term via horizon_years.
+        n_years = max(1, round(len(ts) / (8760 * 60 / resolution_minutes)))
+        period_labels = None
 
     avg_bess_factor = (
         sum((1.0 - scenario.bess_degradation_rate) ** i for i in range(n_years)) / n_years
@@ -267,9 +287,9 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         # zero (docs/sizing_experiments.md E9).
         n = build_network(ts, sizing_scn, snapshot_weightings=weights)
     else:  # full_hourly
-        n = build_network(ts, sizing_scn, resolution_h=1.0)
+        n = build_network(ts, sizing_scn, resolution_h=resolution_h)
 
-    status, condition = solve(n, sizing_scn, ts)
+    status, condition = solve(n, sizing_scn, ts, period_labels=period_labels)
 
     # max(0, ·) clamps solver noise (e.g. -0.0 / -1e-9) at zero builds
     if "p_nom_opt" in n.generators.static.columns:
@@ -299,6 +319,28 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         """
         if "infeasible" not in str(condition).lower():
             return ""
+        # The tiered daily/monthly SLA is the most likely new cause: a single
+        # low-resource period that no portfolio within the caps can cover makes
+        # the WHOLE LP infeasible, where an annual SLA would just spread the
+        # shortfall across other days.
+        if scenario.sla_daily_enabled:
+            return (
+                f" A daily SLA of {scenario.sla_daily_share:.0%} requires at least "
+                "that share of EVERY day's load to be delivered. A single "
+                "low-resource day that no portfolio within the build caps can "
+                "cover makes the whole LP infeasible. Lower the daily share, "
+                "enable market buy, raise the BESS cap, or turn the daily SLA off "
+                "and rely on the monthly/annual one."
+            )
+        if scenario.sla_monthly_enabled:
+            return (
+                f" A monthly SLA of {scenario.sla_monthly_share:.0%} requires at "
+                "least that share of EVERY month's load to be delivered. A single "
+                "low-resource month that no portfolio within the build caps can "
+                "cover makes the whole LP infeasible. Lower the monthly share, "
+                "enable market buy, raise the BESS cap, or turn the monthly SLA "
+                "off and rely on the annual one."
+            )
         if scenario.enforce_min_delivery:
             return (
                 f" The hard minimum-delivery constraint requires "
@@ -361,6 +403,7 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         wind_link_binding=_at_cap(wind_link_mw, sizing_scn.grid_connection_max_mw),
         pvbess_link_binding=_at_cap(pvbess_link_mw, sizing_scn.grid_connection_max_mw),
         sell_link_binding=_at_cap(sell_link_mw, sizing_scn.grid_connection_max_mw),
+        sla_constraint_count=int(n.meta.get("sla_constraint_count", 0)),
     )
 
 
@@ -430,7 +473,9 @@ def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFr
     profile, implied LCOE, and the PPA tariff / penalty / average spot for
     comparison, plus which caps bind at the optimum.
     """
-    horizon_years = len(ts) / 8760.0
+    # len(ts) is in snapshots; × resolution_h converts to real hours (0.5 at 30
+    # min), so the reported horizon stays in years at any resolution.
+    horizon_years = len(ts) * sized.resolution_h / 8760.0
 
     # target_irr, not discount_rate: this table only ever explains a sizing
     # run, and ppa.network.build_network uses target_irr whenever sizing=True
@@ -515,6 +560,7 @@ def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFr
         "sizing_method": scenario.sizing_method,
         "sizing_delivery_share": sized.sizing_delivery_share,
         "delivery_share_full": None,
+        "sla_constraint_count": sized.sla_constraint_count,
     }
 
 

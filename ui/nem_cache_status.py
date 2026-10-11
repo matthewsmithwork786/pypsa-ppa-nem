@@ -31,3 +31,17 @@ def cached_cache_status(year: int = nem_data.DEFAULT_YEAR, cache_dir: Path = nem
     """
     fingerprint = nem_data.cache_fingerprint(year, cache_dir)
     return _cached_cache_status(year, fingerprint, cache_dir)
+
+
+def price_years_covered(region: str, years, cache_dir: Path = nem_data.NEM_CACHE_DIR) -> list:
+    """Selected (region, year) pairs whose price parquet is present on disk.
+
+    Pure on-disk existence check (never a network call) so this display-only
+    module can report which of the selected years have price coverage for a
+    region without needing the multi-year cache_status yet.
+    """
+    covered = []
+    for year in years:
+        if nem_data.price_path(region, year=int(year), cache_dir=cache_dir).exists():
+            covered.append(int(year))
+    return covered

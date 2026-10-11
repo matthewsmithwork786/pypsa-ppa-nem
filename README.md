@@ -4,9 +4,18 @@ PyPSA-based toolkit for simulating and optimising Power Purchase Agreements (PPA
 
 ## Overview
 
+The current testing build defaults to **one PyPSA dispatch year with a 25-year
+financial projection**. It repeats the solved year's energy volumes, applies
+financial indexation and avoids 25 separate dispatch solves or duplicated hourly
+datasets. Full multi-year dispatch remains selectable to model degradation and
+changing operation. See [free Streamlit testing](docs/STREAMLIT_TESTING.md) for
+setup and the approximation's limits.
+
 This project models renewable portfolios (wind, solar, battery storage) operating under long-term PPAs. It uses [PyPSA](https://pypsa.readthedocs.io) to find the least-cost hourly dispatch across a full month of real Australian NEM market data, honouring contractual delivery obligations, shortfall allowances, penalty regimes, and market interaction caps.
 
 A Streamlit web app provides an interactive interface with four predefined case studies, a customisable scenario form, and detailed results (KPIs, financial analysis, supply mix charts).
+
+The app supports multi-year portfolios: pick a range of historical weather years at 5/15/30/60-minute resolution, choose which year the capacity-sizing optimisation tunes against, and layer tiered service-level agreements (monthly and/or daily minimum delivery shares, enforced as hard constraints) on top of the annual delivery obligation.
 
 ## Setup
 

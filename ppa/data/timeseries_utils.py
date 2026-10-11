@@ -32,9 +32,11 @@ def build_year_timeseries(
     price_escalation_rate: float,
     load_profile: str = "flat",
     load_mw_by_year: dict[int, pd.Series] | None = None,
+    resolution_minutes: int = 60,
 ) -> pd.DataFrame:
     """
-    Build a full-year hourly timeseries ready for build_network / solve.
+    Build a full-year timeseries (hourly by default, or at `resolution_minutes`)
+    ready for build_network / solve.
 
     Both CF profiles and market prices are drawn from `weather_year` so that
     price–weather correlations are preserved (e.g. 2021: high prices + low wind).
@@ -44,11 +46,14 @@ def build_year_timeseries(
     wind_cf = wind_cf_by_year[weather_year]
     base_prices = prices_by_year[weather_year]
 
-    # Build the canonical hourly index for this simulation year (UTC)
+    # Build the canonical index for this simulation year (UTC) at the requested
+    # resolution (default 60 min). `_align_to_index` is positional and
+    # length-driven, so its tiling simply happens at the new resolution.
+    n_periods = _hours_in_year(sim_year) * 60 // resolution_minutes
     year_index = pd.date_range(
         start=f"{sim_year}-01-01",
-        periods=_hours_in_year(sim_year),
-        freq="h",
+        periods=n_periods,
+        freq=f"{resolution_minutes}min",
         tz="UTC",
     )
 

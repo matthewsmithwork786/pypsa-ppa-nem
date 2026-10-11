@@ -91,7 +91,7 @@ def test_get_timeseries_dicts_tolerates_scenario_without_the_field(fake_cache, m
     code path.
     """
     monkeypatch.setattr(nem_data, "plant_capacity_mw", lambda *a, **k: 100.0)
-    monkeypatch.setattr(nem_data, "get_price_dict", lambda *a, **k: {2025: pd.Series([1.0])})
+    monkeypatch.setattr(nem_data, "get_price_dict_multi", lambda *a, **k: {2025: pd.Series([1.0])})
     monkeypatch.setattr(nem_data, "load_plant_registry", lambda *a, **k: pd.DataFrame())
 
     class _Bare:

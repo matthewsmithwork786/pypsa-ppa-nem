@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import warnings
 
+import numpy as np
 import pandas as pd
 
 
@@ -32,6 +33,46 @@ def tsam_available() -> bool:
         return True
     except ImportError:
         return False
+
+
+def _aggregate_with_aligned_occurrences(data, n_periods, hours_per_period,
+                                        representation, extreme_periods):
+    """Keep zero-occurrence cluster IDs aligned during tsam 3.4.2 rescaling.
+
+    Moving the sole member of a base cluster into an extreme cluster leaves
+    the base representative in place but removes its ID from the occurrence
+    dictionary. Upstream rescaling indexes that shortened dictionary as a
+    dense array, corrupting weights or raising IndexError. Fill the missing
+    IDs with zero before calling the unchanged upstream rescaler. This local
+    subclass affects only our aggregation; extremes, representation, partial
+    final-period weights and column-mean preservation are unchanged.
+    """
+    from tsam.config import REPRESENTATION_MAPPING
+    from tsam.exceptions import LegacyAPIWarning
+    from tsam.timeseriesaggregation import TimeSeriesAggregation
+
+    class AlignedAggregation(TimeSeriesAggregation):
+        def _rescaleClusterPeriods(self, clusterOrder, clusterPeriods, extremeClusterIdx):
+            counts = self._clusterPeriodNoOccur
+            self._clusterPeriodNoOccur = {
+                i: counts.get(i, 0) for i in range(len(clusterPeriods))
+            }
+            return super()._rescaleClusterPeriods(
+                clusterOrder, clusterPeriods, extremeClusterIdx
+            )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", LegacyAPIWarning)
+        aggregation = AlignedAggregation(
+            timeSeries=data, noTypicalPeriods=n_periods,
+            hoursPerPeriod=hours_per_period, clusterMethod="hierarchical",
+            representationMethod=REPRESENTATION_MAPPING[representation],
+            extremePeriodMethod="new_cluster_center" if extreme_periods else "None",
+            addPeakMax=["ppaload_mw", "ts_PVGen", "ts_WindGen"] if extreme_periods else [],
+            addPeakMin=["ts_PVGen", "ts_WindGen"] if extreme_periods else [],
+        )
+        representatives = aggregation.createTypicalPeriods()
+    return representatives, aggregation.clusterPeriodNoOccur
 
 
 def cluster_typical_periods(
@@ -51,6 +92,14 @@ def cluster_typical_periods(
       it to `build_network(..., snapshot_weightings=weights)` so costs, energy
       and storage integrate over real hours.
 
+    The period-block labels ride along as `weights.attrs["period_labels"]`: a
+    `pd.Series` of one integer per clustered snapshot identifying its
+    `(cluster_id, day_within_period)` block (extra extreme periods at the end
+    are labelled too). `ppa.solver.solve` uses these — NOT the synthetic
+    calendar index, which corresponds to nothing real — to build daily SLA
+    groups. `None` when there was nothing to cluster (window shorter than one
+    period).
+
     `extreme_periods=True` preserves peak-load and dark-lull periods (via
     tsam's `addPeakMax`/`addPeakMin`) so the sized fleet must still cover the
     hours that matter instead of optimising only for the average day.
@@ -64,8 +113,6 @@ def cluster_typical_periods(
             "Typical-days sizing needs the optional 'tsam' package. "
             "Install it (`pixi add --pypi tsam` or `pip install tsam`)."
         )
-    import tsam
-    from tsam.config import ClusterConfig, ExtremeConfig
 
     # You cannot ask for more clusters than there are periods to cluster. The
     # period-reference path solves a user-chosen window (a calendar month is
@@ -78,6 +125,7 @@ def cluster_typical_periods(
         # Nothing to cluster — hand back the window itself, weighted one hour
         # per row so downstream cost/energy integration is unchanged.
         weights = pd.Series(1.0, index=ts.index, dtype=float)
+        weights.attrs["period_labels"] = None
         return ts.copy(), weights
     n_periods = max(1, min(int(n_periods), available_periods))
 
@@ -100,36 +148,16 @@ def cluster_typical_periods(
     # Weeks beat days because a 168 h period contains the real day-to-day
     # sequence, so the LP sees consecutive poor-resource days rather than
     # 24 h fragments stitched together by cyclic state of charge.
-    cluster = ClusterConfig(method="hierarchical", representation=representation)
-    extremes = (
-        ExtremeConfig(
-            method="new_cluster",
-            max_value=["ppaload_mw"],
-            min_value=["ts_PVGen", "ts_WindGen"],
-        )
-        if extreme_periods
-        else None
+    # Peak generation is retained alongside load/dark-lull extremes: it sets
+    # the connection capacity required by the subsequent full hourly solve.
+    reps, occ = _aggregate_with_aligned_occurrences(
+        data, n_periods, hours_per_period, representation, extreme_periods
     )
-
-    # tsam v3 sorts the result columns alphabetically and warns that v4 will
-    # follow input order; we reorder to `cols` below regardless, so silence it.
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            category=FutureWarning,
-            message=".*sorted alphabetically.*",
-        )
-        result = tsam.aggregate(
-            data,
-            n_clusters=n_periods,
-            period_duration=hours_per_period,
-            cluster=cluster,
-            extremes=extremes,
-        )
-
-    reps = result.cluster_representatives
+    # Empty base clusters no longer represent any historical hours. Keeping
+    # their rows would create daily SLA groups with zero total load/weight.
+    # Their members are already assigned to retained extreme clusters.
+    reps = reps.loc[reps.index.get_level_values(0).map(lambda cid: occ[cid] > 0)]
     cluster_ids = reps.index.get_level_values(0)
-    occ = result.cluster_weights
 
     # Normalise column order to the input's (tsam v3 sorts alphabetically; v4
     # follows input order — make it deterministic either way). Give the clustered
@@ -142,4 +170,22 @@ def cluster_typical_periods(
     clustered.index.name = "snapshot"
     weights = pd.Series([float(occ[c]) for c in cluster_ids], dtype=float)
     weights.index = clustered.index
+
+    # WP8 period-block labels for daily SLA groups in `ppa.solver.solve`. tsam
+    # returns each cluster's rows in chronological order, so a per-cluster
+    # cumulative count is the hour-within-period. days_per_period is derived
+    # from hours_per_period (168 -> 7) rather than hard-coded; a period that is
+    # not a whole number of days cannot be sliced into meaningful representative
+    # days, so it falls back to one group per period (an approximation, but a
+    # bounded one). Extreme periods appended by tsam are extra clusters and are
+    # labelled exactly like the ordinary ones.
+    cids = np.asarray(cluster_ids, dtype=int)
+    hour_in_period = pd.Series(cluster_ids).groupby(cluster_ids).cumcount()
+    days_per_period = hours_per_period // 24
+    if hours_per_period % 24 == 0:
+        labels = cids * days_per_period + (hour_in_period // 24).to_numpy()
+    else:
+        labels = cids
+    period_labels = pd.Series(labels, index=clustered.index, dtype=int)
+    weights.attrs["period_labels"] = period_labels
     return clustered, weights

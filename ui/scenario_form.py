@@ -148,6 +148,12 @@ def render_scenario_form(initial: Scenario) -> Scenario:
     
     include_bess = cols[0].toggle("Include BESS", value=initial.include_bess, key="sf_include_bess")
     enable_market_buy = cols[1].toggle("Enable market buy", value=initial.enable_market_buy, key="sf_enable_market_buy")
+    if enable_market_buy:
+        st.caption(
+            "Market purchases include the bid-offer spread and an LGC at the assumed "
+            "certificate price, matching the bundled PPA. This is certificate accounting; "
+            "it does not establish time-matched renewable provenance."
+        )
     enable_market_sell = cols[2].toggle("Enable market sell", value=initial.enable_market_sell, key="sf_enable_market_sell")
     enable_shortfall = cols[3].toggle("Enable shortfall allowance", value=initial.enable_shortfall, key="sf_enable_shortfall")
     
@@ -173,23 +179,9 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 "Max BESS build (MW)", 0.0, 10_000.0, float(initial.max_build_bess_mw),
                 50.0, key="sf_max_build_bess",
             )
-            enforce_min_delivery = st.checkbox(
-                f"Enforce the {initial.required_delivery_share:.0%} delivery share as a "
-                "hard constraint",
-                value=bool(initial.enforce_min_delivery),
-                key="sf_enforce_min_delivery",
-                help=(
-                    "By default the delivery requirement is only a *price* signal: the "
-                    "sizing LP weighs the penalty (PPA price x penalty multiplier) "
-                    "against the cost of building, and buys its way out of the SLA "
-                    "whenever the penalty is cheaper. At current NEM costs it usually "
-                    r"is — penalty A\$126/MWh against a wind LCOE near A\$162/MWh — so "
-                    "sized portfolios settle around 50-65% delivery. Tick this to make "
-                    "the contractual share binding, so the LP must build enough to meet "
-                    "it. If no portfolio within the build caps can, the LP reports "
-                    "infeasible and says which limit is blocking."
-                ),
-            )
+            # `enforce_min_delivery` is set below, in the "Service level agreement
+            # (SLA)" expander right after `required_delivery_share` — its label
+            # quotes that value, so it needs to be seen and set together with it.
             with st.expander("⚙️ Advanced sizing settings", expanded=False):
               _method_labels = {
                   "full_hourly": "Full year hourly",
@@ -244,7 +236,19 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                     "connection limit; when it binds it curtails the build."
                 ),
             )
-            cols[1].caption("")
+            connection_cost_aud_mw = cols[1].number_input(
+                "Link/connection cost (A$/MW)", min_value=0.0, max_value=2_000_000.0,
+                value=float(initial.connection_cost_aud_mw), step=10_000.0,
+                key="sf_connection_cost_aud_mw",
+                help=(
+                    "Capital cost per MW charged on the wind/PV+BESS/export "
+                    "transport links in the sizing LP. A strictly positive value is "
+                    "what stops the LP over-building a link beyond its realised peak "
+                    "flow — it is *why* sized links come out matching peak flow "
+                    "rather than some larger round number. Set to 0 to size links "
+                    "purely against the grid connection limit with no cost penalty."
+                ),
+            )
             merchant_share = cols[2].slider(
                 "Merchant value share", 0.0, 1.0, float(initial.sizing_merchant_value_share),
                 0.05, key="sf_merchant_share",
@@ -263,7 +267,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             sizing_n_periods = initial.sizing_n_periods
             grid_connection = "" if initial.grid_connection_max_mw == float("inf") else str(initial.grid_connection_max_mw)
             merchant_share = float(initial.sizing_merchant_value_share)
-            enforce_min_delivery = bool(initial.enforce_min_delivery)
+            connection_cost_aud_mw = float(initial.connection_cost_aud_mw)
 
         # When capacity co-optimisation is on the MW values are ignored entirely,
         # so the sliders are hidden rather than greyed out -- a disabled control
@@ -293,19 +297,13 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             )
 
     with st.expander("PPA contract terms", expanded=True):
-        cols = st.columns(4)
+        cols = st.columns(3)
         ppaload_mw = cols[0].number_input("PPA offtake load (MW)", min_value=1.0, max_value=PPALOAD_MW_MAX,
                                            value=float(initial.ppaload_mw), step=10.0, key="sf_ppaload_mw",
                                            help="Peak rated MW. The load profile shapes how much of this is demanded each hour.")
         ppa_price = cols[1].number_input("PPA tariff (A$/MWh)", min_value=1.0, max_value=500.0,
                                           value=float(initial.ppa_price), step=5.0, key="sf_ppa_price")
-        required_delivery_share = cols[2].slider(
-            "Required delivery share (%)", 50, 100, int(initial.required_delivery_share * 100),
-            step=1, format="%d%%",
-            help="Fraction of total contracted load that must be delivered on average.",
-            key="sf_required_delivery_share",
-        ) / 100.0
-        pen_mult = cols[3].number_input(
+        pen_mult = cols[2].number_input(
             "Penalty multiplier (×tariff)", min_value=1.0, max_value=5.0,
             value=float(initial.pen_mult), step=0.1,
             key="sf_pen_mult",
@@ -394,13 +392,29 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                                        float(initial.devex_pct_of_capex * 100), 0.5, format="%.1f",
                                        key="sf_devex_pct")
         project_life_yrs = cols[3].number_input("Project life (years)", 5, 40,
-                                            int(initial.project_life_yrs), 1, key="sf_project_life")
+                                            int(initial.project_life_yrs), 1, key="sf_project_life",
+                                            help=("Life used for sizing annualisation and full-mode appraisal. "
+                                                  "Fast-mode financial life uses Financial projection years below."))
 
     with st.expander("Simulation", expanded=True):
+        mode_labels = {
+            "representative_year": "Fast: solve one year, project financials",
+            "full_multi_year": "Full: solve every operating year",
+        }
+        dispatch_mode = st.radio(
+            "Dispatch mode", list(mode_labels),
+            index=list(mode_labels).index(initial.dispatch_mode),
+            format_func=mode_labels.get, key="sf_dispatch_mode",
+        )
+        if dispatch_mode == "representative_year":
+            from ppa.simulation import REPRESENTATIVE_YEAR_NOTE
+
+            st.info(REPRESENTATIVE_YEAR_NOTE)
         cols = st.columns(4)
         simulation_years = int(cols[0].number_input(
-            "Simulation years", 1, 40, int(initial.simulation_years), 1, key="sf_sim_years",
-            help="1 = single full-year run; >1 = multi-year parallel simulation.",
+            "Financial projection years" if dispatch_mode == "representative_year" else "Simulation years",
+            1, 40, int(initial.simulation_years), 1, key="sf_sim_years",
+            help="Fast mode solves one year regardless of this horizon. Full mode solves every year.",
         ))
         first_sim_year = int(cols[1].number_input(
             "First simulation year", 2024, 2040, int(initial.first_sim_year), 1,
@@ -413,20 +427,118 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             help="Annual compound escalation applied to base market prices.",
         ) / 100.0
 
-        st.caption("Technology degradation (compound annual, applied from year 2 onward)")
+        st.caption("Technology degradation (used only in full multi-year dispatch)")
         cols = st.columns(4)
         pv_degradation_rate = cols[0].number_input(
             "PV (%/yr)", 0.0, 5.0, float(initial.pv_degradation_rate * 100),
             0.05, format="%.2f", key="sf_pv_deg",
+            disabled=dispatch_mode == "representative_year",
         ) / 100.0
         wind_degradation_rate = cols[1].number_input(
             "Wind (%/yr)", 0.0, 5.0, float(initial.wind_degradation_rate * 100),
             0.05, format="%.2f", key="sf_wind_deg",
+            disabled=dispatch_mode == "representative_year",
         ) / 100.0
         bess_degradation_rate = cols[2].number_input(
             "BESS (%/yr)", 0.0, 10.0, float(initial.bess_degradation_rate * 100),
             0.1, format="%.1f", key="sf_bess_deg",
+            disabled=dispatch_mode == "representative_year",
         ) / 100.0
+
+    with st.expander("Service level agreement (SLA)", expanded=True):
+        st.caption(
+            "The annual obligation is always active. Monthly and daily obligations are "
+            "optional and stack on top: each limits the free shortfall allowance within "
+            "that period, so a good year cannot pay for a bad month."
+        )
+
+        cols = st.columns(3)
+        required_delivery_share = cols[0].slider(
+            "Annual delivery share (%)", 50, 100, int(initial.required_delivery_share * 100),
+            step=1, format="%d%%", key="sf_required_delivery_share",
+            help="Share of total annual contracted load that must be delivered.",
+        ) / 100.0
+
+        sla_monthly_enabled = cols[1].toggle(
+            "Monthly minimum", value=bool(initial.sla_monthly_enabled),
+            key="sf_sla_monthly_enabled",
+        )
+        if sla_monthly_enabled:
+            sla_monthly_share = cols[1].slider(
+                "Monthly delivery share (%)", 0, 100,
+                int((initial.sla_monthly_share or initial.required_delivery_share) * 100),
+                step=1, format="%d%%", key="sf_sla_monthly_share",
+            ) / 100.0
+        else:
+            sla_monthly_share = float(initial.sla_monthly_share)
+
+        sla_daily_enabled = cols[2].toggle(
+            "Daily minimum", value=bool(initial.sla_daily_enabled),
+            key="sf_sla_daily_enabled",
+        )
+        if sla_daily_enabled:
+            sla_daily_share = cols[2].slider(
+                "Daily delivery share (%)", 0, 100,
+                int((initial.sla_daily_share or initial.required_delivery_share) * 100),
+                step=1, format="%d%%", key="sf_sla_daily_share",
+            ) / 100.0
+        else:
+            sla_daily_share = float(initial.sla_daily_share)
+
+        if sla_monthly_enabled and sla_monthly_share < required_delivery_share:
+            st.warning(
+                f"A {sla_monthly_share:.0%} monthly minimum is looser than the "
+                f"{required_delivery_share:.0%} annual obligation, so it will never "
+                "bind. Raise it above the annual share for it to have any effect."
+            )
+        if sla_daily_enabled and sla_daily_share < required_delivery_share:
+            st.warning(
+                f"A {sla_daily_share:.0%} daily minimum is looser than the "
+                f"{required_delivery_share:.0%} annual obligation, so it will never "
+                "bind. Raise it above the annual share for it to have any effect."
+            )
+        if sla_daily_enabled and sla_daily_share >= 0.90:
+            st.warning(
+                "Daily obligations above ~90% are frequently infeasible: a single "
+                "low-resource day cannot be covered by a portfolio of any size "
+                "without storage or market purchases."
+            )
+
+        if optimise_capacity:
+            enforce_min_delivery = st.checkbox(
+                f"Force the optimised capacity to meet the {required_delivery_share:.0%} "
+                "annual share (hard constraint)",
+                value=bool(initial.enforce_min_delivery), key="sf_enforce_min_delivery",
+                help=(
+                    "By default the delivery requirement is only a *price* signal: the "
+                    "sizing LP weighs the penalty (PPA price x penalty multiplier) "
+                    "against the cost of building, and buys its way out of the SLA "
+                    "whenever the penalty is cheaper. At current NEM costs it usually "
+                    "is — penalty A$126/MWh against a wind LCOE near A$162/MWh — so "
+                    "sized portfolios settle around 50-65% delivery. Tick this to make "
+                    "the contractual share binding, so the LP must build enough to meet "
+                    "it. If no portfolio within the build caps can, the LP reports "
+                    "infeasible and says which limit is blocking."
+                ),
+            )
+        else:
+            enforce_min_delivery = bool(initial.enforce_min_delivery)
+
+        if optimise_capacity and sla_monthly_enabled and sizing_method == "tsam":
+            st.warning(
+                "A monthly SLA cannot be enforced with the 'Typical weeks (tsam)' sizing "
+                "representation: clustering replaces the calendar with representative "
+                "weeks, so calendar months no longer exist in the sizing LP. Switch the "
+                "sizing representation to 'Full year hourly', or turn the monthly SLA off."
+            )
+
+        _res_min = int(getattr(initial, "nem_resolution_minutes", 60))
+        if _res_min < 30 and dispatch_mode == "full_multi_year" and simulation_years > 2:
+            st.warning(
+                f"{_res_min}-minute resolution over {simulation_years} years builds an "
+                f"LP roughly {60 // _res_min}x the hourly size and will exhaust memory. "
+                "Reduce the simulation years to 2 or fewer, or use 30- or 60-minute resolution."
+            )
 
     with st.expander("Market data source", expanded=False):
         from ppa.data import nem_data
@@ -614,7 +726,12 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             float("inf") if not str(grid_connection).strip() else float(str(grid_connection).strip())
         ),
         sizing_merchant_value_share=float(merchant_share),
+        connection_cost_aud_mw=float(connection_cost_aud_mw),
         enforce_min_delivery=bool(enforce_min_delivery),
+        sla_monthly_enabled=bool(sla_monthly_enabled),
+        sla_monthly_share=float(sla_monthly_share),
+        sla_daily_enabled=bool(sla_daily_enabled),
+        sla_daily_share=float(sla_daily_share),
         include_bess=include_bess,
         enable_market_buy=enable_market_buy,
         enable_market_sell=enable_market_sell,
@@ -628,7 +745,9 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         cal_forward_note=cal_forward_note,
         data_source=initial.data_source,
         nem_price_region=nem_price_region,
-        nem_year=int(nem_year),
+        nem_years=(initial.nem_years if initial.data_source == "nem_map" else (int(nem_year),)),
+        capacity_sizing_year=(initial.capacity_sizing_year if initial.data_source == "nem_map" else int(nem_year)),
+        use_unconstrained_cf=bool(use_unconstrained_cf),
         onsw_mw=float(onsw_mw),
         pv_mw=float(pv_mw),
         bess_mw=float(bess_mw) if include_bess else 0.0,
@@ -650,6 +769,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         chosen_day=str(chosen_day),
         transmission_cost_aud_mwh=float(transmission_cost_aud_mwh),
         simulation_years=simulation_years,
+        dispatch_mode=dispatch_mode,
         first_sim_year=first_sim_year,
         price_escalation_rate=float(price_escalation_rate),
         pv_degradation_rate=float(pv_degradation_rate),

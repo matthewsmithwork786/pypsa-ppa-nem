@@ -54,8 +54,11 @@ def _get_base() -> tuple[EnergyInputs | None, ProjectFinanceInputs | None, list[
     if energy is None:
         return None, None, None
 
-    scenario = results[0].scenario if results else None
+    scenario = state.get_effective_scenario() if results else None
     finance = project_finance_inputs_from_scenario(scenario) if scenario else ProjectFinanceInputs()
+    if scenario is not None and scenario.dispatch_mode == "representative_year":
+        finance = dataclasses.replace(finance, operating_life=scenario.simulation_years)
+    finance = dataclasses.replace(finance, escalate_merchant_prices=annual_energy is None)
     return energy, finance, annual_energy
 
 

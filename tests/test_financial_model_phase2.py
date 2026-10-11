@@ -202,7 +202,7 @@ def test_case_studies_validate_and_produce_finite_results(cs):
 def test_run_multi_year_financial_analysis_cashflow_includes_devex():
     scenario = CASE_STUDIES[0]
     s = load_case_study(scenario)
-    s = dataclasses.replace(s, devex_pct_of_capex=0.10)
+    s = dataclasses.replace(s, devex_pct_of_capex=0.10, dispatch_mode="full_multi_year")
 
     summary = SummaryVolumes(
         total_load_mwh=1_000_000.0,

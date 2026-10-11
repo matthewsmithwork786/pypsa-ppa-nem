@@ -687,3 +687,57 @@ compares `tsam` against. The historical coarse-method rows and figures earlier i
 (E1's disabled-slider fleet aside, the "coarse 3h (legacy)" rows, the memory-profile table,
 §"weighted (typical-period) LP" `resolution_h` comparison) are left as-is — they are the
 record of why coarse was retired, not current guidance.
+
+---
+
+## E13 — Multi-year Zenodo plants + tiered SLA (WP1–WP11): numerical regression gate
+
+**Date:** 2026-08-11
+
+Per the implementation plan's §5.2 merge gate: at default settings (monthly/daily SLA off,
+`nem_resolution_minutes=60`, `nem_years=(2025,)`) the model must be byte-identical to before
+the whole multi-year/SLA feature set landed. Ran the first case study's scenario with
+`optimise_capacity=True, sizing_method="tsam", simulation_years=3` on both
+`feature/energy-first-results-deploy` (base, pre-feature) and
+`feature/multiyear-plants-and-tiered-sla` (merged, HEAD `02c432a` + the local
+`_full_year_index()` fixture fix and `docs/PLAN_multiyear_sla.md`/`IMPLEMENTATION_PLAN_*.md`
+additions):
+
+| metric | base | merged | match |
+|---|---|---|---|
+| sized wind MW | 51.966931 | 51.966931 | exact |
+| sized solar MW | 99.801903 | 99.801903 | exact |
+| sized BESS MW | 0.0 | 0.0 | exact |
+| sized BESS MWh | 0.0 | 0.0 | exact |
+| year-1 delivered GWh | 273.851384 | 273.851384 | exact |
+| year-1 `fulfilled_share` | 0.461444 | 0.461444 | exact |
+| year-1 total load MWh | 593465.968052 | 593465.968052 | exact |
+| sizing wall-clock | 14.5 s | 14.82 s | within ±25% |
+
+Every exact-tolerance metric matched to the full float precision printed — no numerical
+drift anywhere in the pipeline (`Scenario.nem_year` becoming a derived property,
+`to_resolution`/`get_cf_dicts_multi` replacing the single-year path inside
+`get_timeseries_dicts`, `resolution_h` threading through `optimise_capacities`/
+`run_multi_year`, and the WP8 SLA constraint plumbing in `solver.py` all confirmed inert at
+defaults). `tsam` had to be `pip install`-ed into the shared `.pixi` env for this run (see
+merge commit notes on WP4/WP8) — it is declared in `pixi.toml`'s `[pypi-dependencies]` but
+was not actually installed in this checkout.
+
+**Follow-on finding, not part of this feature — flagged for a separate fix:** with `tsam`
+actually installed, `tests/test_sla_constraints.py::test_tsam_daily_sla_holds_per_representative_day`
+(previously always `pytest.importorskip`-skipped, so never actually run in any environment)
+fails with `IndexError: index N is out of bounds for axis 0 with size N` inside tsam's own
+`_rescaleClusterPeriods` (`tsam/timeseriesaggregation.py`), triggered from
+`ppa.sizing_tsam.cluster_typical_periods`'s call to `tsam.aggregate(..., extreme_periods=True)`
+— code that predates this feature branch entirely, so this is **not a regression from
+WP1–WP11**. Reproduced directly (outside pytest):
+`cluster_typical_periods(ts, n_periods=N)` raises for `N ∈ {4, 8, 16}`, succeeds for
+`N ∈ {20, 40}` (the `Scenario.sizing_n_periods` default), and succeeds at any `N` with
+`extreme_periods=False`. `validate_scenario` currently allows `sizing_n_periods` anywhere in
+`[4, 40]`, so a user picking a low period count for a faster tsam sizing run can hit this
+crash in production today, independent of anything in this feature. `tsam` was left
+uninstalled in the shared `.pixi` env afterwards (restoring the state every WP in this
+feature was actually reviewed against) — this needs its own investigation (a tsam version
+bump, if one exists that's still compatible with the `highspy==1.15.0` pin, or a defensive
+`extreme_periods` fallback in `cluster_typical_periods`) before `tsam` is safe to install by
+default.

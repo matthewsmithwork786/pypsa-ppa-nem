@@ -11,6 +11,7 @@ trivially auditable (no `requests`/`urllib`/`httpx`/`nemosis`/`socket`).
 from __future__ import annotations
 
 import calendar
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +21,17 @@ import pandas as pd
 # ── Constants ────────────────────────────────────────────────────────────────
 
 NEM_CACHE_DIR = Path(__file__).parent.parent.parent / "data" / "cache" / "nem"
+
+# Runtime cache: where the network-enabled fetch module materialises files
+# downloaded from Zenodo. Separate because the packaged cache may be read-only
+# and is version controlled; we never want downloads landing in a git working
+# tree.
+RUNTIME_CACHE_DIR = Path(
+    os.environ.get(
+        "PPA_RUNTIME_CACHE_DIR",
+        Path.home() / ".cache" / "pypsa-ppa-nem" / "nem",
+    )
+)
 REGISTRY_FILENAME = "nem_plant_registry.parquet"
 NEM_REGIONS = ["NSW1", "QLD1", "SA1", "TAS1", "VIC1"]
 DEFAULT_REGION = "NSW1"
@@ -54,18 +66,46 @@ COMMISSIONING_MIN_PEAK_FRACTION = 0.60
 
 # ── Path helpers ─────────────────────────────────────────────────────────────
 
+def _resolve(relative: Path, cache_dir: Path = NEM_CACHE_DIR) -> Path:
+    """Packaged cache first, then the runtime cache.
+
+    Returns the packaged path when the file exists there, the runtime path when
+    it exists there, and otherwise the packaged path (so error messages keep
+    naming the canonical location). `cache_dir` is still honoured explicitly so
+    every existing test that passes a temp dir keeps working unchanged.
+    """
+    packaged = Path(cache_dir) / relative
+    if packaged.exists():
+        return packaged
+    runtime = RUNTIME_CACHE_DIR / relative
+    if runtime.exists():
+        return runtime
+    return packaged
+
+
 def registry_path(cache_dir: Path = NEM_CACHE_DIR) -> Path:
-    return Path(cache_dir) / "registry" / REGISTRY_FILENAME
+    return _resolve(Path("registry") / REGISTRY_FILENAME, cache_dir)
+
+
+def eligibility_cache_path(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> Path:
+    """Precomputed per-DUID eligibility/CUF summary for `list_eligible_plants`.
+
+    Built offline by `scripts/build_nem_eligibility_cache.py` and committed
+    alongside the other `data/cache/nem/` caches, so the Get Data / Pick
+    Plants map+list renders from a single parquet read instead of running
+    `scada_summary` (a full-year scan) over every plant on every cold start.
+    """
+    return _resolve(Path("registry") / f"eligibility_{year}.parquet", cache_dir)
 
 
 def scada_path(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> Path:
     duid = duid.strip().upper()
-    return Path(cache_dir) / "scada" / f"{duid}_{year}.parquet"
+    return _resolve(Path("scada") / f"{duid}_{year}.parquet", cache_dir)
 
 
 def price_path(region: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> Path:
     region = region.strip().upper()
-    return Path(cache_dir) / "price" / f"rrp_{region}_{year}.parquet"
+    return _resolve(Path("price") / f"rrp_{region}_{year}.parquet", cache_dir)
 
 
 def expected_intervals(year: int) -> int:
@@ -117,6 +157,90 @@ def load_plant_registry(cache_dir: Path = NEM_CACHE_DIR) -> pd.DataFrame:
     df = df.drop_duplicates(subset="duid", keep="first")
     df = df.sort_values(["station_name", "duid"]).reset_index(drop=True)
     return df
+
+
+# ── Multi-year operational manifest ──────────────────────────────────────────
+
+PLANT_YEARS_FILENAME = "plant_years.parquet"
+PLANT_YEARS_COLUMNS = [
+    "duid", "year", "station_name", "region", "fuel_tech",
+    "capacity_registered_mw_used", "n_intervals", "expected_intervals",
+    "coverage", "first_ts", "last_ts", "longest_gap_hours",
+    "longest_zero_run_hours", "monthly_peak_ratio_min",
+    "monthly_peak_ratio_by_month", "annual_cuf", "cuf_vs_plant_median",
+    "first_power_date", "fully_operational", "reject_reasons",
+]
+
+
+def plant_years_path(cache_dir: Path = NEM_CACHE_DIR) -> Path:
+    """The per-(duid, year) operational manifest built by
+    scripts/build_plant_year_manifest.py, resolved packaged-first then runtime."""
+    return _resolve(Path("registry") / PLANT_YEARS_FILENAME, cache_dir)
+
+
+def load_plant_years(cache_dir: Path = NEM_CACHE_DIR) -> pd.DataFrame:
+    """The per-(duid, year) operational manifest built by
+    scripts/build_plant_year_manifest.py. Returns an EMPTY DataFrame with the
+    right columns when absent, so installs without it degrade to the legacy
+    single-year eligibility cache rather than raising (optional caches must
+    degrade, not fail)."""
+    path = plant_years_path(cache_dir)
+    if not path.exists():
+        return pd.DataFrame(columns=PLANT_YEARS_COLUMNS)
+    df = pd.read_parquet(path)
+    missing = [c for c in PLANT_YEARS_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"NEM plant-years manifest at {path} is missing required column(s): {missing}. "
+            f"Present columns: {list(df.columns)}"
+        )
+    df = df.copy()
+    df["duid"] = df["duid"].astype(str).str.strip().str.upper()
+    df["year"] = df["year"].astype(int)
+    df["fully_operational"] = df["fully_operational"].fillna(False).astype(bool)
+    return df
+
+
+def available_years(cache_dir: Path = NEM_CACHE_DIR) -> list:
+    """Sorted distinct years present in the manifest."""
+    manifest = load_plant_years(cache_dir)
+    if manifest.empty:
+        return []
+    return sorted(int(y) for y in manifest["year"].dropna().unique())
+
+
+def plants_operational_for_years(
+    years,
+    cache_dir: Path = NEM_CACHE_DIR,
+    registry: "pd.DataFrame | None" = None,
+) -> pd.DataFrame:
+    """Registry rows for plants marked fully_operational in EVERY year in
+    `years` (intersection, not union). Adds `mean_cuf_selected_years` (mean of
+    annual_cuf over the selected years) for display. Empty `years` -> empty
+    frame."""
+    years = [int(y) for y in years]
+    if registry is None:
+        registry = load_plant_registry(cache_dir)
+    out_columns = list(registry.columns) + ["mean_cuf_selected_years"]
+    if not years:
+        return pd.DataFrame(columns=out_columns)
+
+    manifest = load_plant_years(cache_dir)
+    if manifest.empty:
+        return pd.DataFrame(columns=out_columns)
+
+    op = manifest[manifest["fully_operational"] & manifest["year"].isin(years)]
+    counts = op.groupby("duid")["year"].apply(lambda s: set(int(y) for y in s))
+    keep = [d for d, yrs in counts.items() if set(years).issubset(yrs)]
+    if not keep:
+        return pd.DataFrame(columns=out_columns)
+
+    selected = manifest[manifest["duid"].isin(keep) & manifest["year"].isin(years)]
+    mean_cuf = selected.groupby("duid")["annual_cuf"].mean()
+    result = registry[registry["duid"].isin(keep)].copy()
+    result["mean_cuf_selected_years"] = result["duid"].map(mean_cuf)
+    result = result.sort_values(["station_name", "duid"]).reset_index(drop=True)
+    return result
 
 
 def _to_interval_beginning(index: pd.DatetimeIndex, year: int) -> pd.DatetimeIndex:
@@ -183,7 +307,7 @@ def load_scada(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_
 
 def availability_path(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> Path:
     duid = duid.strip().upper()
-    return Path(cache_dir) / "availability" / f"{duid}_{year}.parquet"
+    return _resolve(Path("availability") / f"{duid}_{year}.parquet", cache_dir)
 
 
 def has_availability(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> bool:
@@ -341,6 +465,39 @@ def to_hourly(series: pd.Series, year: int) -> pd.Series:
     hourly = hourly.ffill().bfill()
     hourly.name = series.name
     return hourly
+
+
+def _validate_resolution(resolution_minutes: int) -> None:
+    if resolution_minutes <= 0 or resolution_minutes % INTERVAL_MINUTES != 0:
+        raise ValueError(
+            f"resolution_minutes must be a positive multiple of {INTERVAL_MINUTES}, "
+            f"got {resolution_minutes}"
+        )
+    if 1440 % resolution_minutes != 0:
+        raise ValueError(
+            f"resolution_minutes must divide evenly into 1440, got {resolution_minutes}"
+        )
+
+
+def _resolution_periods(year: int, resolution_minutes: int) -> int:
+    return expected_intervals(year) // (resolution_minutes // INTERVAL_MINUTES)
+
+
+def to_resolution(series: pd.Series, year: int, resolution_minutes: int) -> pd.Series:
+    """5-min series -> block mean at `resolution_minutes`, reindexed onto a
+    canonical index spanning exactly the year, ffill/bfill so no NaN escapes.
+    `resolution_minutes` must divide into 1440 and be a multiple of 5.
+    resolution_minutes == 60 must return EXACTLY what to_hourly() returns."""
+    _validate_resolution(resolution_minutes)
+    freq = f"{resolution_minutes}min"
+    resampled = series.resample(freq).mean()
+    canonical_index = pd.date_range(
+        start=f"{year}-01-01", periods=_resolution_periods(year, resolution_minutes), freq=freq
+    )
+    resampled = resampled.reindex(canonical_index)
+    resampled = resampled.ffill().bfill()
+    resampled.name = series.name
+    return resampled
 
 
 # ── Whole-year heuristic ─────────────────────────────────────────────────────
@@ -630,6 +787,18 @@ def nem_generation_ready(
 
 # ── Two-tier eligibility ─────────────────────────────────────────────────────
 
+def _load_eligibility_cache(year: int, cache_dir: Path) -> "pd.DataFrame | None":
+    path = eligibility_cache_path(year, cache_dir)
+    if not path.exists():
+        return None
+    try:
+        return pd.read_parquet(path)
+    except Exception:
+        # Corrupt/unreadable cache degrades to "recompute everything live",
+        # same as a missing cache -- never a hard failure.
+        return None
+
+
 def list_eligible_plants(
     min_capacity_mw: float = MIN_CAPACITY_MW,
     year: int = DEFAULT_YEAR,
@@ -654,15 +823,21 @@ def list_eligible_plants(
         df = df[df["region"].isin(regions_upper)]
 
     if check_whole_year:
-        has_scada_list = []
-        sim_ready_list = []
-        data_status_list = []
-        reject_reasons_list = []
-        coverage_list = []
-        mean_cf_list = []
-        cuf_list = []
-        first_output_date_list = []
-        for _, row in df.iterrows():
+        eligibility_cols = [
+            "has_scada", "simulation_ready", "data_status", "reject_reasons",
+            "coverage", "mean_cf", "cuf", "first_output_date",
+        ]
+        cached = _load_eligibility_cache(year, cache_dir)
+        cached_duids = set(cached["duid"]) if cached is not None else set()
+        # Plants missing from the precomputed cache (new since it was last
+        # built, or the cache is absent entirely) still get computed live --
+        # slower for those rows only, correct either way.
+        to_compute = df[~df["duid"].isin(cached_duids)] if cached is not None else df
+
+        has_scada_list, sim_ready_list, data_status_list = [], [], []
+        reject_reasons_list, coverage_list = [], []
+        mean_cf_list, cuf_list, first_output_date_list = [], [], []
+        for _, row in to_compute.iterrows():
             duid = row["duid"]
             capacity_mw = float(row["capacity_registered_mw"])
             has_scada = (
@@ -678,14 +853,22 @@ def list_eligible_plants(
             mean_cf_list.append(summary.mean_cf if summary.mean_cf is not None else np.nan)
             cuf_list.append(summary.cuf if summary.cuf is not None else np.nan)
             first_output_date_list.append(summary.first_output_date)
-        df["has_scada"] = has_scada_list
-        df["simulation_ready"] = sim_ready_list
-        df["data_status"] = data_status_list
-        df["reject_reasons"] = reject_reasons_list
-        df["coverage"] = coverage_list
-        df["mean_cf"] = mean_cf_list
-        df["cuf"] = cuf_list
-        df["first_output_date"] = first_output_date_list
+        computed = pd.DataFrame({
+            "duid": to_compute["duid"].values,
+            "has_scada": has_scada_list, "simulation_ready": sim_ready_list,
+            "data_status": data_status_list, "reject_reasons": reject_reasons_list,
+            "coverage": coverage_list, "mean_cf": mean_cf_list, "cuf": cuf_list,
+            "first_output_date": first_output_date_list,
+        })
+        combined = (
+            pd.concat([cached[["duid"] + eligibility_cols], computed], ignore_index=True)
+            if cached is not None else computed
+        )
+        df = df.merge(combined, on="duid", how="left")
+        for col in ("has_scada", "simulation_ready"):
+            df[col] = df[col].infer_objects(copy=False).fillna(False).astype(bool)
+        df["data_status"] = df["data_status"].fillna("unchecked")
+        df["reject_reasons"] = df["reject_reasons"].fillna("")
     else:
         df["has_scada"] = False
         df["simulation_ready"] = False
@@ -820,14 +1003,15 @@ def _generation_series(
 
 def _cf_dict_for_duid(
     duid: str | None, years, cache_dir: Path, registry: "pd.DataFrame | None",
-    unconstrained: bool = True,
+    unconstrained: bool = True, resolution_minutes: int = 60,
 ) -> dict:
     result: dict = {}
     for year in years:
         if not duid:
-            hours = expected_hours(year)
-            idx = pd.date_range(start=f"{year}-01-01", periods=hours, freq="h")
-            result[year] = pd.Series(np.zeros(hours), index=idx, name="cf")
+            periods = _resolution_periods(year, resolution_minutes)
+            freq = f"{resolution_minutes}min"
+            idx = pd.date_range(start=f"{year}-01-01", periods=periods, freq=freq)
+            result[year] = pd.Series(np.zeros(periods), index=idx, name="cf")
             continue
         capacity_mw = plant_capacity_mw(duid, registry=registry, cache_dir=cache_dir)
         # UNCONSTRAINED availability (UIGF) is the correct input and the
@@ -844,7 +1028,7 @@ def _cf_dict_for_duid(
         # cache) and for installs without the optional availability cache.
         series = _generation_series(duid, year, cache_dir, unconstrained)
         cf_5min = capacity_factor_series(series, capacity_mw)
-        result[year] = to_hourly(cf_5min, year)
+        result[year] = to_resolution(cf_5min, year, resolution_minutes)
     return result
 
 
@@ -864,6 +1048,48 @@ def get_price_dict(region=DEFAULT_REGION, years=(DEFAULT_YEAR,), cache_dir=NEM_C
     for year in years:
         prices_5min = load_regional_price(region, year, cache_dir)
         result[year] = to_hourly(prices_5min, year)
+    return result
+
+
+def get_cf_dicts_multi(
+    pv_duid, wind_duid, years, resolution_minutes=60,
+    cache_dir=NEM_CACHE_DIR, registry=None, unconstrained=True,
+) -> tuple:
+    """Like `get_cf_dicts` but across multiple years at a non-hourly
+    resolution: returns `(pv_cf_by_year, wind_cf_by_year)`, each a dict keyed
+    by year of block-mean CF series on the canonical `resolution_minutes` grid.
+    """
+    _validate_resolution(resolution_minutes)
+    if registry is None and (pv_duid or wind_duid):
+        registry = load_plant_registry(cache_dir)
+    pv_cf_by_year = _cf_dict_for_duid(
+        pv_duid, years, cache_dir, registry, unconstrained, resolution_minutes
+    )
+    wind_cf_by_year = _cf_dict_for_duid(
+        wind_duid, years, cache_dir, registry, unconstrained, resolution_minutes
+    )
+    return pv_cf_by_year, wind_cf_by_year
+
+
+def get_price_dict_multi(
+    region, years, resolution_minutes=60, cache_dir=NEM_CACHE_DIR
+) -> dict:
+    """Like `get_price_dict` but across multiple years at a non-hourly
+    resolution. Raises a FileNotFoundError naming the missing region AND year
+    when no price cache exists for a requested (region, year) pair.
+    """
+    _validate_resolution(resolution_minutes)
+    result: dict = {}
+    for year in years:
+        path = price_path(region, year, cache_dir)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"No cached price data for region '{region}' in {year} at {path}. Run "
+                f"`python scripts/fetch_nem_scada_prices.py --year {year}` in a "
+                "non-sandboxed environment and copy the output into this cache."
+            )
+        prices_5min = load_regional_price(region, year, cache_dir)
+        result[year] = to_resolution(prices_5min, year, resolution_minutes)
     return result
 
 
@@ -1011,23 +1237,29 @@ def period_ts(
 
 def get_timeseries_dicts(scenario, cache_dir=NEM_CACHE_DIR) -> tuple:
     """Convenience: reads scenario.nem_pv_duid, scenario.nem_wind_duid,
-    scenario.nem_price_region, scenario.nem_year (duck-typed attribute access
-    only -- do NOT import ppa.scenario here) and returns
-    (pv_by_year, wind_by_year, prices_by_year).
+    scenario.nem_price_region, scenario.nem_years (falling back to
+    scenario.nem_year), and scenario.nem_resolution_minutes (default 60) --
+    duck-typed attribute access only, do NOT import ppa.scenario here -- and
+    returns (pv_by_year, wind_by_year, prices_by_year).
     """
     pv_duid = getattr(scenario, "nem_pv_duid", "")
     wind_duid = getattr(scenario, "nem_wind_duid", "")
     region = getattr(scenario, "nem_price_region", DEFAULT_REGION)
-    year = getattr(scenario, "nem_year", DEFAULT_YEAR)
+    single_year = getattr(scenario, "nem_year", DEFAULT_YEAR)
+    years = tuple(getattr(scenario, "nem_years", (single_year,)))
+    resolution_minutes = int(getattr(scenario, "nem_resolution_minutes", 60))
 
     # Duck-typed like every other attribute here, so callers without the field
     # (tests, fake scenarios) keep working.
     unconstrained = bool(getattr(scenario, "use_unconstrained_cf", True))
 
-    pv_by_year, wind_by_year = get_cf_dicts(
-        pv_duid, wind_duid, years=(year,), cache_dir=cache_dir, unconstrained=unconstrained
+    pv_by_year, wind_by_year = get_cf_dicts_multi(
+        pv_duid, wind_duid, years, resolution_minutes=resolution_minutes,
+        cache_dir=cache_dir, unconstrained=unconstrained,
     )
-    prices_by_year = get_price_dict(region, years=(year,), cache_dir=cache_dir)
+    prices_by_year = get_price_dict_multi(
+        region, years, resolution_minutes=resolution_minutes, cache_dir=cache_dir
+    )
     return pv_by_year, wind_by_year, prices_by_year
 
 

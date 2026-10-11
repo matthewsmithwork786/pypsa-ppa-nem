@@ -8,9 +8,13 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from ppa.financial_model import SOLAR_HOUR_END, SOLAR_HOUR_START
 from ppa.scenario import BASE_SCENARIO
 from ui import state
 from ui.charts import year_axis
+from ui.config_summary import render_config_summary
+from ui.constants import NEM_RESOLUTION_MINUTES
+from ui.exports import csv_download_button
 
 
 def restore_from_query_params() -> None:
@@ -34,6 +38,9 @@ def restore_from_query_params() -> None:
 
     from ppa import run_registry, run_store
 
+    if not run_store.valid_run_id(run_id):
+        st.query_params.pop("run", None)
+        return
     run_registry.touch(run_id)
 
     payload = run_store.load(run_id)
@@ -97,6 +104,51 @@ def _render_sizing_diagnostics() -> None:
         st.dataframe(diag["tech_rows"], width="stretch")
         st.markdown("**Connection links**")
         st.dataframe(diag["link_rows"], width="stretch")
+        # WP9: which SLA tiers were live in the sizing LP and how much work they
+        # did. `sla_constraint_count` comes from ppa.sizing.SizedCapacities (the
+        # solver stores it in n.meta["sla_constraint_count"]) — a positive count
+        # means the tier was a genuine constraint on the build, not just a price
+        # signal, and the daily tier is the biggest multiplier (one per day).
+        scn = state.get_effective_scenario()
+        sla_constraints = int(diag.get("sla_constraint_count", 0))
+        sla_rows = [
+            {
+                "SLA tier": "Monthly",
+                "Active": "Yes" if getattr(scn, "sla_monthly_enabled", False) else "No",
+                "Target share": (
+                    f"{scn.sla_monthly_share:.0%}"
+                    if getattr(scn, "sla_monthly_enabled", False) else "—"
+                ),
+            },
+            {
+                "SLA tier": "Daily",
+                "Active": "Yes" if getattr(scn, "sla_daily_enabled", False) else "No",
+                "Target share": (
+                    f"{scn.sla_daily_share:.0%}"
+                    if getattr(scn, "sla_daily_enabled", False) else "—"
+                ),
+            },
+            {
+                "SLA tier": "Min-delivery floor",
+                "Active": "Yes" if getattr(scn, "enforce_min_delivery", False) else "No",
+                "Target share": (
+                    f"{getattr(scn, 'required_delivery_share', 0.0):.0%}"
+                    if getattr(scn, "enforce_min_delivery", False) else "—"
+                ),
+            },
+            {"SLA tier": "Constraints added", "Active": "—", "Target share": str(sla_constraints)},
+        ]
+        st.markdown("**SLA tiers**")
+        st.dataframe(pd.DataFrame(sla_rows), width="stretch")
+        if sla_constraints > 0:
+            st.caption(
+                f"**{sla_constraints}** SLA/delivery constraint(s) were live in the sizing LP — "
+                "each Active tier adds one shortfall cap (+ one min-delivery floor) per period, "
+                "so the daily tier alone multiplies the constraint count by the number of days. "
+                "Whether a tier binds at the optimum is visible on the Deep Dive tab: the "
+                "achieved share sitting at the target means the constraint is what stopped the "
+                "LP doing something cheaper."
+            )
         _delivery_sizing = diag.get("sizing_delivery_share")
         _delivery_full = diag.get("delivery_share_full")
         if _delivery_sizing is not None and _delivery_full is not None:
@@ -152,6 +204,12 @@ def _render_scenario_summary(s) -> None:
             st.markdown(f"- Offtake: **{s.ppaload_mw:.0f} MW** flat")
             st.markdown(f"- Tariff: **A${s.ppa_price:.0f}/MWh**")
             st.markdown(f"- Required delivery: **{s.required_delivery_share:.0%}**")
+            if s.sla_monthly_enabled:
+                st.markdown(f"- Monthly minimum: **{s.sla_monthly_share:.0%}**")
+            if s.sla_daily_enabled:
+                st.markdown(f"- Daily minimum: **{s.sla_daily_share:.0%}**")
+            if not (s.sla_monthly_enabled or s.sla_daily_enabled):
+                st.markdown("- Tiered SLA: *none*")
             if s.enable_penalty:
                 st.markdown(f"- Penalty: **{s.pen_mult:.1f}×** = A${s.penalty_price:.0f}/MWh")
             else:
@@ -176,7 +234,10 @@ def _render_scenario_summary(s) -> None:
             st.markdown("**Simulation**")
             if s.transmission_cost_aud_mwh > 0:
                 st.markdown(f"- Transmission: **A${s.transmission_cost_aud_mwh:.1f}/MWh** delivered")
-            if s.simulation_years == 1:
+            if s.dispatch_mode == "representative_year":
+                st.markdown(f"- Mode: **1 solved year → {s.simulation_years}-year financial projection**")
+                st.caption("Fixed energy volumes; no later-year degradation or dispatch re-solve.")
+            elif s.simulation_years == 1:
                 st.markdown(f"- Mode: **1-year** ({s.first_sim_year})")
             else:
                 st.markdown(
@@ -184,11 +245,12 @@ def _render_scenario_summary(s) -> None:
                     f"({s.first_sim_year}–{s.first_sim_year + s.simulation_years - 1})"
                 )
             st.markdown(f"- Price escalation: **{s.price_escalation_rate:.1%}/yr**")
-            st.markdown(
-                f"- Degradation: PV {s.pv_degradation_rate:.1%} | "
-                f"Wind {s.wind_degradation_rate:.1%} | "
-                f"BESS {s.bess_degradation_rate:.1%}"
-            )
+            if s.dispatch_mode == "full_multi_year":
+                st.markdown(
+                    f"- Degradation: PV {s.pv_degradation_rate:.1%} | "
+                    f"Wind {s.wind_degradation_rate:.1%} | "
+                    f"BESS {s.bess_degradation_rate:.1%}"
+                )
 
 
 # ── data status (compact) ─────────────────────────────────────────────────────
@@ -263,6 +325,19 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
     from ppa.financials import run_multi_year_financial_analysis
 
     orig_scenario = scenario  # pre-sizing, user-facing scenario -- persisted below
+    from ppa.simulation import REPRESENTATIVE_YEAR_NOTE, scenario_for_dispatch
+
+    if scenario.dispatch_mode == "representative_year":
+        st.info(REPRESENTATIVE_YEAR_NOTE)
+
+    res_min = int(getattr(scenario, "nem_resolution_minutes", 60))
+    resolution_h = res_min / 60.0
+    if res_min < 30 and scenario.dispatch_years > 2:
+        raise RuntimeError(
+            f"{res_min}-minute resolution over {scenario.simulation_years} years builds an "
+            f"LP roughly {60 // res_min}x the hourly size and will exhaust memory. "
+            "Reduce the simulation years to 2 or fewer, or use 30- or 60-minute resolution."
+        )
 
     if scenario.data_source == "custom_csv":
         from ppa.data_loader import custom_timeseries_dicts
@@ -299,15 +374,17 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
             sizing_memory_advice,
             run_sizing_subprocess,
             sizing_diagnostics,
-            weather_cycle_years,
         )
 
-        n_sizing_years, cycle_note = weather_cycle_years(
-            scenario.simulation_years, len(pv_by_year), len(prices_by_year)
-        )
-        if cycle_note:
-            st.info(cycle_note)
-        n_sizing_years, notice = clamp_sizing_years(n_sizing_years)
+        # The sizing control names one historical year, independently of the
+        # operating-life projection. Do not concatenate the 25-year horizon.
+        sizing_year = scenario.capacity_sizing_year if scenario.is_nem else min(pv_by_year)
+        sizing_pv = {sizing_year: pv_by_year[sizing_year]}
+        sizing_wind = {sizing_year: wind_by_year[sizing_year]}
+        sizing_prices = {sizing_year: prices_by_year[sizing_year]}
+        sizing_load = {sizing_year: load_by_year[sizing_year]} if load_by_year else None
+        n_sizing_years = 1
+        n_sizing_years, notice = clamp_sizing_years(n_sizing_years, resolution_h)
         if notice:
             st.warning(notice)
         # Warn BEFORE the solve: an out-of-memory kill arrives as a silent
@@ -323,8 +400,9 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
             ),
         )
         sizing_ts = build_sizing_timeseries(
-            scenario, pv_by_year, wind_by_year, prices_by_year, n_sizing_years,
-            load_mw_by_year=load_by_year,
+            scenario, sizing_pv, sizing_wind, sizing_prices, n_sizing_years,
+            load_mw_by_year=sizing_load,
+            resolution_minutes=res_min,
         )
 
         _t0 = time.monotonic()
@@ -358,8 +436,8 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
         gc.collect()
         horizon_msg = (
             f"Sizing LP: {sized.sizing_years_used} year(s). The subsequent hourly "
-            f"dispatch simulation still solves all {scenario.simulation_years} "
-            "year(s) — that is where most of the runtime goes."
+            f"dispatch simulation solves {scenario.dispatch_years} "
+            "year(s)."
             if sized.horizon_clamped
             else ""
         )
@@ -376,7 +454,7 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
 
     _t_dispatch = time.monotonic()
     results = run_multi_year(
-        scenario=scenario,
+        scenario=scenario_for_dispatch(scenario),
         pv_cf_by_year=pv_by_year,
         wind_cf_by_year=wind_by_year,
         prices_by_year=prices_by_year,
@@ -385,6 +463,7 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
         max_workers=max_workers,
         progress_callback=_on_progress,
         run_id=run_id,
+        resolution_h=resolution_h,
     )
     dispatch_seconds = time.monotonic() - _t_dispatch
     state.set_multi_year_results(results)
@@ -416,47 +495,55 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
 
     progress_bar.progress(1.0, text="Optimisation complete!")
     timing = f" (sizing {sizing_seconds:.0f}s + dispatch {dispatch_seconds:.0f}s)" if sizing_seconds is not None else f" ({dispatch_seconds:.0f}s)"
-    status_text.success(f"Completed {scenario.simulation_years} year(s) successfully{timing}.")
+    if scenario.dispatch_mode == "representative_year":
+        status_text.success(
+            f"Solved 1 dispatch year; prepared {scenario.simulation_years} projected financial years{timing}."
+        )
+    else:
+        status_text.success(f"Completed {scenario.simulation_years} year(s) successfully{timing}.")
 
 
 # ── multi-year results display ────────────────────────────────────────────────
 
 def _render_results(fin, n_years: int) -> None:
+    s = state.get_effective_scenario()
+    render_config_summary(s)
+    if s.dispatch_mode == "representative_year":
+        st.caption(f"Financial projection: {n_years} operating years based on one solved dispatch year.")
     with st.expander("Optimisation results", expanded=True):
         avg_delivery = sum(y.fulfilled_share for y in fin.yearly) / len(fin.yearly) if fin.yearly else 0.0
         cols = st.columns(6)
-        irr_str = f"{fin.irr:.1%}" if fin.irr == fin.irr else "N/A"
-        lcoe_str = f"A${fin.lcoe:.1f}/MWh" if fin.lcoe == fin.lcoe else "N/A"
-        payback_str = f"{fin.simple_payback:.1f} yrs" if fin.simple_payback < 1e8 else "N/A"
-        cols[0].metric("NPV", f"A${fin.npv/1e6:.1f}M")
-        cols[1].metric("Project IRR", irr_str)
-        cols[2].metric("LCOE", lcoe_str)
-        cols[3].metric("Simple Payback", payback_str)
-        cols[4].metric("Lifetime Net Revenue", f"A${fin.total_lifetime_revenue/1e6:.1f}M")
-        cols[5].metric(
+        cols[0].metric("Peak demand", f"{s.ppaload_mw:,.0f} MW")
+        cols[1].metric(
             "Achieved PPA delivery (avg)", f"{avg_delivery:.1%}",
             help="Average share of contracted PPA load actually delivered "
                  "from renewables/storage + market purchase, across all simulated years.",
         )
-        if fin.breakeven_ppa_price == fin.breakeven_ppa_price:  # not NaN
-            s = state.get_scenario()
-            # Escape every "$" -- two unescaped dollar signs in one markdown
-            # string are parsed by Streamlit as a LaTeX math span, swallowing
-            # everything (including ** bold markers) in between.
-            st.caption(
-                rf"Breakeven PPA price for a **{s.target_irr:.0%} target IRR**: "
-                rf"**A\${fin.breakeven_ppa_price:.1f}/MWh** (vs A\${s.ppa_price:.0f}/MWh "
-                "contracted; holds delivered volumes fixed at the simulated dispatch, unlevered project IRR basis)."
+        cols[2].metric(
+            "PPA price", f"A${s.ppa_price:,.0f}/MWh",
+            help=f"Required delivery share: {s.required_delivery_share:.0%}.",
+        )
+        cols[3].metric(
+            "Merchant sell share", f"{s.sizing_merchant_value_share:.0%}",
+            help="Share of merchant revenue credited to the sizing LP.",
+        )
+        cols[4].metric("BESS", f"{s.bess_mw:,.0f} MW / {s.bess_mwh:,.0f} MWh")
+        if fin.yearly:
+            y0 = fin.yearly[0]
+            cols[5].metric(
+                "First-year PPA revenue", f"A${y0.ppa_revenue/1e6:.1f}M",
+                help=f"Year {y0.year}: PPA revenue from delivered volumes at the contracted price.",
             )
+        else:
+            cols[5].metric("First-year PPA revenue", "—")
+
+        results = state.get_multi_year_results() or []
+        if results:
+            _render_first_year_energy_tables(results[0], s)
+        else:
+            st.info("Energy volume tables need the per-year results; re-run the optimisation.")
 
         if n_years == 1:
-            y = fin.yearly[0]
-            st.caption(
-                rf"Year {y.year} — PPA revenue A\${y.ppa_revenue/1e6:.2f}M | "
-                rf"Merchant A\${y.merch_revenue/1e6:.2f}M | "
-                rf"Delivery {y.fulfilled_share:.1%} | "
-                rf"Net CF A\${y.net_cashflow/1e6:.2f}M"
-            )
             return
 
     # st.markdown("---")
@@ -466,37 +553,76 @@ def _render_results(fin, n_years: int) -> None:
             "| Year-by-Year Table"
         ])
         with tab_charts:
-            tab_chart1, tab_chart2, tab_chart3 = st.tabs([
-                "| Cumulative NPV", 
-                "| Annual Revenue Breakdown", 
+            tab_chart1, tab_chart2 = st.tabs([
+                "| Annual Revenue & Merchant Prices", 
                 "| PPA Delivery Rate"
             ])
             with tab_chart1:
-                _render_npv_chart(fin)
-            with tab_chart2:
                 _render_revenue_chart(fin)
-            with tab_chart3:
+            with tab_chart2:
                 _render_delivery_chart(fin)
 
         with tab_table:
             _render_yearly_table(fin)
 
 
-def _render_npv_chart(fin) -> None:
-    years = [y.year for y in fin.yearly]
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=years, y=[round(v / 1e6, 2) for v in fin.cumulative_npv],
-        mode="lines+markers", name="Cumulative NPV",
-        line=dict(color="#2196F3", width=2),
-    ))
-    fig.add_hline(y=0, line_dash="dash", line_color="gray")
-    fig.update_layout(
-        title="Cumulative NPV over Project Life",
-        xaxis_title="Year", yaxis_title="NPV (A$M)", height=400,
-        xaxis=year_axis(years),
-    )
-    st.plotly_chart(fig, width="stretch")
+def _render_first_year_energy_tables(result, s) -> None:
+    """Energy-first view of the first simulated year: PPA volumes, merchant
+    volumes split by solar vs non-solar hours, and penalty volumes. Deliberately
+    no financial metrics -- those are computed once the financial modelling
+    options are set."""
+    summ = result.summary
+    res_h = result.n_period_hours / len(result.dispatch.market_sell) if len(result.dispatch.market_sell) else 1.0
+
+    idx = result.dispatch.market_sell.index
+    hour = idx.hour
+    solar_mask = (hour >= SOLAR_HOUR_START) & (hour < SOLAR_HOUR_END)
+
+    solar_sold_mwh = float(result.dispatch.market_sell.where(solar_mask, 0.0).sum()) * res_h
+    nonsolar_sold_mwh = float(result.dispatch.market_sell.where(~solar_mask, 0.0).sum()) * res_h
+
+    prices = result.market_prices
+    solar_rev = float((result.dispatch.market_sell.where(solar_mask, 0.0) * prices).sum()) * res_h
+    nonsolar_rev = float((result.dispatch.market_sell.where(~solar_mask, 0.0) * prices).sum()) * res_h
+    solar_price = solar_rev / solar_sold_mwh if solar_sold_mwh > 0 else 0.0
+    nonsolar_price = nonsolar_rev / nonsolar_sold_mwh if nonsolar_sold_mwh > 0 else 0.0
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("**First-year PPA volumes**")
+        st.dataframe(
+            pd.DataFrame({
+                "PPA load": f"{summ.total_load_mwh/1e3:.1f} GWh",
+                "PPA delivered": f"{summ.ppa_delivered_mwh/1e3:.1f} GWh",
+                "  · from renewables & storage": f"{summ.renewable_and_storage_to_ppa_mwh/1e3:.1f} GWh",
+                "  · via market purchase": f"{summ.market_buy_to_ppa_mwh/1e3:.1f} GWh",
+                "Allowed shortfall": f"{summ.allowed_shortfall_mwh/1e3:.1f} GWh",
+            }, index=["Volume"]).T,
+            width="stretch", height="content",
+        )
+    with c2:
+        st.markdown("**First-year merchant volumes (solar / non-solar)**")
+        st.dataframe(
+            pd.DataFrame({
+                "Sold to market — solar hours": f"{solar_sold_mwh/1e3:.1f} GWh",
+                "Sold to market — non-solar hours": f"{nonsolar_sold_mwh/1e3:.1f} GWh",
+                "Total sold to market": f"{summ.sold_to_market_mwh/1e3:.1f} GWh",
+                "Achieved solar-hour price": f"A${solar_price:,.0f}/MWh",
+                "Achieved non-solar-hour price": f"A${nonsolar_price:,.0f}/MWh",
+            }, index=["Volume"]).T,
+            width="stretch", height="content",
+        )
+    with c3:
+        st.markdown("**First-year penalty volumes**")
+        st.dataframe(
+            pd.DataFrame({
+                "Penalties": f"{summ.penalty_mwh/1e3:.1f} GWh",
+                "Share of PPA load": f"{summ.penalty_share_of_load:.1%}",
+                "Shortfall (allowed)": f"{summ.allowed_shortfall_mwh/1e3:.1f} GWh",
+                "Contracted penalty price": f"A${s.penalty_price:,.0f}/MWh",
+            }, index=["Volume"]).T,
+            width="stretch", height="content",
+        )
 
 
 def _render_revenue_chart(fin) -> None:
@@ -514,6 +640,18 @@ def _render_revenue_chart(fin) -> None:
         xaxis=year_axis(years),
     )
     st.plotly_chart(fig, width="stretch")
+    csv_download_button(
+        pd.DataFrame({
+            "year": years,
+            "ppa_revenue_aud_m": [y.ppa_revenue / 1e6 for y in fin.yearly],
+            "merchant_revenue_aud_m": [y.merch_revenue / 1e6 for y in fin.yearly],
+            "market_buy_cost_aud_m": [y.market_buy_cost / 1e6 for y in fin.yearly],
+            "penalty_cost_aud_m": [y.penalty_cost / 1e6 for y in fin.yearly],
+            "transmission_cost_aud_m": [y.transmission_cost / 1e6 for y in fin.yearly],
+            "opex_aud_m": [y.opex / 1e6 for y in fin.yearly],
+        }),
+        "annual_revenue_breakdown.csv", key="dl_revenue",
+    )
 
 
 def _render_delivery_chart(fin) -> None:
@@ -531,6 +669,10 @@ def _render_delivery_chart(fin) -> None:
         xaxis=year_axis(years),
     )
     st.plotly_chart(fig, width="stretch")
+    csv_download_button(
+        pd.DataFrame({"year": years, "delivery_rate_pct": [round(y.fulfilled_share, 3) * 100 for y in fin.yearly]}),
+        "ppa_delivery_rate.csv", key="dl_delivery",
+    )
 
 
 def _render_yearly_table(fin) -> None:
@@ -582,7 +724,8 @@ def render() -> None:
             )
         with cols[1]:
             max_workers = st.selectbox(
-                "Parallel workers", [1, 2, 4, 8, 16, 24, 30], index=2, key="opt_max_workers",
+                "Parallel workers", [1, 2, 4, 8, 16, 24, 30], index=0, key="opt_max_workers",
+                disabled=s.dispatch_mode == "representative_year",
                 help=(
                     "Max parallel year-solves. Automatically capped to the available "
                     "CPU and RAM (~1.2 GB per worker), so memory-limited hosts like "
@@ -601,10 +744,15 @@ def render() -> None:
         from ppa import run_registry
 
         run_id = run_registry.new_run_id()
-        st.query_params["run"] = run_id
         try:
-            _run_simulation(s, int(max_workers), run_id)
+            from ppa.simulation import solve_slot
+
+            with solve_slot():
+                state.clear_run_outputs()
+                st.query_params["run"] = run_id
+                _run_simulation(s, int(max_workers), run_id)
         except Exception as exc:
+            st.query_params.pop("run", None)
             st.error(f"Optimisation failed: {exc}")
         else:
             st.rerun()

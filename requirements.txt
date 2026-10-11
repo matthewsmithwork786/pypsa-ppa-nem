@@ -24,3 +24,7 @@ streamlit-folium==0.27.2
 # solver, which W15 benchmarked and rejected (dual simplex won), so nothing is
 # lost. See docs/DEPLOYMENT.md.
 tsam==3.4.2
+# Zenodo runtime fetch (WP4): fsspec + aiohttp power the column-pruned parquet
+# downloads in ppa/data/remote_cache.py (aiohttp is fsspec's HTTP backend).
+fsspec==2026.4.0
+aiohttp==3.14.3

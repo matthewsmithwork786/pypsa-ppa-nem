@@ -39,6 +39,7 @@ class _Dispatch:
         self.market_buy = pd.Series(2 * rng.random(n), index=idx)
         self.market_sell = pd.Series(8 * rng.random(n), index=idx)
         self.ppa_delivery = pd.Series(30 + 5 * rng.random(n), index=idx)
+        self.allowed_shortfall = pd.Series(1 * rng.random(n), index=idx)
         self.penalty_gen = pd.Series(3 * rng.random(n), index=idx)
         self.index = idx
 

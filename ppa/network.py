@@ -173,7 +173,10 @@ def build_network(
         bus="Bus_BuyFromMarket",
         p_nom=s.maxbuy_mw,
         p_max_pu=1.0,
-        marginal_cost=ts["ts_MktPrice"] + s.market_spread,
+        # The PPA is bundled: imported energy needs a purchased certificate.
+        # Paying the same LGC rate credited on exports removes the artificial
+        # profit from buying power solely to resell it with a free certificate.
+        marginal_cost=ts["ts_MktPrice"] + s.market_spread + s.lgc_price_aud_mwh,
     )
 
     # sign=-1: acts as a sink at Bus_SellToMarket; negative marginal_cost = revenue.
@@ -202,7 +205,7 @@ def build_network(
         "Generator",
         "Gen_SellToMarket",
         bus="Bus_SellToMarket",
-        p_nom=build_cap_sum if sizing else s.maxsell_mw,
+        p_nom=(build_cap_sum if sizing else s.maxsell_mw) if s.enable_market_sell else 0.0,
         p_max_pu=1.0,
         sign=-1.0,
         marginal_cost=sell_marginal_cost,
