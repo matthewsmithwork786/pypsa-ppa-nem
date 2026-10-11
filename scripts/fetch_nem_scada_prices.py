@@ -1,50 +1,10 @@
 #!/usr/bin/env python3
-"""
-One-time acquisition script: pull AEMO 5-minute SCADA and dispatch-price data via `nemosis`.
+"""Fetch AEMO 5-minute SCADA and regional spot prices using `nemosis`.
 
-*** NOT PART OF THE STREAMLIT APP. NEVER IMPORTED BY `ppa/` OR `ui/`. ***
-
-Run this in a SEPARATE environment with real network access to AEMO/NEMWEB
-(this repo's dev sandbox blocks those domains at the egress-policy level).
-Copy/commit the resulting output files into `data/cache/nem/` in this repo
-afterwards -- that is what the Streamlit app actually reads at runtime
-(see `ppa/data/nem_data.py`, which is cache-only and has no network imports).
-
-Approach, confirmed to work per the user's own `nemosis` notebook
-(`nemosis_march_2025_timeseries_mdavis_guide.ipynb`, whose output already lives
-at `data/march_2025_pypsa_timeseries.csv` using DUIDs BODWF1/COLEASF1):
-
-    from nemosis import dynamic_data_compiler
-
-nemosis downloads AEMO's public MMS tables (DUDETAILSUMMARY, DISPATCH_UNIT_SCADA,
-DISPATCHPRICE) into a local "raw cache" directory (parquet/feather under the hood,
-managed by nemosis itself), then we re-load the cached tables with pandas and
-reshape them into this repo's cache layout:
-
-    data/cache/nem/scada/{DUID}_{year}.parquet   # index=5-min settlementdate, col 'scadavalue'
-    data/cache/nem/price/rrp_{REGION}_{year}.parquet  # index=5-min settlementdate, col 'rrp'
-
-TIMEZONE NOTE: all timestamps written by this script are tz-NAIVE NEM standard
-time (AEST, UTC+10, no daylight saving) -- this is AEMO's native convention.
-Whoever wires `ppa/data/nem_data.py` up to
-`ppa/data/timeseries_utils.py::_align_to_index` (which assigns positionally) must
-account for this offset explicitly -- do not assume these indices are UTC.
-
-LIMITATION (read before relying on the DUID auto-selection):
-DUDETAILSUMMARY does NOT carry a fuel-type field, only DISPATCHTYPE ("GENERATOR"/
-"LOAD"), region, and (sometimes) unit capacity fields depending on nemosis version.
-It cannot tell wind/solar apart from coal/gas on its own. This script's default
-DUID selection is therefore just "all GENERATOR DUIDs with reported capacity above
---min-capacity-mw" -- NOT filtered to wind/solar. To get an actually-correct
-wind/solar DUID list, either:
-  (a) pass --duid-list pointing at a CSV/text file of DUIDs -- e.g. the
-      `duid` column written by `scripts/fetch_nem_plant_registry.py`
-      (data/cache/nem/registry/nem_plant_registry.parquet), or your own AEMO
-      "Generation Information" spreadsheet download, or
-  (b) accept the fallback and post-filter later by cross-referencing the
-      registry parquet before feeding DUIDs into the app.
-This caveat is logged loudly at runtime (see `select_target_duids()`).
-"""
+Writes per-DUID SCADA and per-region price Parquet files under `data/cache/nem/`.
+Use a registry-derived DUID list to avoid including non-renewable generators; the
+capacity-only fallback does not identify fuel type. Run in a separate network-enabled
+environment with `scripts/requirements-acquisition.txt`; see `--help` for options."""
 from __future__ import annotations
 
 import argparse
@@ -74,12 +34,7 @@ def _dynamic_data_compiler(*args, **kwargs):
     fformat=..., select_columns=...). Imported lazily so the rest of this script, and
     any --help invocation, works even if nemosis isn't installed.
 
-    NOTE: an earlier version of this shim also tried falling back to `cache_compiler`,
-    but that function's signature does not match how this script calls the compiler
-    (it is nemosis's lower-level cache-refresh helper, not a drop-in replacement) --
-    that fallback was silently wrong and has been removed. If `dynamic_data_compiler`
-    is renamed in a future nemosis release, update this function to match the new
-    entry point rather than reintroducing a mismatched fallback.
+    The lazy import keeps `--help` usable when nemosis is not installed.
     """
     try:
         from nemosis import dynamic_data_compiler as _compiler

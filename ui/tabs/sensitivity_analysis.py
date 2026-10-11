@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 
-import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -16,27 +16,16 @@ from ppa.financial_model import (
 )
 from ppa.sensitivity import (
     PARAMS,
-    PARAM_BY_FIELD,
     run_tornado,
-    run_what_if,
     tornado_to_dataframe,
 )
 from ui import state
-
 
 # ── Base inputs ────────────────────────────────────────────────────────────────
 
 
 def _get_base() -> tuple[EnergyInputs | None, ProjectFinanceInputs | None, list[EnergyInputs] | None]:
-    """Derive base energy, finance inputs, and real per-year energy from session state.
-
-    Prefers an already-run Financial Model result so the user's edited
-    assumptions (and the per-year data it ran with) carry over; falls back to
-    raw optimisation results. `annual_energy` (3rd element) is real per-year
-    data for a multi-year run -- see run_project_finance's `annual_energy`
-    param -- so sensitivity results perturb the same baseline the Financial
-    Model tab shows rather than a flattened averaged year.
-    """
+    """Return base energy, finance inputs, and per-year energy from session state."""
     pf = state.get_project_finance() if state.has_project_finance() else None
     if pf is not None:
         return pf.energy, pf.inputs, pf.annual_energy
@@ -79,8 +68,8 @@ PCT_METRICS = {"project_irr", "equity_irr", "gearing"}
 
 def _fmt(v: float, metric: str) -> str:
     if metric in PCT_METRICS:
-        return f"{v:.1%}" if v == v else "n/a"
-    return f"{v:,.2f}" if v == v else "n/a"
+        return f"{v:.1%}" if not math.isnan(v) else "n/a"
+    return f"{v:,.2f}" if not math.isnan(v) else "n/a"
 
 
 def _scale(metric: str) -> float:
@@ -126,10 +115,6 @@ def _what_if_panel(
         for p in PARAMS:
             groups.setdefault(p.group, []).append(p)
 
-        # PARAMS is the single source (ppa/sensitivity.py) -- a field added there
-        # appears here automatically, so the what-if form can no longer drift
-        # from the tornado catalogue the way it had (three devex fields the
-        # catalogue didn't carry).
         n_cols = 4
         cols = st.columns(n_cols)
         overrides: dict[str, float | int] = {}
@@ -146,7 +131,6 @@ def _what_if_panel(
 
         wi_finance = dataclasses.replace(base_finance, **overrides)
 
-    base_result = run_project_finance(base_finance, base_energy, annual_energy=annual_energy)
     wi_result   = run_project_finance(wi_finance,   base_energy, annual_energy=annual_energy)
 
     with st.expander("Base results", expanded=True):
@@ -160,12 +144,11 @@ def _what_if_panel(
             ("Min DSCR",    "min_dscr",    False),
         ]
         for col, (label, attr, is_pct) in zip(cols, kpis):
-            bv = getattr(base_result, attr)
             wv = getattr(wi_result,   attr)
             if is_pct:
-                col.metric(label, f"{wv:.2%}") # , delta=f"{(wv - bv) * 100:+.2f} pp")
+                col.metric(label, f"{wv:.2%}")
             else:
-                col.metric(label, f"{wv:,.2f}") # , delta=f"{wv - bv:+,.2f}")
+                col.metric(label, f"{wv:,.2f}")
 
 
 # ── Tornado chart ──────────────────────────────────────────────────────────────
@@ -177,11 +160,10 @@ def _tornado_panel(
     annual_energy: list[EnergyInputs] | None = None,
 ) -> None:
     tab_chart1, tab_chart2 = st.tabs([
-        "| Tornado chart — one-at-a-time sensitivity", 
+        "| Tornado chart — one-at-a-time sensitivity",
         "| Data table",
     ])
     with tab_chart1:
-    # with st.expander("Tornado chart — one-at-a-time sensitivity", expanded=True):
         cols = st.columns([3, 1])
         with cols[1]:
             metric_key = st.selectbox(
@@ -203,10 +185,6 @@ def _tornado_panel(
             )
 
         if zero_rows:
-            # st.caption parses markdown; several parameter labels carry their
-            # own "$" (e.g. "Solar fixed O&M (A$m/MW)") and joining more than
-            # one into a single caption pairs them into a LaTeX math span that
-            # silently drops the "$" -- escape every one before joining.
             names = ", ".join(r.param.replace("$", r"\$") for r in zero_rows)
             st.caption(
                 f"**{len(zero_rows)} parameter(s) hidden** (as of negligible effect on "
@@ -273,14 +251,14 @@ def _tornado_panel(
             x=base_scaled,
             line_dash="dash",
             line_color="black",
-            annotation=dict(
-                text=f"Base {base_scaled:.2f}{unit}",
-                yref="paper",
-                y=1.0,
-                yanchor="bottom",
-                xanchor="center",
-                showarrow=False,
-            ),
+            annotation={
+                "text": f"Base {base_scaled:.2f}{unit}",
+                "yref": "paper",
+                "y": 1.0,
+                "yanchor": "bottom",
+                "xanchor": "center",
+                "showarrow": False,
+            },
         )
 
         metric_label = METRIC_OPTIONS[metric_key]
@@ -290,9 +268,9 @@ def _tornado_panel(
         fig.update_layout(
             barmode="overlay",
             height=max(350, len(rows) * 32 + 80),
-            margin=dict(t=50, b=50, l=10, r=40),
+            margin={"t": 50, "b": 50, "l": 10, "r": 40},
             xaxis_title=metric_label,
-            yaxis=dict(automargin=True),
+            yaxis={"automargin": True},
             plot_bgcolor="white",
             paper_bgcolor="white",
         )
@@ -300,7 +278,6 @@ def _tornado_panel(
             st.plotly_chart(fig, width='stretch')
 
     with tab_chart2:
-    # with st.expander("Data table", expanded=False):
         df = tornado_to_dataframe(rows, base_val, metric_key)
         st.dataframe(df.set_index("Parameter"), width='stretch', height="content")
 
@@ -326,5 +303,4 @@ def render() -> None:
         return
 
     _what_if_panel(base_energy, base_finance, annual_energy)
-    # st.markdown("---")
     _tornado_panel(base_energy, base_finance, annual_energy)

@@ -1,13 +1,4 @@
-"""Disk persistence for completed multi-year run results, keyed by run ID.
-
-Streamlit wipes ``st.session_state`` on every full-page reload -- each reload
-is a brand-new server session, not a resume of the old one. Saving a finished
-run here under its run_id (also stashed in ``st.query_params["run"]``) lets a
-fresh session reload the same results and scenario instead of showing an
-empty form. It does not help a refresh *during* a run -- see
-``ppa.run_registry`` for that half of the problem (keeping an orphaned run
-alive long enough to finish, rather than losing the work outright).
-"""
+"""Persist completed runs so a page reload can restore results by run ID."""
 from __future__ import annotations
 
 import pickle
@@ -31,8 +22,7 @@ def _path(run_id: str) -> Path:
 
 
 def _valid_payload(payload: object) -> bool:
-    # Pickles are produced only by this server, never uploaded by users. Check
-    # the restore schema too: an old/incomplete cache must not break startup.
+    # Reject incomplete or stale payloads before exposing restored results.
     from ppa.scenario import Scenario
     from ppa.financials import MultiYearFinancialResult
     from ppa.results import OptimisationResult
@@ -75,8 +65,7 @@ def load(run_id: str) -> dict | None:
         return payload if _valid_payload(payload) else None
     except (OSError, EOFError, pickle.UnpicklingError, AttributeError, ImportError,
             TypeError, ValueError):
-        # A cache written before a deploy, truncated by a reboot, or pruned
-        # concurrently should behave exactly like an expired run link.
+        # Corrupt or stale files behave like an expired run link.
         return None
 
 

@@ -1,4 +1,4 @@
-"""Dispatch mode selection and a shared solve slot for a small hosted app."""
+"""Dispatch-mode selection and process-local solve lock."""
 from __future__ import annotations
 
 import dataclasses
@@ -12,9 +12,8 @@ _SOLVE_SLOT = threading.Lock()
 REPRESENTATIVE_YEAR_NOTE = (
     "One operating year is solved in PyPSA. Its delivery, merchant volumes and "
     "shortfalls are repeated for the financial horizon; prices and costs follow "
-    "the financial assumptions. Generation and battery degradation, different "
-    "weather years and changes in dispatch are not simulated in this mode. "
-    "Use full multi-year dispatch to assess those effects."
+    "the financial assumptions. Weather changes, degradation and dispatch "
+    "changes are excluded; use full multi-year dispatch to model them."
 )
 
 

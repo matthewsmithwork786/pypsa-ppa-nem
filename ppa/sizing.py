@@ -45,10 +45,7 @@ class SizedCapacities:
     resolution_h: int = 1
     # Sizing representation used ("tsam" / "full_hourly")
     sizing_method: str = "tsam"
-    # PPA delivery share the sizing LP itself achieves on its representation
-    # (clustered typical weeks / full hourly) — compared against
-    # the full hourly simulation of the sized portfolio to catch clustering
-    # losses (plan W14 item 6).
+    # Delivery share achieved by the sizing LP's representation.
     sizing_delivery_share: float = 0.0
     # Sized connection/transport link MW (carried into dispatch via apply_sizing)
     wind_link_mw: float = 0.0
@@ -111,14 +108,13 @@ def sizing_memory_advice(scenario: Scenario) -> "str | None":
     """Warn when the chosen sizing representation will not fit in RAM.
 
     Returns a human-readable message, or None when there is enough headroom
-    (or memory cannot be read). Deliberately advisory rather than automatic:
-    silently switching representation would change the sized fleet without the
-    user knowing, and the methods do not agree (docs/sizing_experiments.md E2).
+    (or memory cannot be read). This remains advisory because changing
+    representation can change the resulting capacities.
     """
     mem_mb = _available_memory_mb()
     if mem_mb is None:
         return None
-    method = getattr(scenario, "sizing_method", "full_hourly")
+    method = scenario.sizing_method
     needed = SIZING_PEAK_MB.get(method)
     if needed is None or mem_mb >= needed:
         return None
@@ -231,18 +227,17 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
 
     `ts` is the hourly timeseries. How it is represented before the solve is
     chosen by `scenario.sizing_method`: "tsam" (the default) clusters it into
-    typical weeks at hourly resolution (best fidelity for the LP size; W14),
-    "full_hourly" keeps the exact hourly year (slowest, used as the exactness
-    benchmark by `validate_sizing_representation`). Snapshot weightings (set
-    in `build_network`) keep costs and storage dynamics in real hours either
-    way.
+    typical weeks at hourly resolution, or "full_hourly" keeps the exact year
+    and serves as the reference for `validate_sizing_representation`. Snapshot
+    weightings (set in `build_network`) keep costs and storage dynamics in real
+    hours either way.
 
     BESS energy capacity fade cannot be time-varied on a StorageUnit, so the
     horizon-average degradation factor is applied to the fixed duration — a
     slight de-rating that approximates multi-year usable-capacity fade.
     """
     method = scenario.sizing_method
-    resolution_minutes = int(getattr(scenario, "nem_resolution_minutes", 60))
+    resolution_minutes = int(scenario.nem_resolution_minutes)
     resolution_h = resolution_minutes / 60.0
     if method == "tsam":
         from ppa.sizing_tsam import cluster_typical_periods
@@ -250,9 +245,7 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         ts, weights = cluster_typical_periods(
             ts, n_periods=max(4, int(scenario.sizing_n_periods))
         )
-        # WP8: the clusterer knows the true period boundaries, so it labels each
-        # snapshot with its (cluster, day-within-period) block. Read it BEFORE
-        # handing `weights` to build_network — pandas operations may drop attrs.
+        # Capture representative-day labels before pandas operations can drop attrs.
         period_labels = weights.attrs.get("period_labels")
         n_years = max(1, round(float(weights.sum()) / 8760))
     else:  # full_hourly
@@ -282,9 +275,7 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         sizing_scn = dataclasses.replace(sizing_scn, max_build_bess_mw=0.0)
 
     if method == "tsam":
-        # intra_period_hours=1.0 (the default): the occurrence weight is NOT the
-        # elapsed time between snapshots, and conflating them sizes storage to
-        # zero (docs/sizing_experiments.md E9).
+        # Occurrence weights scale energy and cost; the storage timestep remains 1 h.
         n = build_network(ts, sizing_scn, snapshot_weightings=weights)
     else:  # full_hourly
         n = build_network(ts, sizing_scn, resolution_h=resolution_h)
@@ -301,8 +292,7 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
         pv_mw = 0.0
         bess_mw = 0.0
 
-    # Sized connection/transport link MW (the W12a fix: no longer pinned to the
-    # disabled slider caps — the LP co-sizes these with generation).
+    # Read the connection capacities co-optimised with generation.
     if "p_nom_opt" in n.links.static.columns:
         wind_link_mw = max(0.0, float(n.links.static.p_nom_opt["OnshoreWind_to_IPPGeneration"]))
         pvbess_link_mw = max(0.0, float(n.links.static.p_nom_opt["PVBESS_to_IPPGeneration"]))
@@ -369,11 +359,7 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
     # Report undegraded nameplate energy (the simulation applies fade per year itself)
     bess_mwh = bess_mw * scenario.bess_max_hours
 
-    # PPA delivery share achieved *within the sizing LP* on its representation,
-    # so the diagnostics can compare it against the full hourly simulation of
-    # the sized portfolio (plan W14 item 6: a large gap = clustering dropped
-    # something). Energy is p (MW) × snapshot weighting (hours), so both sides
-    # are weighted the same way to integrate over real hours.
+    # Energy is MW × snapshot weighting (hours), including representative periods.
     w = n.snapshot_weightings["objective"].to_numpy()
     load_mwh = float((ts["ppaload_mw"].to_numpy() * w).sum())
     if "IPPGen_to_PPAOfftake" in n.links.dynamic.p1.columns and load_mwh > 0:
@@ -412,15 +398,8 @@ def validate_sizing_representation(
 ) -> dict:
     """Re-solve the sizing LP exactly and compare it against the chosen method.
 
-    U8 step 4. The W14 validation metric compared the sizing LP's own delivery
-    share against the full simulation's, but that is far too weak: measured
-    across every representation the delivery gap sat at 2-4 pp even when the
-    sized fleet was 19% wrong (docs/sizing_experiments.md E2). Delivery share
-    is simply not sensitive to the sizing decision.
-
-    This compares the thing that actually matters -- **sized MW per
-    technology** -- against the exact full-hourly LP. Costs a full-hourly
-    solve, so it is an opt-in check, not something to run on every solve.
+    Compare sized MW by technology against the exact hourly LP. This opt-in
+    check requires an additional full-hourly solve.
 
     Returns a dict with `rows` (per technology: chosen MW, exact MW, delta),
     `max_abs_delta`, `within_tolerance` and `reference_seconds`.
@@ -469,7 +448,7 @@ def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFr
 
     Pure, unit-testable summary the Optimisation tab renders in its sizing
     diagnostics expander so "strange sizing results" become an explainable
-    answer (plan W12e): annualised A$/MW/yr, achieved CF from the loaded
+    answer: annualised A$/MW/yr, achieved CF from the loaded
     profile, implied LCOE, and the PPA tariff / penalty / average spot for
     comparison, plus which caps bind at the optimum.
     """
@@ -721,8 +700,7 @@ def apply_sizing(scenario: Scenario, sized: SizedCapacities) -> Scenario:
         bess_mw=round(sized.bess_mw, 1) if bess_built else 0.0,
         bess_mwh=round(sized.bess_mwh, 1) if bess_built else 0.0,
         include_bess=scenario.include_bess and bess_built,
-        # Carry the sized connection MW into dispatch so the simulation uses the
-        # same connection capacity the LP assumed (plan W12a carry-through).
+        # Carry the connection capacities into dispatch.
         wind_link_mw=round(sized.wind_link_mw, 1),
         pvbess_link_mw=round(sized.pvbess_link_mw, 1),
         sell_link_mw=round(sized.sell_link_mw, 1),

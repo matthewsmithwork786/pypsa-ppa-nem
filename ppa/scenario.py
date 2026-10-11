@@ -7,17 +7,9 @@ from typing import Any
 from ppa import assumptions as A
 from ppa.industrial_profiles import PROFILE_KEYS
 
-# "nem_map" (NEM plants picked on the map), "nem_default" (NEM prices/DUIDs
-# without map interaction), "custom_csv" (Phase 3)
+# "nem_map" (plants selected on the map), "nem_default" (prices/DUIDs only),
+# or "custom_csv".
 DATA_SOURCES = ("nem_map", "nem_default", "custom_csv")
-
-
-def _tsam_available() -> bool:
-    try:
-        import tsam  # noqa: F401
-        return True
-    except ImportError:
-        return False
 
 
 @dataclass
@@ -26,112 +18,46 @@ class Scenario:
 
     # Feature toggles
     include_bess: bool = True
-    # Market buy defaults OFF (and the cap to 0%): the PPA should be delivered
-    # by the contracted assets; market supplementation is an explicit escape
-    # valve, not the default behaviour.
+    # Market purchases are opt-in.
     enable_market_buy: bool = False
     enable_market_sell: bool = True
     enable_shortfall: bool = True
     enable_penalty: bool = True
     run_financial_analysis: bool = True
-    # Off by default: the counterfactual answers "what would the offtaker have
-    # paid otherwise", which is a comparison users want AFTER they have a
-    # result, not five controls to configure before getting one.
+    # Compare with the offtaker's alternative supply costs.
     enable_counterfactual: bool = False
 
     # Counterfactual sourcing
     cal_forward_price: float = 85.0
     cal_hedge_fraction: float = 0.80
-    # Provenance of cal_forward_price: "manual" (free user input, default) or
-    # "aer_indicative" (seeded from ppa.data.aer_futures' quarterly-average AER
-    # quote). cal_forward_note carries the disclaimer text to render whenever
-    # source != "manual". NOTE: this is provenance for the *forward price*
-    # only -- cal_hedge_fraction stays a pure user input describing how much of
-    # the offtaker's own load is hedged, which AER's published price series has
-    # no bearing on. Do not wire AER data into cal_hedge_fraction.
+    # Price source and its user-facing note.
     cal_forward_source: str = "manual"   # "manual" | "aer_indicative"
     cal_forward_note: str = ""
 
-    # Capacity co-optimisation (ignores the fixed MW values below when enabled)
+    # Capacity co-optimisation ignores fixed MW values below.
     optimise_capacity: bool = False
     max_build_wind_mw: float = 1000.0
     max_build_pv_mw: float = 1000.0
     max_build_bess_mw: float = 1000.0
-    # Sizing representation: "tsam" (typical weeks, default) or "full_hourly"
-    # (exact hourly -- also the exactness benchmark
-    # validate_sizing_representation() compares "tsam" against). The subsequent
-    # dispatch simulation and financials always run hourly on the sized
-    # portfolio either way.
-    #
-    # Typical weeks (tsam) is the default: 11x faster than the exact hourly LP
-    # (18 s vs 200 s), lands the fleet within ~10% and the BESS within 3%
-    # (docs/sizing_experiments.md E11), and -- decisively for the deployed app --
-    # the exact LP peaks at ~1,143 MB, which does not fit a 1 GB container.
-    #
-    # It was briefly defaulted to full_hourly while clustered sizing was sizing
-    # storage to ZERO. That turned out to be a units bug (the occurrence count
-    # was being used as the storage timestep) rather than a clustering limit,
-    # and is fixed. Use validate_sizing_representation() to check the error for
-    # a specific scenario, or switch to Full year hourly locally where memory
-    # allows.
+    # Sizing uses representative weeks or the exact hourly series. Dispatch
+    # remains hourly in either case.
     sizing_method: str = "tsam"
-    # Number of typical periods for the tsam method. Periods are WEEKS (168 h),
-    # not days. Default 40 (the top of the range): the user's measured 90% SLA
-    # gap (82% delivered with 16 weeks) tightens as the clustering captures more
-    # of the poor-resource spell a battery must ride through, so err on the side
-    # of more weeks; the slider lets users trade accuracy for speed.
+    # Number of representative weeks (168 h each).
     sizing_n_periods: int = 40
-    # Model each plant's UNCONSTRAINED output (AEMO UIGF from DISPATCHLOAD)
-    # rather than its historical sent-out SCADA. ON by default: this is the
-    # correct input, not a variant.
-    #
-    # The LP takes the CF series as p_max_pu -- an upper bound it then curtails
-    # against itself (negative prices, connection limits, satisfied offtake).
-    # SCADA is already reduced by another plant's network constraints and by
-    # whatever economic curtailment that plant's own offtake contract
-    # incentivised, so using it would double-count curtailment for a new build.
-    # Measured per-plant curtailment ranges ~0-71% (docs/sizing_experiments.md
-    # E8), so it cannot be corrected with a flat uplift either.
-    #
-    # Turn OFF only to reproduce pre-U4 results, or to model taking offtake
-    # from a specific EXISTING plant, where its actual constrained sent-out
-    # energy is what you would receive. Falls back to SCADA per DUID when no
-    # availability cache exists (5 of 184 DUIDs in the 2025 cache, plus any
-    # install without the optional cache).
+    # Use AEMO unconstrained availability as the generation upper bound.
+    # Turn off to model an existing plant's sent-out SCADA output.
     use_unconstrained_cf: bool = True
-    # Green-certificate (LGC) revenue on SURPLUS generation only, A$/MWh.
-    #
-    # The PPA is treated as bundled: certificates attached to contracted energy
-    # transfer to the offtaker inside `ppa_price`, so crediting LGCs on
-    # delivered MWh would double-count the tariff. Only energy sold to market
-    # carries a separately monetisable certificate. This mirrors
-    # ProjectFinanceInputs.lgc_price ("green-certificate revenue on excess") and
-    # exists so the sizing LP and the financial model score the same revenue
-    # stack — previously the LP credited no certificate revenue at all.
-    #
-    # The 5.0 default is inherited from ProjectFinanceInputs, NOT a market
-    # quote. Set it from current LGC market data before relying on it; the RET
-    # winds down to 2030, so the forward curve matters more than spot here.
+    # LGC revenue on surplus exports only; delivered certificates are bundled
+    # into the PPA tariff. A$/MWh.
     lgc_price_aud_mwh: float = A.LGC_PRICE_AUD_MWH
-    # Enforce `required_delivery_share` as a HARD constraint in the sizing LP
-    # rather than leaving it to the penalty price. Off by default (the penalty/
-    # shortfall merit order is the original design), but essential whenever the
-    # penalty is cheaper than building: at the Corporate PPA defaults penalty
-    # energy is A$126/MWh against a wind LCOE of A$162/MWh, so the LP buys out
-    # of the SLA and delivery settles at 50-65% (docs/sizing_experiments.md E1).
-    # May make the LP infeasible when the build caps bind — that is a real
-    # answer ("this SLA is unreachable within these caps"), not a failure.
+    # Enforce the delivery target as a hard sizing constraint. Build caps can
+    # make the LP infeasible when the target is unreachable.
     enforce_min_delivery: bool = False
-    # Merchant sales earn revenue in the sizing LP at this fraction of historic
-    # spot (a haircut for capture-price cannibalisation, MLF and curtailment).
-    # Applied to positive prices only — negative hours keep their full
-    # disincentive so the LP curtails rather than dumps energy at negative spot.
+    # Fraction of positive spot price credited to merchant exports in sizing.
     sizing_merchant_value_share: float = 0.5
-    # Hard cap (MW) on the transport/connection links in sizing mode. Default
-    # float("inf") = unlimited; real NEM projects have a physical connection limit.
+    # Maximum link capacity in sizing mode; infinity means unlimited.
     grid_connection_max_mw: float = float("inf")
-    # Sized connection MW carried through from the sizing LP into the dispatch
-    # simulation (set by ppa.sizing.apply_sizing). None = derive from nameplate.
+    # Sized connection capacities; None derives capacity from nameplate.
     wind_link_mw: "float | None" = None
     pvbess_link_mw: "float | None" = None
     sell_link_mw: "float | None" = None
@@ -158,65 +84,44 @@ class Scenario:
 
     # Multi-year simulation
     simulation_years: int = 25
-    # The web app solves one representative year by default, then projects its
-    # fixed energy volumes over simulation_years. Full dispatch remains opt-in.
+    # Representative-year dispatch projects one year's volumes over the
+    # financial horizon. Full multi-year dispatch is opt-in.
     dispatch_mode: str = "representative_year"
     first_sim_year: int = 2025
     price_escalation_rate: float = A.PRICE_ESCALATION_RATE  # annual escalation applied to base market prices
 
-    # Technology degradation (compound per year, applied from year 1 onward)
+    # Annual compound technology degradation rates.
     pv_degradation_rate: float = 0.005    # 0.5%/yr — industry standard for crystalline Si
     wind_degradation_rate: float = 0.002  # 0.2%/yr
     bess_degradation_rate: float = 0.020  # 2.0%/yr usable capacity fade
 
-    # Combined transmission / grid-use charge (A$/MWh) on every MWh delivered to
-    # the offtaker, covering all network levels between the generation sites and
-    # the consumer, whatever the source (RE, BESS or market buy).
+    # Transmission and grid-use charge on every delivered MWh (A$/MWh).
     transmission_cost_aud_mwh: float = 0.0
 
     # ── Data source ──────────────────────────────────────────────────────────
-    # "nem_map" (NEM plants picked on the map), "nem_default" (NEM prices/DUIDs
-    # without map interaction), "custom_csv" (Phase 3)
+    # "nem_map" (plants selected on the map), "nem_default" (prices/DUIDs only),
+    # or "custom_csv".
     data_source: str = "nem_default"
     nem_price_region: str = "NSW1"
     nem_pv_duid: str = ""
     nem_wind_duid: str = ""
 
     # ── NEM data selection ───────────────────────────────────────────────────
-    # Historical years to cycle through in the multi-year dispatch simulation,
-    # in order, repeating. Chronological order is the meaningful one, so this is
-    # kept sorted ascending. `nem_year` (below) remains as a derived property so
-    # the ~38 existing single-year call sites keep working.
+    # Historical input years, cycled in ascending order for multi-year dispatch.
     nem_years: tuple[int, ...] = (2025,)
-    # The ONE historical year the capacity-sizing LP optimises against. Sizing
-    # over the full multi-year horizon is possible but is what makes the LP
-    # large; the user picks a representative year instead.
+    # Historical year used by the capacity-sizing LP.
     capacity_sizing_year: int = 2025
-    # Snapshot resolution in minutes for the generation/price series: 60, 30, 15
-    # or 5. Sub-hourly multiplies LP size (and memory) by 60/resolution, so 15
-    # and 5 are guarded — see ui/scenario_form.py and ppa/multi_year.py.
+    # Snapshot resolution in minutes: 60, 30, 15 or 5.
     nem_resolution_minutes: int = 60
 
     # ── Tiered SLA ───────────────────────────────────────────────────────────
-    # `required_delivery_share` above is the ANNUAL obligation. These add
-    # tighter obligations at monthly and daily granularity. Both are OFF by
-    # default: with them off the model is bit-identical to today's.
+    # Optional monthly and daily delivery targets.
     sla_monthly_enabled: bool = False
     sla_monthly_share: float = 0.0
     sla_daily_enabled: bool = False
     sla_daily_share: float = 0.0
 
-    # Financial — Australian NEM benchmarks (AUD)
-    # Capital costs from CSIRO GenCost 2025-26 Final Report (15 July 2026),
-    # Apx Table B.1 (generation) and Apx Table B.5 (storage), "Current policies"
-    # scenario, 2025 row, real 2025 A$.
-    #
-    # Basis check (GenCost p.96-97): these are *overnight* capital costs, and
-    # GenCost explicitly EXCLUDES connection costs and marginal loss factors.
-    # So charging `connection_cost_aud_mw` separately in the sizing LP and
-    # `onsw/pv/bess_connection_cost` in the financial model is correct and does
-    # not double-count. Overnight also means interest during construction is
-    # excluded, which the financial model applies via its own build schedule.
+    # Financial assumptions in Australian dollars.
     wind_capex_per_kw: float = A.WIND_CAPEX_AUD_KW   # A$/kW, GenCost 2025-26 T.B1 "Wind" 2025
     pv_capex_per_kw: float = A.PV_CAPEX_AUD_KW     # A$/kW, GenCost 2025-26 T.B1 "Large scale solar PV" 2025
     bess_capex_per_kwh: float = A.BESS_CAPEX_AUD_KWH   # A$/kWh, GenCost 2025-26 T.B5 4-hour total (battery 265 + BOP 120)
@@ -224,11 +129,7 @@ class Scenario:
     project_life_yrs: int = A.PROJECT_LIFE_YRS
     discount_rate: float = A.DISCOUNT_RATE
     target_irr: float = A.TARGET_IRR
-    # Grid-connection capital cost (A$/MW) for the transport links in sizing
-    # mode. Matches ProjectFinanceInputs' onsw/pv connection cost (A$0.15M/MW);
-    # a strictly positive value pins each extendable link's p_nom_opt to its
-    # realised peak flow (no degenerate over-build) and makes connection a
-    # genuine part of the sizing trade-off.
+    # Grid-connection capital cost for sizing links (A$/MW).
     connection_cost_aud_mw: float = A.CONNECTION_COST_AUD_MW
 
     # ── Derived properties ─────────────────────────────────────────────────────
@@ -244,14 +145,7 @@ class Scenario:
 
     @property
     def nem_year(self) -> int:
-        """First (earliest) selected NEM data year.
-
-        Kept as a property, not a field, so the many single-year call sites
-        (AER futures, reference_month_ts, cache_status, config summary) keep
-        working. It is deliberately absent from dataclasses.asdict(), and
-        dataclasses.replace(s, nem_year=...) will now raise — use
-        nem_years=(y,).
-        """
+        """First selected NEM data year, or 2025 when none is selected."""
         return int(self.nem_years[0]) if self.nem_years else 2025
 
     @property
@@ -468,12 +362,15 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
             )
         if s.sizing_method == "tsam" and not (4 <= s.sizing_n_periods <= 40):
             errors.append("Typical-period count must be between 4 and 40.")
-        if s.sizing_method == "tsam" and not _tsam_available():
-            errors.append(
-                "Typical-days sizing needs the optional 'tsam' package. "
-                "Install it (`pixi add --pypi tsam` or `pip install tsam`) or "
-                "switch the sizing method to 'Full year hourly'."
-            )
+        if s.sizing_method == "tsam":
+            from ppa.sizing_tsam import tsam_available
+
+            if not tsam_available():
+                errors.append(
+                    "Typical-days sizing needs the optional 'tsam' package. "
+                    "Install it (`pip install tsam`) or "
+                    "switch the sizing method to 'Full year hourly'."
+                )
         if s.grid_connection_max_mw is not None and s.grid_connection_max_mw < 0:
             errors.append("Grid connection limit must be ≥ 0 MW (blank = unlimited).")
         if not (0.0 <= s.sizing_merchant_value_share <= 1.0):
@@ -485,15 +382,14 @@ def validate_scenario(s: Scenario, available_days: list[str] | None = None) -> l
             )
     if s.lgc_price_aud_mwh < 0:
         errors.append("LGC price must be ≥ 0 A$/MWh.")
-    else:
-        if s.onsw_mw < 0:
-            errors.append("Onshore wind capacity must be ≥ 0 MW.")
-        if s.pv_mw < 0:
-            errors.append("Solar PV capacity must be ≥ 0 MW.")
-        if s.include_bess and s.bess_mw <= 0:
-            errors.append("BESS power capacity must be > 0 when BESS is enabled.")
-        if s.include_bess and s.bess_mwh <= 0:
-            errors.append("BESS energy capacity must be > 0 when BESS is enabled.")
+    if s.onsw_mw < 0:
+        errors.append("Onshore wind capacity must be ≥ 0 MW.")
+    if s.pv_mw < 0:
+        errors.append("Solar PV capacity must be ≥ 0 MW.")
+    if s.include_bess and s.bess_mw <= 0:
+        errors.append("BESS power capacity must be > 0 when BESS is enabled.")
+    if s.include_bess and s.bess_mwh <= 0:
+        errors.append("BESS energy capacity must be > 0 when BESS is enabled.")
     if s.ppaload_mw <= 0:
         errors.append("PPA offtake load must be > 0 MW.")
     if s.ppa_price <= 0:

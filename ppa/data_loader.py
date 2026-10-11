@@ -1,23 +1,14 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
 from ppa.industrial_profiles import get_load_series
 from ppa.scenario import Scenario
 
-REQUIRED_COLUMNS = ["timestamp", "ts_PVGen", "ts_WindGen", "ts_NSWPrice"]
-
-_DEFAULT_CSV_CANDIDATES = [
-    Path(__file__).parent.parent / "data" / "march_2025_pypsa_timeseries.csv",
-]
-
-# ── Custom CSV upload (Phase 3) ────────────────────────────────────────────────
-
-CUSTOM_UPLOAD_COLUMNS = ["timestamp", "ts_PVGen", "ts_WindGen", "ts_LoadMW", "ts_MktPrice"]
+# User-uploaded custom timeseries.
 CUSTOM_DATA_COLUMNS = ["ts_PVGen", "ts_WindGen", "ts_LoadMW", "ts_MktPrice"]
+CUSTOM_UPLOAD_COLUMNS = ["timestamp", *CUSTOM_DATA_COLUMNS]
 CUSTOM_CF_COLUMNS = ("ts_PVGen", "ts_WindGen")
 TEMPLATE_START = "2025-01-01"
 TEMPLATE_END = "2025-12-31"
@@ -25,38 +16,11 @@ TEMPLATE_FREQ_MINUTES = 60
 TEMPLATE_LOAD_MW = 100.0
 
 
-def find_default_csv() -> Path | None:
-    for p in _DEFAULT_CSV_CANDIDATES:
-        if p.exists():
-            return p
-    return None
-
-
-def load_timeseries(csv_path: str | Path) -> pd.DataFrame:
-    csv_path = Path(csv_path)
-    if not csv_path.exists():
-        raise FileNotFoundError(f"Timeseries CSV not found: {csv_path}")
-
-    ts = pd.read_csv(csv_path)
-
-    missing = [c for c in REQUIRED_COLUMNS if c not in ts.columns]
-    if missing:
-        raise ValueError(f"Missing required columns in CSV: {missing}")
-
-    ts["timestamp"] = pd.to_datetime(ts["timestamp"])
-    ts = ts.sort_values("timestamp").set_index("timestamp")
-    ts.index.name = "snapshot"
-    return ts
-
-
 def prepare_timeseries(ts: pd.DataFrame, scenario: Scenario) -> pd.DataFrame:
     if getattr(scenario, "data_source", "nem_default") == "custom_csv" and "ts_LoadMW" in ts.columns:
         return prepare_custom_timeseries(ts)
 
     ts = ts.copy()
-    # The NEM path carries ts_MktPrice; the legacy CSV exposes ts_NSWPrice.
-    if "ts_MktPrice" not in ts.columns and "ts_NSWPrice" in ts.columns:
-        ts["ts_MktPrice"] = ts["ts_NSWPrice"]
     profile = get_load_series(scenario.load_profile, ts.index)
     ts["ppaload_mw"] = (profile * scenario.ppaload_mw).values
     return ts
@@ -85,8 +49,6 @@ def coerce_chosen_day(ts: pd.DataFrame, chosen_day: str) -> str:
         return available[len(available) // 2]
     return min(available, key=lambda d: abs((pd.Timestamp(d) - target).days))
 
-
-# ── Template generation ────────────────────────────────────────────────────────
 
 def build_upload_template(
     start: str = TEMPLATE_START,
@@ -123,8 +85,6 @@ def build_upload_template(
     return df.to_csv(index=False).encode("utf-8")
 
 
-# ── Upload validation / loading ───────────────────────────────────────────────
-
 def _load_custom_upload_raw(file) -> tuple[pd.DataFrame, int]:
     """Parse + validate the raw upload. Returns (indexed_df, n_duplicates_dropped)."""
     try:
@@ -147,17 +107,10 @@ def _load_custom_upload_raw(file) -> tuple[pd.DataFrame, int]:
     for c in CUSTOM_DATA_COLUMNS:
         original = ts[c]
         coerced = pd.to_numeric(original, errors="coerce")
-        # NaN after coercion means either the source cell was already empty/NaN
-        # or it contained non-numeric junk that couldn't be parsed — either way
-        # it's an invalid data value.
         bad_mask = coerced.isna()
         if bad_mask.any():
             n = int(bad_mask.sum())
-            # `ts.index` here is still the 0-based pandas RangeIndex position
-            # (this runs before `set_index("timestamp")`). A user opening the
-            # raw CSV in a spreadsheet sees row 1 = header, row 2 = first data
-            # row, so the 0-based position must be offset by 2 to match what
-            # they'd see on screen.
+            # Include the header and one-based row number shown by spreadsheets.
             first_row = int(ts.index[bad_mask][0]) + 2
             raise ValueError(
                 f"Column '{c}' contains {n} non-numeric or empty value(s) "

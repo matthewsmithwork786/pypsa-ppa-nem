@@ -40,20 +40,13 @@ def compute_counterfactuals(
     result: OptimisationResult,
     dt: float = 1.0,
 ) -> CounterfactualResult:
-    """Compare PPA offtaker cost against spot-only and calendar-year base-futures procurement.
+    """Compare modelled-period PPA costs with spot and calendar-futures costs.
 
-    All strategies source the same hourly load: `ts["ppaload_mw"]`, the actual
-    hourly load series (the uploaded hourly load on the custom-CSV path, or the
-    profile-synthesized hourly load on the NEM path). This is a strict
-    improvement over the previous flat-`scenario.ppaload_mw`-scalar approach for
-    ALL data sources, since `scenario.ppaload_mw` is the uploaded/contracted PEAK
-    MW (needed for LP feasibility), not the actual average consumption -- using
-    it as a flat load for the whole period systematically overstates cost for
-    any non-flat load profile.
-    Costs are for the modelled period only (not annualised).
+    All strategies use the actual hourly load in ``ts['ppaload_mw']``. Costs
+    cover the modelled period and are not annualised.
     """
     spot_price = ts["ts_MktPrice"]
-    load_mw = ts["ppaload_mw"]  # actual load series, not the flat peak scalar
+    load_mw = ts["ppaload_mw"]
     # dt = hours per row of ts; must match whatever build_network(resolution_h=)
     # used for this same ts, or every $/MWh figure below is scaled wrong.
     total_load_mwh = float((load_mw * dt).sum())
@@ -92,9 +85,7 @@ def compute_counterfactuals(
     ppa_saving_vs_blended = blended_cost - ppa_offtaker_cost
 
     # --- Cumulative cost series ---
-    hourly_cal_cost = pd.Series(
-        scenario.cal_forward_price * load_mw * dt, index=ts.index
-    )
+    hourly_cal_cost = scenario.cal_forward_price * load_mw * dt
     cumulative_spot = hourly_spot_cost.cumsum()
     cumulative_ppa = hourly_ppa_cost.cumsum()
     cumulative_cal = hourly_cal_cost.cumsum()

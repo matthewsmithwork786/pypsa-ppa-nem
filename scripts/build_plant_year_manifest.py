@@ -1,43 +1,12 @@
 #!/usr/bin/env python3
-"""Build the operational-year determination manifest (`plant_years.parquet`).
+"""Build `plant_years.parquet` from cached availability files and the plant registry.
 
-*** Reads only the already-committed `data/cache/nem/` files -- no network
-access needed, unlike the `fetch_*` scripts. Safe to run in this sandbox. ***
-
-For every `<DUID>_<year>.parquet` file in `data/cache/nem/availability/` this
-script computes a row of structural and utilisation metrics for that (duid,
-year) pair and applies the `fully_operational` gate that the multi-year sizing
-path will use to decide which calendar years a plant is a fair representation
-of the finished asset. The registry (`data/cache/nem/registry/
-nem_plant_registry.parquet`) is denormalised onto each row so the output is
-self-contained for the plant picker.
-
-The gate generalises the single-year heuristics in `ppa/data/nem_data.py`
-(`whole_year_check` + `commissioning_ramp_check`) in three ways:
-
-- `monthly_peak_ratio_min` applies the commissioning-ramp discriminator to
-  **all 12 months** instead of only Jan/Feb, so mid-year commissioning,
-  ramp-down before retirement and month-long outages are all caught
-  symmetrically. The ratio is each month's peak divided by the plant's own
-  annual peak, which keeps it robust to AC clipping at ~0.80 of nameplate and
-  to heavy curtailment late in the year (same design rationale as
-  `nem_data.COMMISSIONING_MIN_PEAK_FRACTION`).
-- Coverage/span thresholds are tightened (98% / 3 Jan-29 Dec) because a
-  multi-year archive can afford to reject an 18-day hole that the old 95% /
-  15 Jan-15 Dec rule admitted.
-- `longest_gap_hours` and `longest_zero_run_hours` bound single outages in
-  absolute terms, and the registry's `first_power_date` (when present) must
-  predate the year start by 60 days.
-
-`annual_cuf`, `cuf_vs_plant_median` and `monthly_peak_ratio_by_month` are
-recorded for diagnosis and tuning but are NOT part of the gate.
-
-    python scripts/build_plant_year_manifest.py
-"""
+The manifest reports per-plant yearly coverage, utilisation, and operational checks.
+It uses fixed thresholds below and does not acquire data. Run from the repository root:
+`python3 scripts/build_plant_year_manifest.py`."""
 from __future__ import annotations
 
 import argparse
-import calendar
 import sys
 from pathlib import Path
 

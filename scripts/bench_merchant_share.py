@@ -1,27 +1,8 @@
 #!/usr/bin/env python3
-"""W12b: sweep `Scenario.sizing_merchant_value_share` on a real case study.
+"""Sweep the merchant-value share and report sized capacity, delivery, and finance outputs.
 
-The sizing LP credits merchant sales at `sizing_merchant_value_share` of
-*positive* spot prices (a haircut for capture-price cannibalisation, MLF and
-curtailment). The share is a conservatism dial, not a derived number, so the
-plan (W12b) asks for it to be measured rather than asserted: for each share,
-report the sized fleet, the delivery share and the full-simulation project IRR.
-
-Any share > 0 means the LP builds until a cap binds, so `max_build_*` and
-`grid_connection_max_mw` become the real sizing decision — the "binding" column
-shows which cap stopped the build at each share.
-
-This runs the same pipeline as `ui/tabs/optimisation.py::_run_simulation`:
-
-    sizing LP -> apply_sizing -> run_multi_year (hourly dispatch)
-              -> run_multi_year_financial_analysis (IRR)
-
-Usage:
-    PYTHONPATH=. python3 scripts/bench_merchant_share.py
-    PYTHONPATH=. python3 scripts/bench_merchant_share.py --years 3 --case corporate_ppa
-
-Needs the cached NEM SCADA/price parquets under `data/cache/nem/`.
-"""
+Usage: `PYTHONPATH=. python3 scripts/bench_merchant_share.py [--case ID] [--years N]`
+Requires bundled NEM availability and price caches."""
 from __future__ import annotations
 
 import argparse

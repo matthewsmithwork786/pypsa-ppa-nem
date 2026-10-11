@@ -10,11 +10,8 @@ if TYPE_CHECKING:
     from ppa.financials import MultiYearFinancialResult
 
 SCENARIO_KEY = "scenario"
-RESULT_KEY = "optimisation_result"
-FINANCIAL_KEY = "financial_result"
-COUNTERFACTUAL_KEY = "counterfactual_result"
+RESULT_KEY = "optimisation_result"  # Remove results from older single-year sessions.
 TIMESERIES_KEY = "timeseries"
-ACTIVE_CASE_STUDY_KEY = "active_case_study_id"
 MULTI_YEAR_RESULTS_KEY = "multi_year_results"
 MULTI_YEAR_FINANCIAL_KEY = "multi_year_financial"
 PROJECT_FINANCE_KEY = "project_finance_result"
@@ -122,65 +119,12 @@ def has_scenario() -> bool:
     return SCENARIO_KEY in st.session_state
 
 
-def get_result() -> "OptimisationResult | None":
-    return st.session_state.get(RESULT_KEY)
-
-
-def set_result(r: "OptimisationResult") -> None:
-    st.session_state[RESULT_KEY] = r
-    st.session_state.pop(FINANCIAL_KEY, None)
-    st.session_state.pop(COUNTERFACTUAL_KEY, None)
-    reset_financial_model_inputs()
-
-
-def has_result() -> bool:
-    return RESULT_KEY in st.session_state
-
-
-def clear_result() -> None:
-    st.session_state.pop(RESULT_KEY, None)
-    st.session_state.pop(FINANCIAL_KEY, None)
-    st.session_state.pop(COUNTERFACTUAL_KEY, None)
-
-
-def get_financial() -> "FinancialResult | None":
-    return st.session_state.get(FINANCIAL_KEY)
-
-
-def set_financial(f: "FinancialResult") -> None:
-    st.session_state[FINANCIAL_KEY] = f
-
-
-def has_financial() -> bool:
-    return FINANCIAL_KEY in st.session_state
-
-
-def get_counterfactual() -> "CounterfactualResult | None":
-    return st.session_state.get(COUNTERFACTUAL_KEY)
-
-
-def set_counterfactual(cf: "CounterfactualResult") -> None:
-    st.session_state[COUNTERFACTUAL_KEY] = cf
-
-
-def has_counterfactual() -> bool:
-    return COUNTERFACTUAL_KEY in st.session_state
-
-
 def get_timeseries() -> "pd.DataFrame | None":
     return st.session_state.get(TIMESERIES_KEY)
 
 
 def set_timeseries(ts: "pd.DataFrame") -> None:
     st.session_state[TIMESERIES_KEY] = ts
-
-
-def get_active_case_study_id() -> str | None:
-    return st.session_state.get(ACTIVE_CASE_STUDY_KEY)
-
-
-def set_active_case_study_id(cs_id: str) -> None:
-    st.session_state[ACTIVE_CASE_STUDY_KEY] = cs_id
 
 
 def get_multi_year_results() -> "list | None":
@@ -278,8 +222,8 @@ def clear_run_outputs() -> None:
     once a NEM/custom-CSV selection changes the data source).
     """
     st.query_params.pop("run", None)
-    for key in (RESULT_KEY, FINANCIAL_KEY, COUNTERFACTUAL_KEY, PROJECT_FINANCE_KEY,
-                MULTI_YEAR_RESULTS_KEY, MULTI_YEAR_FINANCIAL_KEY, OPTIMISED_SIZES_KEY,
+    for key in (RESULT_KEY, PROJECT_FINANCE_KEY, MULTI_YEAR_RESULTS_KEY, MULTI_YEAR_FINANCIAL_KEY,
+                OPTIMISED_SIZES_KEY,
                 SIZING_DIAGNOSTICS_KEY, TIMESERIES_KEY):
         st.session_state.pop(key, None)
     reset_financial_model_inputs()

@@ -4,9 +4,10 @@ scenarios, the actual plant names behind the run."""
 from __future__ import annotations
 
 import streamlit as st
+from ppa.scenario import Scenario
 
 
-def render_config_summary(s, expanded: bool = False) -> None:
+def render_config_summary(s: Scenario, expanded: bool = False) -> None:
     """Render the fleet MW (incl. load & links) and plant names actually used."""
     with st.expander("⚙️ Configuration used", expanded=expanded):
         cols = st.columns(4)
@@ -23,12 +24,9 @@ def render_config_summary(s, expanded: bool = False) -> None:
                 st.markdown(f"- {label}: **{val}**")
         with cols[1]:
             st.markdown("**Connection links (MW)**")
-            wind_link = getattr(s, "wind_link_mw", None)
-            pvbess_link = getattr(s, "pvbess_link_mw", None)
-            sell_link = getattr(s, "sell_link_mw", None)
-            st.markdown(f"- Wind link: **{wind_link:.0f} MW**" if wind_link else "- Wind link: *unconstrained*")
-            st.markdown(f"- PV+BESS link: **{pvbess_link:.0f} MW**" if pvbess_link else "- PV+BESS link: *unconstrained*")
-            st.markdown(f"- Export/sell link: **{sell_link:.0f} MW**" if sell_link else "- Export/sell link: *unconstrained*")
+            st.markdown(f"- Wind link: **{s.wind_link_mw:.0f} MW**" if s.wind_link_mw else "- Wind link: *unconstrained*")
+            st.markdown(f"- PV+BESS link: **{s.pvbess_link_mw:.0f} MW**" if s.pvbess_link_mw else "- PV+BESS link: *unconstrained*")
+            st.markdown(f"- Export/sell link: **{s.sell_link_mw:.0f} MW**" if s.sell_link_mw else "- Export/sell link: *unconstrained*")
         with cols[2]:
             st.markdown("**Plant identity**")
             if s.is_nem:
@@ -46,16 +44,16 @@ def render_config_summary(s, expanded: bool = False) -> None:
             st.markdown(f"- Dispatch: **{s.dispatch_years} solved year(s)**")
             if s.dispatch_mode == "representative_year":
                 st.markdown(f"- Financial projection: **{s.simulation_years} years** (fixed volumes)")
-            years = ", ".join(str(y) for y in (getattr(s, "nem_years", ()) or ()))
+            years = ", ".join(str(y) for y in s.nem_years)
             if years:
                 st.markdown(f"- NEM data years: **{years}**")
-            st.markdown(f"- Resolution: **{getattr(s, 'nem_resolution_minutes', 60)} min**")
-            if getattr(s, "optimise_capacity", False):
-                st.markdown(f"- Sizing year: **{getattr(s, 'capacity_sizing_year', '—')}**")
+            st.markdown(f"- Resolution: **{s.nem_resolution_minutes} min**")
+            if s.optimise_capacity:
+                st.markdown(f"- Sizing year: **{s.capacity_sizing_year}**")
             st.markdown(f"- Annual delivery: **{s.required_delivery_share:.0%}**")
-            if getattr(s, "sla_monthly_enabled", False):
-                st.markdown(f"- Monthly minimum: **{getattr(s, 'sla_monthly_share', 0.0):.0%}**")
-            if getattr(s, "sla_daily_enabled", False):
-                st.markdown(f"- Daily minimum: **{getattr(s, 'sla_daily_share', 0.0):.0%}**")
-            if not (getattr(s, "sla_monthly_enabled", False) or getattr(s, "sla_daily_enabled", False)):
+            if s.sla_monthly_enabled:
+                st.markdown(f"- Monthly minimum: **{s.sla_monthly_share:.0%}**")
+            if s.sla_daily_enabled:
+                st.markdown(f"- Daily minimum: **{s.sla_daily_share:.0%}**")
+            if not (s.sla_monthly_enabled or s.sla_daily_enabled):
                 st.markdown("- Tiered SLA: *none*")

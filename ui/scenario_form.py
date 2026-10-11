@@ -13,33 +13,14 @@ from ui import state
 max_cap_per_technology = 500
 max_bes_hours = 8
 
-# PPA offtake load (MW) number_input bounds. Raised well above
-    # max_cap_per_technology-scale single-tech limits since a co-optimised
-# wind+solar+BESS portfolio (each individually up to several thousand MW via
-# the sizing max-build inputs) can plausibly serve a load in the same range,
-# and a custom-CSV upload's peak MW must always fit under this ceiling or the
-# Case Setup tab crashes with StreamlitValueAboveMaxError on the next render.
+# Leave room for large co-optimised fleets and custom-upload load profiles.
 PPALOAD_MW_MAX = 10_000.0
 
 
 def _seed_aer_applied_from_scenario(
     session_state, cal_forward_source: str, cal_forward_price: float, cal_forward_note: str,
 ) -> None:
-    """If `session_state` has no `_sf_aer_applied` yet and the ALREADY-SAVED
-    scenario's own provenance says an AER quote is active
-    (`cal_forward_source == "aer_indicative"`), re-seed `_sf_aer_applied` from
-    the scenario's `cal_forward_price`/`cal_forward_note`.
-
-    Must run before `_apply_pending_aer` / the `cal_forward_price` widget.
-    Without this, `_sf_aer_applied` (which `ui.state.set_scenario` pops on
-    every save) would have no record of the active AER quote on the very next
-    render, so the next "Apply changes" click -- even with no other changes --
-    would silently overwrite `cal_forward_source` back to "manual" and wipe
-    `cal_forward_note`.
-
-    Pure w.r.t. Streamlit, like `_apply_pending_aer` -- works against any
-    mutable-mapping-like object.
-    """
+    """Restore the active AER quote marker after scenario widget keys reset."""
     from ppa.data import aer_futures
 
     if cal_forward_source == aer_futures.SOURCE_AER:
@@ -50,19 +31,7 @@ def _seed_aer_applied_from_scenario(
 
 
 def _resolve_aer_provenance(session_state, cal_forward_price: float) -> tuple[str, str]:
-    """Decide `(cal_forward_source, cal_forward_note)` for this render, given
-    the current `cal_forward_price` widget value and any `_sf_aer_applied`
-    state.
-
-    If the widget value still matches the previously-applied AER quote,
-    provenance stays "aer_indicative". Otherwise a manual edit has been
-    detected: `_sf_aer_applied` is POPPED entirely (not just ignored for this
-    render) so that later re-typing the same numeric value is correctly
-    treated as a fresh manual entry rather than "the AER quote is still
-    active".
-
-    Pure w.r.t. Streamlit -- works against any mutable-mapping-like object.
-    """
+    """Return the quote provenance, clearing it after a manual price edit."""
     from ppa.data import aer_futures
 
     applied = session_state.get("_sf_aer_applied")
@@ -74,15 +43,7 @@ def _resolve_aer_provenance(session_state, cal_forward_price: float) -> tuple[st
 
 
 def _apply_pending_aer(session_state) -> bool:
-    """Pop `_sf_aer_pending` from `session_state` and seed `sf_cal_forward_price` +
-    `_sf_aer_applied` if present. Must run before the `cal_forward_price` widget
-    renders. Returns True iff a pending quote was applied. Idempotent -- a
-    second call with nothing pending is a no-op.
-
-    Pure w.r.t. Streamlit: works against any mutable-mapping-like object
-    (plain dict in tests, `st.session_state` at runtime) so it's testable
-    without a running Streamlit app.
-    """
+    """Apply a pending AER quote before its price widget renders."""
     pending = session_state.pop("_sf_aer_pending", None)
     if pending is None:
         return False
@@ -92,24 +53,10 @@ def _apply_pending_aer(session_state) -> bool:
 
 
 def _default_aer_seed_for_scenario(scenario, cache_dir=None):
-    """Return ``(cal_forward_price, cal_forward_source, cal_forward_note)``
-    seeded from the AER base-futures cache for ``scenario``'s region/year, or
-    ``None`` when no usable cache exists.
-
-    AER data becomes the *default* forward-price seed (W4): when a futures
-    cache is present for ``nem_year`` and the user has not yet made a manual
-    choice, the forward price is pre-filled from the full-year quarterly
-    average with ``cal_forward_source = "aer_indicative"`` so the disclaimer
-    and provenance are carried through -- the manual-opt-in click becomes
-    unnecessary in the common case. ``None`` keeps the previous "manual"
-    default for region/year combinations without cached data.
-
-    Duck-typed ``scenario`` access only (``getattr``), matching
-    ``ppa.data.aer_futures.forward_price_for_scenario``.
-    """
+    """Return an indicative AER quote for the scenario year, if cached."""
     from ppa.data import aer_futures
 
-    year = getattr(scenario, "nem_year", aer_futures.DEFAULT_YEAR) or aer_futures.DEFAULT_YEAR
+    year = scenario.nem_year or aer_futures.DEFAULT_YEAR
     cache_dir = cache_dir if cache_dir is not None else aer_futures.NEM_CACHE_DIR
     if not aer_futures.has_futures_cache(year, cache_dir=cache_dir):
         return None
@@ -122,9 +69,6 @@ def _default_aer_seed_for_scenario(scenario, cache_dir=None):
 
 def render_scenario_form(initial: Scenario) -> Scenario:
     """Render all scenario controls and return a new Scenario from widget values."""
-    # The single most consequential choice in the app, so it is asked first and
-    # in plain language rather than buried among the feature toggles. Whether
-    # the optimiser sizes the fleet decides what every control below means.
     st.subheader("Portfolio capacity")
     _capacity_mode = st.radio(
         "How should the fleet be sized?",
@@ -179,9 +123,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 "Max BESS build (MW)", 0.0, 10_000.0, float(initial.max_build_bess_mw),
                 50.0, key="sf_max_build_bess",
             )
-            # `enforce_min_delivery` is set below, in the "Service level agreement
-            # (SLA)" expander right after `required_delivery_share` — its label
-            # quotes that value, so it needs to be seen and set together with it.
+            # Keep this control next to its target share.
             with st.expander("⚙️ Advanced sizing settings", expanded=False):
               _method_labels = {
                   "full_hourly": "Full year hourly",
@@ -269,11 +211,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             merchant_share = float(initial.sizing_merchant_value_share)
             connection_cost_aud_mw = float(initial.connection_cost_aud_mw)
 
-        # When capacity co-optimisation is on the MW values are ignored entirely,
-        # so the sliders are hidden rather than greyed out -- a disabled control
-        # that still shows a number invites the reader to believe it matters.
-        # Only the BESS duration (MWh/MW) survives, because the sizing LP holds
-        # duration fixed and sizes power.
+        # Manual capacities do not affect co-optimised runs; duration still does.
         if optimise_capacity:
             onsw_mw, pv_mw, bess_mw = initial.onsw_mw, initial.pv_mw, initial.bess_mw
             _hours = st.slider(
@@ -309,7 +247,6 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             key="sf_pen_mult",
         )
 
-        # ── Load profile selector ─────────────────────────────────────────────
         st.markdown("**Offtaker load profile**")
         _custom_active = initial.data_source == "custom_csv"
         _profile_labels = [f"{PROFILE_INFO[k]['icon']} {PROFILE_INFO[k]['label']}" for k in PROFILE_KEYS]
@@ -368,10 +305,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                                                 key="sf_bess_capex")
         with cols[3]:
             st.caption("Annual fixed O&M")
-            # st.caption parses markdown; three unescaped "$" signs in one
-            # string get parsed as LaTeX math spans (an odd count still
-            # corrupts the render) -- escape every one, as elsewhere in this
-            # repo (e.g. the LaTeX-currency fix already applied to charts/axes).
+            # Escape currency symbols so Streamlit does not parse them as math.
             st.caption(
                 rf"Wind A\${_assumptions.WIND_FIXED_OM_AUD_MW_YR:,.0f}/MW · "
                 rf"PV A\${_assumptions.PV_FIXED_OM_AUD_MW_YR:,.0f}/MW · "
@@ -532,7 +466,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 "sizing representation to 'Full year hourly', or turn the monthly SLA off."
             )
 
-        _res_min = int(getattr(initial, "nem_resolution_minutes", 60))
+        _res_min = int(initial.nem_resolution_minutes)
         if _res_min < 30 and dispatch_mode == "full_multi_year" and simulation_years > 2:
             st.warning(
                 f"{_res_min}-minute resolution over {simulation_years} years builds an "
@@ -599,12 +533,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         _seed_aer_applied_from_scenario(
             st.session_state, initial.cal_forward_source, initial.cal_forward_price, initial.cal_forward_note,
         )
-        # AER as the *default* seed (W4): when a futures cache exists for the
-        # scenario's year and the user has not yet made a manual choice
-        # (sf_cal_forward_price unset), pre-fill the forward price from the
-        # full-year quarterly average with aer_indicative provenance so the
-        # disclaimer carries through. A pending manual quote (Apply button)
-        # always wins afterwards.
+        # Seed from cached AER data only before the user sets a price manually.
         if "sf_cal_forward_price" not in st.session_state:
             _aer_seed = _default_aer_seed_for_scenario(initial)
             if _aer_seed is not None:
@@ -660,11 +589,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                     "AER region", options=_aer_regions, index=_aer_region_idx, key="sf_aer_region",
                 )
                 _aer_quarters_available = aer_futures.available_quarters(_aer_df, region=aer_region)
-                # The field this feeds is labelled "calendar year", so default to
-                # the first complete calendar year rather than the whole published
-                # strip -- AER lists ~4 years ahead, and averaging all 16 quarters
-                # is a multi-year strip price, not a calendar-year one (NSW1:
-                # A$105.76 across 2026-29 vs A$101.72 for CY2026).
+                # Use the first complete calendar year, not the full futures strip.
                 _aer_default_quarters = aer_futures.first_full_calendar_year(
                     _aer_quarters_available
                 )
@@ -672,10 +597,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 if _stored_quarters is not None and any(
                     q not in _aer_quarters_available for q in _stored_quarters
                 ):
-                    # Stale selection from a previously-selected region (e.g.
-                    # one that doesn't have this quarter) -- reset to a fresh,
-                    # valid list rather than letting it propagate into
-                    # `quarterly_average`'s ValueError below.
+                    # Reset a quarter selection that is invalid for this region.
                     st.session_state["sf_aer_quarters"] = list(_aer_default_quarters)
                 else:
                     st.session_state.setdefault("sf_aer_quarters", list(_aer_default_quarters))
@@ -704,9 +626,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
 
     with st.expander("Reference day selection", expanded=True):
         cols = st.columns(4)
-        # Read-only: the day is reconciled against the user-selected reference
-        # period on the Optimisation tab (coerce_chosen_day), so the two can
-        # never diverge. Display the coerced day here.
+        # Display the date that the optimisation runner will use.
         ts = state.get_timeseries()
         if ts is not None:
             chosen_day = coerce_chosen_day(ts, initial.chosen_day)

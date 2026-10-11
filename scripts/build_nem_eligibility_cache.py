@@ -1,26 +1,8 @@
 #!/usr/bin/env python3
-"""Precompute the per-DUID eligibility/CUF summary that `nem_data.list_eligible_plants`
-otherwise has to compute live (one full-year scan per plant) on every cold start.
+"""Build the cached plant eligibility and capacity-factor summary from local NEM data.
 
-*** Reads only the already-committed `data/cache/nem/` files -- no network access
-needed, unlike the `fetch_*` scripts. Safe to run in this sandbox. ***
-
-The Get Data / Pick Plants map+list calls `list_eligible_plants(check_whole_year=True)`,
-which used to iterate `scada_summary()` (a full-year 5-minute scan) over every plant
-in the registry just to render the plant picker -- the "loading the plant generation
-cache takes a while" complaint. `scada_summary` results don't change unless the
-underlying availability/SCADA cache changes, so this script runs that scan once and
-writes the result to `data/cache/nem/registry/eligibility_{year}.parquet`;
-`list_eligible_plants` reads it back in a single parquet read (falling back to a live
-per-plant computation only for DUIDs missing from the cache, e.g. a newly-added
-plant), so the map/list renders instantly on every subsequent run -- including a
-fresh Cloud Run container, since the parquet ships committed in the image.
-
-Run this whenever `data/cache/nem/availability/` or `.../scada/` changes (new year
-fetched, plants added/removed, registry updated), then commit the output parquet:
-
-    python scripts/build_nem_eligibility_cache.py --year 2025
-"""
+Run after changing registry, availability, or SCADA files:
+`python3 scripts/build_nem_eligibility_cache.py --year 2025`."""
 from __future__ import annotations
 
 import argparse

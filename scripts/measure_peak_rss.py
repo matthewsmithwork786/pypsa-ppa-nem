@@ -1,22 +1,9 @@
 #!/usr/bin/env python3
-"""Part A (M6): measure peak RSS of the sizing and dispatch phases.
+"""Measure peak resident memory for capacity sizing and multi-year dispatch.
 
-The capacity-sizing LP is the memory peak of the whole app, and `run_multi_year`
-forks its workers — fork is copy-on-write, but CPython refcounting dirties
-nearly every page a child touches, so each worker costs roughly the parent's
-own RSS. That combination is what OOM-kills long runs. This script measures the
-phases separately so the cost is visible rather than inferred.
-
-Peak RSS is sampled from `/proc/<pid>/statm` for this process **and all its
-descendants**, so forked dispatch workers and the sizing subprocess are counted.
-
-Usage:
-    PYTHONPATH=. python3 scripts/measure_peak_rss.py --phase both
-    PYTHONPATH=. python3 scripts/measure_peak_rss.py --phase sizing --years 15
-    PYTHONPATH=. python3 scripts/measure_peak_rss.py --phase dispatch --workers 4
-
-Needs the cached NEM SCADA/price parquets under `data/cache/nem/`.
-"""
+The sampler includes this process and its descendants, including worker processes.
+Usage: `PYTHONPATH=. python3 scripts/measure_peak_rss.py --phase both`.
+Requires bundled NEM availability and price caches; `/proc` sampling is Linux-specific."""
 from __future__ import annotations
 
 import argparse
@@ -127,8 +114,7 @@ def main() -> None:
             sized = run_sizing_subprocess(sizing_ts, scn)
         print(f"SIZING   peak RSS {sampler.peak_mb:8,.0f} MB   "
               f"{time.monotonic() - t0:6.1f}s   status={sized.status}")
-        # This del+collect is the M2 fix: whatever is still resident here is
-        # paid for once per forked dispatch worker.
+        # Release the sizing inputs before forking dispatch workers.
         del sizing_ts
         gc.collect()
         print(f"         parent RSS after release: {_rss_mb(os.getpid()):,.0f} MB")

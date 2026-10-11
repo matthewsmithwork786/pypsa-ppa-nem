@@ -72,7 +72,7 @@ def test_the_checker_actually_catches_the_bug_that_shipped():
 
 
 def test_app_title():
-    """The app title and H1 must use the Australia product name verbatim."""
+    """Keep the user-facing product title stable."""
     app = Path(__file__).resolve().parents[1] / "streamlit_app.py"
     source = app.read_text()
     assert "PyPSA based PPA explorer - Australia" in source

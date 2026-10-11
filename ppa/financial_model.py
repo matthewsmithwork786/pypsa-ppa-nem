@@ -24,15 +24,14 @@ The model is driven by two input objects:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from ppa import assumptions as A
 
-try:  # optional — only needed by energy_inputs_from_result
+if TYPE_CHECKING:
     from ppa.results import OptimisationResult
-except Exception:  # pragma: no cover
-    OptimisationResult = object  # type: ignore
 
 SOLAR_HOUR_START = 9   # inclusive — "solar hours" defined as 09:00–17:00
 SOLAR_HOUR_END = 17    # exclusive
@@ -163,12 +162,8 @@ def project_finance_inputs_from_scenario(scenario) -> "ProjectFinanceInputs":
     produced the energy results. Costs convert A$/kW -> A$m/MW (and
     A$/kWh -> A$m/MWh).
 
-    O&M is deliberately NOT seeded here: since Phase 2 of
-    TASK_financial_assumptions_refactor.md, both the sizing LP/unlevered model
-    (via ppa.assumptions' WIND/PV/BESS_FIXED_OM constants) and PFI's own
-    per-technology defaults derive from those same constants, so they already
-    agree without per-call conversion -- which is what stops "which opex
-    applies" depending on the code path, the bug this refactor exists to close."""
+    O&M uses the shared defaults in :mod:`ppa.assumptions` and needs no
+    scenario-specific conversion."""
     s = scenario
     return ProjectFinanceInputs(
         onsw_build_cost=s.wind_capex_per_kw / 1000.0,
@@ -309,24 +304,12 @@ def energy_inputs_from_result(
 
 
 def per_year_energy_inputs(results: list) -> list[EnergyInputs]:
-    """Per-year energy inputs, one per simulated year, in order.
-
-    This is what `run_project_finance`'s `annual_energy` parameter consumes so
-    the levered model reflects the real year-to-year variation (degradation,
-    weather-year cycling, the escalation the dispatch model already applied)
-    instead of one averaged year replayed under smooth indexation -- see
-    `energy_inputs_from_results` for the averaged fallback used when a caller
-    only has (or wants) a single representative year."""
+    """Convert each simulated year's dispatch to annual financial inputs."""
     return [energy_inputs_from_result(r) for r in results]
 
 
 def energy_inputs_from_results(results: list) -> EnergyInputs:
-    """Average annualised energy inputs across several per-year results.
-
-    Used only as a display/fallback summary and by callers that don't pass
-    `run_project_finance`'s `annual_energy` -- the model itself now consumes
-    real per-year data (via `per_year_energy_inputs`) rather than replaying
-    this average for every operating year."""
+    """Average annualised inputs for display or representative-year runs."""
     per_year = per_year_energy_inputs(results)
     if not per_year:
         raise ValueError("no results provided")

@@ -50,17 +50,8 @@ def build_network(
     n.set_snapshots(ts.index)
     if snapshot_weightings is not None:
         w = snapshot_weightings.to_numpy(dtype=float)
-        # Occurrence counts scale COST and ENERGY to the represented year, but
-        # they are NOT the elapsed time between consecutive snapshots, and the
-        # "stores" column means exactly that: it is the dt in the storage
-        # energy balance.
-        #
-        # Setting stores to the occurrence count makes one snapshot span up to
-        # ~55 h on a 12-period year, and a 4-hour battery cannot shift anything
-        # across a 55-hour step -- so the LP sized storage to ZERO under every
-        # typical-period configuration (docs/sizing_experiments.md E9). Inside a
-        # representative period the snapshots really are `intra_period_hours`
-        # apart (1 h for hourly typical days), so that is the correct dt.
+        # Occurrence counts scale objective and generation energy. Storage
+        # weights are elapsed hours between representative snapshots instead.
         n.snapshot_weightings["objective"] = w
         n.snapshot_weightings["generators"] = w
         n.snapshot_weightings["stores"] = float(intra_period_hours)
@@ -71,22 +62,14 @@ def build_network(
         total_hours = len(ts) * resolution_h
 
     sizing = s.optimise_capacity
-    # Annualized A$/MW/yr (or A$/MW-of-BESS/yr via fixed duration), scaled by the
-    # fraction of a year the LP covers so capex and operational costs are summed
-    # over the same horizon. crf annualizes overnight capex; fixed O&M is an
-    # absolute per-technology add-on (ppa.assumptions), not a %-of-capex rate --
-    # see TASK_financial_assumptions_refactor.md Phase 2.
+    # Annualised cost per MW, scaled to the LP horizon. Fixed O&M is an
+    # absolute per-technology amount.
     horizon_years = total_hours / 8760.0
 
-    # In sizing mode the LP sizes to the project's hurdle rate (target_irr) and
-    # includes devex, so its cost basis matches the financial model (plan W12c):
-    # the optimiser only builds capacity that clears the hurdle rate. Dispatch
-    # mode carries no capex anyway (fixed capacities), so the rate choice is
-    # inert there.
+    # Sizing uses the project hurdle rate and devex; dispatch has fixed capacity.
     crf_rate = s.target_irr if sizing else s.discount_rate
     devex_pct = s.devex_pct_of_capex if sizing else 0.0
-    # Fixed O&M per technology + maintenance capex (Gohdes (2026) Table 2: 0.05%
-    # of capex p.a., on top of the named fixed-O&M figure -- see ppa/assumptions.py).
+    # Fixed O&M plus annual maintenance as a share of capex.
     wind_capex_per_mw = s.wind_capex_per_kw * 1_000
     pv_capex_per_mw = s.pv_capex_per_kw * 1_000
     bess_capex_per_mw = s.bess_capex_per_kwh * 1_000 * s.bess_max_hours
@@ -104,11 +87,7 @@ def build_network(
         + A.MAINTENANCE_CAPEX_PCT_OF_CAPEX_PA * bess_capex_per_mw,
         devex_pct,
     ) * horizon_years
-    # Connection capital cost annualised the same way as generation capex
-    # (plan W12a): strictly positive, so each extendable transport link's
-    # p_nom_opt is pinned to its realised peak flow instead of degenerating.
-    # Never devex'd (devex_pct left at its 0.0 default). Fixed O&M is $0 -- see
-    # CONNECTION_FIXED_OM_AUD_MW_YR's docstring in ppa/assumptions.py.
+    # Connection costs use the same annualisation and have no devex uplift.
     link_cc = annualised_cost_per_mw(
         s.connection_cost_aud_mw, crf_rate, s.project_life_yrs, A.CONNECTION_FIXED_OM_AUD_MW_YR
     ) * horizon_years
@@ -179,21 +158,11 @@ def build_network(
         marginal_cost=ts["ts_MktPrice"] + s.market_spread + s.lgc_price_aud_mwh,
     )
 
-    # sign=-1: acts as a sink at Bus_SellToMarket; negative marginal_cost = revenue.
-    # In sizing mode merchant revenue is credited at `sizing_merchant_value_share`
-    # of historic spot (a haircut for capture-price cannibalisation, MLF and
-    # curtailment) — applied to POSITIVE prices only, so negative-price hours
-    # keep their full disincentive and the LP curtails rather than sells into
-    # them (plan W12b). The old code zeroed merchant revenue entirely, which made
-    # the sizing LP optimise a strictly poorer objective than the IRR later
-    # measures and caused systematic under-build.
-    # Surplus energy also carries a green certificate (plan U2). The PPA is
-    # bundled, so certificates on *delivered* MWh transfer to the offtaker
-    # inside ppa_price — only market sales monetise one separately, which is
-    # why the credit sits here and not on the generators. The LGC price is NOT
-    # haircut by sizing_merchant_value_share: the haircut represents capture-
     # price/MLF/curtailment risk in the *energy* market, which does not apply
-    # to the certificate market.
+    # Negative marginal cost represents export revenue. Sizing discounts
+    # positive spot prices by `sizing_merchant_value_share`; negative prices
+    # retain their full disincentive. LGC revenue applies to exports, not PPA
+    # deliveries, whose certificates are bundled into the tariff.
     if sizing:
         merch_price = ts["ts_MktPrice"].where(
             ts["ts_MktPrice"] <= 0, ts["ts_MktPrice"] * s.sizing_merchant_value_share
@@ -248,13 +217,8 @@ def build_network(
     )
 
     # ── Links ─────────────────────────────────────────────────────────────────
-    # Transport links (wind→IPP, PV+BESS→IPP, IPP→market): in sizing mode these
-    # are extendable investment variables bounded by `grid_connection_max_mw`
-    # and priced at the connection cost, so the LP can size connection capacity
-    # freely (the W12a bug pinned them to the disabled slider MW, capping how
-    # much built generation could ever be delivered). In dispatch mode they use
-    # the sized connection MW carried on the scenario by `apply_sizing`, falling
-    # back to the nameplate-derived caps when not set.
+    # Sizing co-optimises connection links within the grid cap. Dispatch uses
+    # capacities carried by `apply_sizing`, or nameplate-derived caps.
     if sizing:
         wind_pnom, wind_ext, wind_cap_max, wind_link_cc = 0.0, True, grid_connection_cap, link_cc
         pvbess_pnom, pvbess_ext, pvbess_cap_max, pvbess_link_cc = 0.0, True, grid_connection_cap, link_cc

@@ -1,12 +1,6 @@
-"""Cache-only reader/adapter for Australian NEM plant registry, SCADA and price data.
+"""Cache-only readers and adapters for NEM registry, generation, and price data.
 
-This module NEVER makes a network call. It only reads parquet files that were
-produced offline by the acquisition scripts in `scripts/` (run in a separate,
-non-sandboxed environment with real access to AEMO/NEMWEB/OpenNEM) and copied
-into `data/cache/nem/`. Import surface is intentionally restricted to
-`pathlib`/`dataclasses`/`functools`/`calendar`/`pandas`/`numpy` so this module
-stays importable in a bare pytest process with no `streamlit` installed and is
-trivially auditable (no `requests`/`urllib`/`httpx`/`nemosis`/`socket`).
+All acquisition runs offline in `scripts/`; this module does not make network calls.
 """
 from __future__ import annotations
 
@@ -22,10 +16,8 @@ import pandas as pd
 
 NEM_CACHE_DIR = Path(__file__).parent.parent.parent / "data" / "cache" / "nem"
 
-# Runtime cache: where the network-enabled fetch module materialises files
-# downloaded from Zenodo. Separate because the packaged cache may be read-only
-# and is version controlled; we never want downloads landing in a git working
-# tree.
+# Optional runtime cache for local installations where the packaged cache is
+# read-only. Packaged data remains the source of truth and is checked first.
 RUNTIME_CACHE_DIR = Path(
     os.environ.get(
         "PPA_RUNTIME_CACHE_DIR",
@@ -49,17 +41,8 @@ WHOLE_YEAR_MIN_COVERAGE = 0.95
 WHOLE_YEAR_FIRST_TS_LATEST = (1, 15)
 WHOLE_YEAR_LAST_TS_EARLIEST = (12, 15)
 WHOLE_YEAR_MONTHLY_MAX_FRACTION = 0.05
-# Commissioning-ramp detection. A plant still being built out produces all year
-# and passes every coverage/span check, but its capacity factor understates the
-# finished asset -- MacIntyre (923 MW) ran at a 9.8% CF through 2025 while its
-# monthly peak climbed 0.09 -> 0.53 of nameplate.
-#
-# The discriminator is the RAMP, not the level: compare the plant's early-year
-# peak against its own annual peak. An operational plant reaches roughly its
-# annual peak in the first months (measured: >=0.90); a commissioning one does
-# not (measured: <=0.33). Using the best of the first two months tolerates a
-# single-month outage, and normalising by the plant's own peak keeps it robust
-# to AC clipping and to heavy curtailment later in the year.
+# Compare early-year peak to the plant's own annual peak, tolerating AC clipping
+# and later curtailment while catching assets still commissioning.
 COMMISSIONING_EARLY_MONTHS = (1, 2)
 COMMISSIONING_MIN_PEAK_FRACTION = 0.60
 
@@ -67,13 +50,7 @@ COMMISSIONING_MIN_PEAK_FRACTION = 0.60
 # ── Path helpers ─────────────────────────────────────────────────────────────
 
 def _resolve(relative: Path, cache_dir: Path = NEM_CACHE_DIR) -> Path:
-    """Packaged cache first, then the runtime cache.
-
-    Returns the packaged path when the file exists there, the runtime path when
-    it exists there, and otherwise the packaged path (so error messages keep
-    naming the canonical location). `cache_dir` is still honoured explicitly so
-    every existing test that passes a temp dir keeps working unchanged.
-    """
+    """Resolve from the requested cache, then the optional runtime cache."""
     packaged = Path(cache_dir) / relative
     if packaged.exists():
         return packaged
@@ -88,13 +65,7 @@ def registry_path(cache_dir: Path = NEM_CACHE_DIR) -> Path:
 
 
 def eligibility_cache_path(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> Path:
-    """Precomputed per-DUID eligibility/CUF summary for `list_eligible_plants`.
-
-    Built offline by `scripts/build_nem_eligibility_cache.py` and committed
-    alongside the other `data/cache/nem/` caches, so the Get Data / Pick
-    Plants map+list renders from a single parquet read instead of running
-    `scada_summary` (a full-year scan) over every plant on every cold start.
-    """
+    """Path to the optional precomputed per-DUID eligibility summary."""
     return _resolve(Path("registry") / f"eligibility_{year}.parquet", cache_dir)
 
 
@@ -109,11 +80,11 @@ def price_path(region: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACH
 
 
 def expected_intervals(year: int) -> int:
-    return (366 if calendar.isleap(year) else 365) * 288
+    return expected_hours(year) * 12
 
 
 def expected_hours(year: int) -> int:
-    return 8784 if calendar.isleap(year) else 8760
+    return (366 if calendar.isleap(year) else 365) * 24
 
 
 # ── Readers ──────────────────────────────────────────────────────────────────
@@ -144,9 +115,7 @@ def load_plant_registry(cache_dir: Path = NEM_CACHE_DIR) -> pd.DataFrame:
     for col in ("capacity_registered_mw", "lat", "lon"):
         df[col] = df[col].astype(float)
 
-    # first_power_date is optional (older caches don't have it). Normalise to a
-    # YYYY-MM-DD string or None when present so downstream tooltips can rely on
-    # a single format. It is deliberately NOT in REGISTRY_COLUMNS.
+    # Older registry caches may omit this optional field.
     if "first_power_date" in df.columns:
         df["first_power_date"] = pd.to_datetime(
             df["first_power_date"], errors="coerce", format="mixed"
@@ -179,11 +148,7 @@ def plant_years_path(cache_dir: Path = NEM_CACHE_DIR) -> Path:
 
 
 def load_plant_years(cache_dir: Path = NEM_CACHE_DIR) -> pd.DataFrame:
-    """The per-(duid, year) operational manifest built by
-    scripts/build_plant_year_manifest.py. Returns an EMPTY DataFrame with the
-    right columns when absent, so installs without it degrade to the legacy
-    single-year eligibility cache rather than raising (optional caches must
-    degrade, not fail)."""
+    """Load the optional per-plant/year manifest, or an empty schema if absent."""
     path = plant_years_path(cache_dir)
     if not path.exists():
         return pd.DataFrame(columns=PLANT_YEARS_COLUMNS)
@@ -244,11 +209,7 @@ def plants_operational_for_years(
 
 
 def _to_interval_beginning(index: pd.DatetimeIndex, year: int) -> pd.DatetimeIndex:
-    """AEMO SETTLEMENTDATE is interval-ENDING. If the index's max falls in year+1
-    (i.e. the series still has its trailing interval-ending timestamp), shift the
-    whole index back by one 5-min interval so hourly resampling yields exactly
-    8760/8784 clean bins instead of 8761/8785.
-    """
+    """Shift interval-ending timestamps back when the series includes year-end."""
     if len(index) and index.max() >= pd.Timestamp(f"{year + 1}-01-01"):
         return index - pd.Timedelta(minutes=INTERVAL_MINUTES)
     return index
@@ -259,14 +220,8 @@ def _load_5min_series(path: Path, value_col_candidates: list[str], series_name: 
     if not path.exists():
         raise FileNotFoundError(missing_msg)
     df = pd.read_parquet(path)
-
-    # Locate the value column, tolerating case variants.
-    lower_map = {c.lower(): c for c in df.columns}
-    value_col = None
-    for cand in value_col_candidates:
-        if cand.lower() in lower_map:
-            value_col = lower_map[cand.lower()]
-            break
+    lower_map = {str(c).lower(): c for c in df.columns}
+    value_col = next((lower_map[c.lower()] for c in value_col_candidates if c.lower() in lower_map), None)
     if value_col is None:
         raise ValueError(
             f"Could not find a value column {value_col_candidates} in {path}. "
@@ -316,27 +271,14 @@ def has_availability(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_
 
 
 def canonical_5min_index(year: int) -> pd.DatetimeIndex:
-    """AEMO's 5-minute dispatch intervals for `year`, interval-ENDING.
-
-    AEMO stamps an interval by its end, so a year runs 00:05 on 1 Jan through
-    00:00 on 1 Jan of the following year. `_to_interval_beginning` shifts this
-    to interval-beginning for modelling; this helper describes the raw
-    convention, which is what the compact cache format relies on.
-    """
+    """Canonical AEMO interval-ending timestamps for `year`."""
     return pd.date_range(
         f"{year}-01-01 00:05", periods=expected_intervals(year), freq="5min"
     )
 
 
 def _read_5min_values(path: Path, column: str, year: int) -> "pd.Series | None":
-    """Read the compact values-only cache format, or None if not that format.
-
-    The timestamp index is ~64% of a naive per-interval parquet and is entirely
-    redundant: the intervals are a fixed 5-minute grid. Storing values alone
-    against `canonical_5min_index(year)` cut the shipped availability cache
-    from 197 MB to ~71 MB with an exact round-trip. Gaps are stored as NaN
-    rather than filled, so `whole_year_check`'s coverage test still sees them.
-    """
+    """Read a values-only parquet on the canonical grid, or return None."""
     df = pd.read_parquet(path)
     if column not in df.columns or not isinstance(df.index, pd.RangeIndex):
         return None
@@ -347,23 +289,10 @@ def _read_5min_values(path: Path, column: str, year: int) -> "pd.Series | None":
 
 
 def load_availability(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> pd.Series:
-    """5-min UNCONSTRAINED availability (MW) from AEMO DISPATCHLOAD.
+    """Read 5-minute unconstrained availability (MW) from DISPATCHLOAD.
 
-    For semi-scheduled units this is AEMO's Unconstrained Intermittent
-    Generation Forecast: the plant's physically available output, before
-    network constraints and before any economic curtailment its own offtake
-    contract incentivised. `load_scada` returns what was actually sent out,
-    i.e. *after* both.
-
-    Which one to model with matters. Measured over the 2025 cache
-    (docs/sizing_experiments.md E8) the fleet gap is wind 27.7% -> 30.7% and
-    solar 16.9% -> 20.4%, but it is very unevenly distributed: solar
-    curtailment has a median of 21.6% and a maximum of 71.3%, because it
-    depends on each plant's own contract and network position. That is exactly
-    why a flat uplift factor would be wrong and this series is needed.
-
-    Optional cache: raises FileNotFoundError with acquisition instructions when
-    absent, so existing installs without it keep working.
+    Unlike SCADA, UIGF is before network and economic curtailment. It is an
+    optional cache; callers can fall back to SCADA when absent.
     """
     duid = duid.strip().upper()
     path = availability_path(duid, year, cache_dir)
@@ -453,18 +382,8 @@ def capacity_factor_for_duid(
 
 
 def to_hourly(series: pd.Series, year: int) -> pd.Series:
-    """5-min series -> hourly mean, reindexed onto a canonical hour-beginning
-    DatetimeIndex spanning exactly expected_hours(year) rows, ffill/bfill so no
-    NaN reaches downstream code.
-    """
-    hourly = series.resample("h").mean()
-    canonical_index = pd.date_range(
-        start=f"{year}-01-01", periods=expected_hours(year), freq="h"
-    )
-    hourly = hourly.reindex(canonical_index)
-    hourly = hourly.ffill().bfill()
-    hourly.name = series.name
-    return hourly
+    """Return hourly means on the canonical year grid, filling edge gaps."""
+    return to_resolution(series, year, 60)
 
 
 def _validate_resolution(resolution_minutes: int) -> None:
@@ -484,10 +403,7 @@ def _resolution_periods(year: int, resolution_minutes: int) -> int:
 
 
 def to_resolution(series: pd.Series, year: int, resolution_minutes: int) -> pd.Series:
-    """5-min series -> block mean at `resolution_minutes`, reindexed onto a
-    canonical index spanning exactly the year, ffill/bfill so no NaN escapes.
-    `resolution_minutes` must divide into 1440 and be a multiple of 5.
-    resolution_minutes == 60 must return EXACTLY what to_hourly() returns."""
+    """Return block means on the canonical yearly grid, filling edge gaps."""
     _validate_resolution(resolution_minutes)
     freq = f"{resolution_minutes}min"
     resampled = series.resample(freq).mean()
@@ -555,11 +471,11 @@ def whole_year_check(
     else:
         monthly_max = pd.Series(dtype=float)
 
-    weak_months: list[int] = []
-    for m in range(1, 13):
-        if m not in monthly_max.index or monthly_max.loc[m] < WHOLE_YEAR_MONTHLY_MAX_FRACTION * capacity_mw:
-            weak_months.append(m)
-    weak_months_t = tuple(weak_months)
+    cutoff = WHOLE_YEAR_MONTHLY_MAX_FRACTION * capacity_mw
+    weak_months_t = tuple(
+        month for month in range(1, 13)
+        if month not in monthly_max.index or monthly_max.loc[month] < cutoff
+    )
     monthly_output_ok = len(weak_months_t) == 0
 
     reasons: list[str] = []
@@ -599,16 +515,7 @@ def whole_year_check(
 def commissioning_ramp_check(
     series: pd.Series, year: int
 ) -> "tuple[bool, float | None]":
-    """Detect a plant that was still ramping into service during `year`.
-
-    Returns ``(is_fully_operational, early_peak_ratio)`` where the ratio is the
-    best of the first `COMMISSIONING_EARLY_MONTHS` monthly peaks divided by the
-    annual peak. ``None`` when there is no usable data.
-
-    Pass `availability` (UIGF) in preference to SCADA: availability reflects
-    what the plant *could* have produced, so a plant heavily curtailed early in
-    the year is not mistaken for one that was still being commissioned.
-    """
+    """Compare the best early-month peak with the annual peak; return status and ratio."""
     s = series[series.index.year == year].dropna()
     if s.empty:
         return False, None
@@ -616,10 +523,10 @@ def commissioning_ramp_check(
     if annual_peak <= 0:
         return False, None
     monthly_max = s.groupby(s.index.month).max()
-    early = [float(monthly_max[m]) for m in COMMISSIONING_EARLY_MONTHS if m in monthly_max.index]
-    if not early:
+    early = monthly_max.reindex(COMMISSIONING_EARLY_MONTHS).dropna()
+    if early.empty:
         return False, 0.0
-    ratio = max(early) / annual_peak
+    ratio = float(early.max()) / annual_peak
     return ratio >= COMMISSIONING_MIN_PEAK_FRACTION, ratio
 
 
@@ -834,32 +741,23 @@ def list_eligible_plants(
         # slower for those rows only, correct either way.
         to_compute = df[~df["duid"].isin(cached_duids)] if cached is not None else df
 
-        has_scada_list, sim_ready_list, data_status_list = [], [], []
-        reject_reasons_list, coverage_list = [], []
-        mean_cf_list, cuf_list, first_output_date_list = [], [], []
+        computed_rows = []
         for _, row in to_compute.iterrows():
             duid = row["duid"]
-            capacity_mw = float(row["capacity_registered_mw"])
-            has_scada = (
-                availability_path(duid, year, cache_dir).exists()
-                or scada_path(duid, year, cache_dir).exists()
-            )
-            summary = scada_summary(duid, capacity_mw, year, cache_dir)
-            has_scada_list.append(has_scada)
-            sim_ready_list.append(summary.status == "ready")
-            data_status_list.append(summary.status)
-            reject_reasons_list.append(summary.reject_reasons)
-            coverage_list.append(summary.check.coverage if summary.check is not None else np.nan)
-            mean_cf_list.append(summary.mean_cf if summary.mean_cf is not None else np.nan)
-            cuf_list.append(summary.cuf if summary.cuf is not None else np.nan)
-            first_output_date_list.append(summary.first_output_date)
-        computed = pd.DataFrame({
-            "duid": to_compute["duid"].values,
-            "has_scada": has_scada_list, "simulation_ready": sim_ready_list,
-            "data_status": data_status_list, "reject_reasons": reject_reasons_list,
-            "coverage": coverage_list, "mean_cf": mean_cf_list, "cuf": cuf_list,
-            "first_output_date": first_output_date_list,
-        })
+            summary = scada_summary(duid, float(row["capacity_registered_mw"]), year, cache_dir)
+            computed_rows.append({
+                "duid": duid,
+                "has_scada": availability_path(duid, year, cache_dir).exists()
+                or scada_path(duid, year, cache_dir).exists(),
+                "simulation_ready": summary.status == "ready",
+                "data_status": summary.status,
+                "reject_reasons": summary.reject_reasons,
+                "coverage": summary.check.coverage if summary.check is not None else np.nan,
+                "mean_cf": summary.mean_cf,
+                "cuf": summary.cuf,
+                "first_output_date": summary.first_output_date,
+            })
+        computed = pd.DataFrame(computed_rows, columns=["duid", *eligibility_cols])
         combined = (
             pd.concat([cached[["duid"] + eligibility_cols], computed], ignore_index=True)
             if cached is not None else computed
@@ -918,12 +816,10 @@ def list_cached_price_years(cache_dir: Path = NEM_CACHE_DIR) -> list:
     price_dir = Path(cache_dir) / "price"
     if not price_dir.exists():
         return []
-    years = set()
-    for p in price_dir.glob("rrp_*.parquet"):
-        parts = p.stem.split("_")
-        if len(parts) >= 3 and parts[-1].isdigit():
-            years.add(int(parts[-1]))
-    return sorted(years)
+    return sorted({
+        int(year) for path in price_dir.glob("rrp_*.parquet")
+        if (year := path.stem.split("_")[-1]).isdigit()
+    })
 
 
 def cache_fingerprint(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> tuple:
@@ -933,18 +829,14 @@ def cache_fingerprint(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR)
     price_dir = cache_dir / "price"
     registry_file = registry_path(cache_dir)
 
-    files: list[Path] = []
-    if scada_dir.exists():
-        files.extend(scada_dir.glob(f"*_{year}.parquet"))
-    if price_dir.exists():
-        files.extend(price_dir.glob(f"*_{year}.parquet"))
+    scada_files = list(scada_dir.glob(f"*_{year}.parquet")) if scada_dir.exists() else []
+    price_files = list(price_dir.glob(f"*_{year}.parquet")) if price_dir.exists() else []
+    files = scada_files + price_files
     if registry_file.exists():
         files.append(registry_file)
 
-    n_scada = len(list(scada_dir.glob(f"*_{year}.parquet"))) if scada_dir.exists() else 0
-    n_price = len(list(price_dir.glob(f"*_{year}.parquet"))) if price_dir.exists() else 0
     max_mtime_ns = max((f.stat().st_mtime_ns for f in files), default=0)
-    return (n_scada, n_price, max_mtime_ns)
+    return (len(scada_files), len(price_files), max_mtime_ns)
 
 
 def cache_status(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> dict:

@@ -1,19 +1,4 @@
-"""Cache-only reader for AER quarterly "indicative base futures price" data.
-
-Mirrors `ppa.data.nem_data`'s no-network-import discipline exactly: this
-module NEVER makes a network call and NEVER imports `requests`/`urllib`/
-`httpx`/`nemosis`/`socket`/`streamlit`. It only reads a parquet file that was
-produced offline by `scripts/fetch_aer_futures.py` (run in a separate,
-non-sandboxed environment with real access to aer.gov.au) and copied into
-`data/cache/nem/hedge/`.
-
-Scope note (important, read before "completing" anything here): AER publishes
-a *price* series (this module). `cal_hedge_fraction` on `ppa.scenario.Scenario`
-is a completely separate, pure user input describing what share of the
-offtaker's own load is hedged at the forward price -- it has no AER analogue
-and this module must never compute or default it. Only `cal_forward_price`
-(via `forward_price_for_scenario`) is in scope here.
-"""
+"""Cache-only reader for AER quarterly base-futures prices."""
 from __future__ import annotations
 
 import re
@@ -22,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ppa.data.nem_data import DEFAULT_REGION, DEFAULT_YEAR, NEM_CACHE_DIR, NEM_REGIONS
+from ppa.data.nem_data import DEFAULT_REGION, DEFAULT_YEAR, NEM_CACHE_DIR
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -72,18 +57,7 @@ def list_cached_futures_years(cache_dir: Path = NEM_CACHE_DIR) -> list:
 # ── Loader ───────────────────────────────────────────────────────────────────
 
 def load_aer_base_futures(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> pd.DataFrame:
-    """Read + normalise the AER hedge cache parquet for `year`.
-
-    Normalises region (strip/upper + alias map), quarter_label (strip),
-    product (strip/title), price_aud_mwh (numeric, NaN rows dropped),
-    as_at_date (datetime, coerced). Dedupes on (region, parsed quarter,
-    product) -- using `parse_quarter_label`'s (year, quarter) tuple rather
-    than the raw label string, so two different spellings of the same
-    quarter (e.g. "Q2-2025" and "2025 Q2") are recognized as the SAME period
-    and don't both survive to double-count that period in `quarterly_average`
-    -- keeping the row with the latest as_at_date. Genuinely unparseable
-    labels fall back to deduping by exact raw string among themselves.
-    """
+    """Load, normalize, and deduplicate the cached futures rows for `year`."""
     path = futures_path(year, cache_dir)
     if not path.exists():
         raise FileNotFoundError(
@@ -111,19 +85,11 @@ def load_aer_base_futures(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_
 
     df = df[df["price_aud_mwh"].notna()].copy()
 
-    # Dedupe on (region, PARSED quarter, product), keeping the latest
-    # as_at_date. Rows with NaT as_at_date sort first (nan is "oldest"/least
-    # preferred) so a comparable real date always wins over an unknown one.
-    # The parsed-quarter key (falling back to the raw label only when
-    # unparseable) is what makes "Q2-2025" and "2025 Q2" collide as the same
-    # dedup group instead of surviving as two separate rows.
     df["_orig_order"] = range(len(df))
     df["_quarter_key"] = df["quarter_label"].map(
         lambda lbl: parse_quarter_label(lbl) or ("unparsed", lbl)
     )
-    # Ties in as_at_date (including two genuinely-simultaneous NaT rows) break
-    # by original row order, keeping the EARLIER-appearing row -- i.e. sort so
-    # the earlier row ends up last (`keep="last"`) within a tied group.
+    # Keep the latest date, breaking ties in favor of the first source row.
     df = df.sort_values(["as_at_date", "_orig_order"], ascending=[True, False], na_position="first")
     df = df.drop_duplicates(subset=["region", "_quarter_key", "product"], keep="last")
     df = df.drop(columns=["_quarter_key", "_orig_order"])
@@ -134,10 +100,7 @@ def load_aer_base_futures(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_
 # ── Quarter-label parsing ────────────────────────────────────────────────────
 
 def parse_quarter_label(label: str) -> "tuple[int, int] | None":
-    """Tolerant parse of Q1-2025 / Q1 2025 / 2025 Q1 / 2025-Q1 / 2025Q1 formats.
-
-    Returns (year, quarter) or None if unparseable (never raises).
-    """
+    """Parse common quarter/year label orders; return `(year, quarter)` or None."""
     if label is None:
         return None
     m = _QUARTER_RE.search(str(label))
@@ -155,9 +118,7 @@ def available_regions(df: pd.DataFrame) -> list:
 
 
 def available_quarters(df: pd.DataFrame, region: "str | None" = None, product: str = DEFAULT_PRODUCT) -> list:
-    """Raw quarter_label strings for `region`+`product`, chronologically sorted
-    via `parse_quarter_label` (unparseable labels sorted last, stable order).
-    """
+    """Return matching labels in chronological order; unparsed labels sort last."""
     subset = df[df["product"].str.casefold() == product.casefold()]
     if region is not None:
         subset = subset[subset["region"] == region.strip().upper()]
@@ -174,13 +135,7 @@ def available_quarters(df: pd.DataFrame, region: "str | None" = None, product: s
 
 
 def first_full_calendar_year(quarters) -> list:
-    """The earliest calendar year in `quarters` that has all four of them.
-
-    AER publishes roughly four years of forward quarters, so averaging every
-    label gives a multi-year strip price. The app's field is a *calendar-year*
-    base-futures price, so this picks the nearest complete year. Falls back to
-    the full list when no year is complete (nothing better to offer).
-    """
+    """Return the earliest complete calendar year, or all labels if none is complete."""
     by_year: dict = {}
     for label in quarters:
         parsed = parse_quarter_label(label)
@@ -196,10 +151,7 @@ def first_full_calendar_year(quarters) -> list:
 def quarterly_average(
     df: pd.DataFrame, region: str = DEFAULT_REGION, quarters=None, product: str = DEFAULT_PRODUCT,
 ) -> float:
-    """Unweighted arithmetic mean of price_aud_mwh over `quarters` (default: ALL
-    available quarters for `region`+`product`) -- represents a full-year CAL
-    hedge strip.
-    """
+    """Return the unweighted mean price over the selected quarters."""
     region_norm = region.strip().upper()
     all_regions = available_regions(df)
     if region_norm not in all_regions:

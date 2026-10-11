@@ -1,8 +1,0 @@
-# Legacy. tsam now ships in requirements.txt (highspy is pinned to 1.15.0
-# there precisely so the two resolve together), and it is the app's DEFAULT
-# sizing representation ("Typical weeks (tsam)", Scenario.sizing_method).
-#
-# This file is kept only for older environments that installed the stack
-# before tsam moved into requirements.txt. If you are on such an environment:
-#     pip install tsam==3.4.2 "highspy<=1.15.0"
-tsam==3.4.2

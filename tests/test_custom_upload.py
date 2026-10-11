@@ -246,14 +246,19 @@ def test_prepare_timeseries_dispatches_to_custom_for_custom_csv_source():
     )
 
 
-def test_prepare_timeseries_default_csv_path_unchanged():
-    """The non-custom path (default/NEM CSV) keeps the flat load synthesis."""
-    default_csv = data_loader.find_default_csv()
-    assert default_csv is not None, "march_2025_pypsa_timeseries.csv fixture must exist"
-    ts = data_loader.load_timeseries(default_csv)
+def test_prepare_timeseries_nem_source_synthesizes_selected_load_profile():
+    """NEM data with ts_MktPrice gets the selected load profile without legacy aliases."""
+    idx = pd.date_range("2025-01-01", periods=3, freq="h")
+    ts = pd.DataFrame({
+        "ts_PVGen": [0.0, 0.5, 0.0],
+        "ts_WindGen": [0.3, 0.4, 0.2],
+        "ts_MktPrice": [41.0, 52.0, 37.0],
+    }, index=idx)
     scenario = Scenario(data_source="nem_default", load_profile="flat", ppaload_mw=123.0)
     prepared = data_loader.prepare_timeseries(ts, scenario)
     assert (prepared["ppaload_mw"] == 123.0).all()
+    pd.testing.assert_series_equal(prepared["ts_MktPrice"], ts["ts_MktPrice"])
+    assert "ts_NSWPrice" not in prepared.columns
 
 
 # ── Round-trip ────────────────────────────────────────────────────────────────
@@ -275,8 +280,8 @@ def test_round_trip_template_download_fill_reupload():
     expected.index.name = "snapshot"
 
     pd.testing.assert_frame_equal(
-        ts[data_loader.CUSTOM_DATA_COLUMNS],
-        expected[data_loader.CUSTOM_DATA_COLUMNS],
+        ts[list(data_loader.CUSTOM_DATA_COLUMNS)],
+        expected[list(data_loader.CUSTOM_DATA_COLUMNS)],
         check_dtype=False,
     )
 

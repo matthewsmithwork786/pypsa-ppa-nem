@@ -1,49 +1,10 @@
 #!/usr/bin/env python3
-"""U4 acquisition: pull AEMO 5-minute *unconstrained availability* via `nemosis`.
+"""Fetch 5-minute AEMO UIGF availability from `DISPATCHLOAD` using `nemosis`.
 
-Why this exists
----------------
-The SCADA traces in `data/cache/nem/scada/` are **constrained** output: what a
-plant actually sent out, after network constraints and after any economic
-curtailment its own offtake contract incentivised. Using that as the capacity
-factor for a *new* build charges curtailment twice -- once baked into the
-trace, and again when the sizing LP curtails against prices and limits.
-
-It also cannot be corrected with a uniform uplift, because whether a plant
-curtails into negative prices depends on its individual PPA. Some are
-incentivised to, some are not.
-
-`DISPATCHLOAD.AVAILABILITY` avoids both problems. For semi-scheduled units it
-is AEMO's Unconstrained Intermittent Generation Forecast (UIGF): the plant's
-*physically available* output for that interval, independent of network
-constraints and of any contractual curtailment incentive.
-
-`SEMIDISPATCHCAP` is carried alongside as the constraint flag (1 = a dispatch
-cap was binding in that interval), so downstream code can measure how much
-curtailment a trace embeds rather than inferring it.
-
-Output
-------
-`data/cache/nem/availability/<DUID>_<year>.parquet` with columns
-`availability` (MW) and `semidispatchcap` (0/1), on a 5-minute
-`SETTLEMENTDATE` index -- deliberately the same shape and cadence as the SCADA
-cache so `ppa/data/nem_data.py` can read it with the existing loader.
-
-INTERVENTION filtering
-----------------------
-DISPATCHLOAD carries both normal (`INTERVENTION=0`) and intervention
-(`INTERVENTION=1`) runs for intervened intervals. We keep `INTERVENTION=0`,
-the standard non-intervention dispatch, matching how DISPATCH_UNIT_SCADA is
-already treated.
-
-Usage
------
-    pip install -r scripts/requirements-acquisition.txt
-    python3 scripts/fetch_nem_availability.py --year 2025 \
-        --duid-list data/cache/nem/registry/nem_plant_registry.parquet
-
-Network: reaches nemweb.com.au (AEMO's public MMS archive) via nemosis.
-"""
+Writes one Parquet file per DUID and year under `data/cache/nem/availability/`.
+This is an acquisition tool; the application reads local cache files only. Install
+`scripts/requirements-acquisition.txt` in a network-enabled environment and run
+`python3 scripts/fetch_nem_availability.py --help` for options."""
 from __future__ import annotations
 
 import argparse

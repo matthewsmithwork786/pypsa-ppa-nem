@@ -21,28 +21,18 @@ from ppa.solver import solve
 import streamlit as st
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 
-# Peak RSS of a single full-year EU solve, measured at ~735 MB with io_api="direct".
-# Each parallel worker is its own process and pays this in full, so we budget one
-# worker per this much *available* RAM. Override via PPA_WORKER_MEM_MB for other
-# model sizes.
+# Per-worker memory budget; override for larger or smaller model sizes.
 _PER_WORKER_MEM_MB = int(os.environ.get("PPA_WORKER_MEM_MB", "1200"))
 
-# Headroom left for the OS, the Streamlit process and allocator slack. Without a
-# reserve the pool sizes right up to MemAvailable and the OOM killer arrives.
+# Reserve memory for the OS, Streamlit and allocator overhead.
 _RESERVE_MEM_MB = int(os.environ.get("PPA_RESERVE_MEM_MB", "800"))
 
 
 def _available_memory_mb() -> float | None:
-    """Best-effort RAM headroom in MB, honouring cgroup limits (containers).
-
-    Returns the min of the cgroup memory headroom and host MemAvailable, or None
-    if nothing could be read. Streamlit Community Cloud caps memory via cgroups at
-    ~1 GB, well below the host's reported free memory, so cgroup awareness is what
-    makes the cloud fall back to serial.
-    """
+    """Best-effort available RAM in MB, respecting container limits."""
     candidates: list[float] = []
 
-    # cgroup v2 (Streamlit Cloud, most modern containers)
+    # cgroup v2
     try:
         with open("/sys/fs/cgroup/memory.max") as fh:
             raw = fh.read().strip()
@@ -54,7 +44,7 @@ def _available_memory_mb() -> float | None:
     except (OSError, ValueError):
         pass
 
-    # cgroup v1 fallback
+    # cgroup v1
     try:
         with open("/sys/fs/cgroup/memory/memory.limit_in_bytes") as fh:
             limit = int(fh.read().strip())
@@ -65,7 +55,7 @@ def _available_memory_mb() -> float | None:
     except (OSError, ValueError):
         pass
 
-    # Host-level available memory
+    # Host memory
     try:
         with open("/proc/meminfo") as fh:
             for line in fh:
@@ -97,33 +87,13 @@ def _usable_cpu_count() -> int:
 
 
 def _safe_worker_count(requested: int, n_years: int) -> int:
-    """Clamp the requested worker count to what this machine can actually run.
-
-    Bounded by: years to solve, usable CPUs, and (crucially) available RAM. On a
-    memory-constrained host (e.g. Streamlit Community Cloud) this collapses to 1,
-    forcing the memory-safe serial path.
-
-    The per-worker budget is the larger of `_PER_WORKER_MEM_MB` (a solve's own
-    peak) and **the parent's current RSS**. The parent term matters because the
-    pool forks: fork is copy-on-write, but CPython's reference counting writes to
-    the header of nearly every object a child touches, so each worker ends up
-    paying roughly the parent's whole footprint. A parent still holding something
-    large — most importantly the capacity-sizing LP, which is hundreds of
-    thousands of rows — therefore multiplies that cost by the worker count. A
-    flat per-worker constant misses this entirely and oversubscribes into the
-    OOM killer.
-    """
+    """Clamp workers by years, usable CPUs and available memory."""
     workers, _ = _worker_count_with_reason(requested, n_years)
     return workers
 
 
 def _worker_count_with_reason(requested: int, n_years: int) -> tuple[int, str]:
-    """`_safe_worker_count` plus a plain-English reason for any reduction.
-
-    Selecting 4 workers and silently getting 1 reads as the control being
-    ignored, so the caller can say which limit actually bound and with what
-    numbers.
-    """
+    """Return the safe worker count and a reason if it is reduced."""
     workers = max(1, min(requested, n_years, _usable_cpu_count()))
     reason = ""
     if requested > n_years and n_years < _usable_cpu_count():
@@ -167,16 +137,7 @@ def _degraded_scenario(scenario: Scenario, year_idx: int) -> Scenario:
 
 
 def _release_free_memory() -> None:
-    """Ask glibc to return free heap arenas to the OS.
-
-    gc.collect() frees the Python objects, but glibc's allocator keeps the
-    arenas for reuse, so RSS stays high and a container's memory limit still
-    sees it. Measured on the serial path: clearing the networks alone took
-    year-8 RSS from 2,162 MB to 1,305 MB, but the remainder was held arenas --
-    the accumulated results are only ~3.4 MB each.
-
-    No-op on platforms without glibc; never raises.
-    """
+    """Return free glibc heap arenas to the OS when supported."""
     try:
         import ctypes
 
@@ -192,39 +153,21 @@ def _solve_one_year(
     scenario_fields: dict,
     resolution_h: float = 1.0,
 ) -> tuple[int, OptimisationResult]:
-    """Solve a single year's LP. Returns (sim_year_idx, result).
+    """Solve one year and return its index and result.
 
-    Takes the scenario as a plain dict, not a Scenario instance, and rebuilds it
-    here. Sending a Scenario across the process boundary pickles the class *by
-    reference*; if Streamlit's file watcher has reloaded ppa.scenario, the stale
-    class held by a session_state Scenario no longer matches sys.modules and
-    pickling dies with "it is not the same object as ppa.scenario.Scenario". A
-    dict is a builtin type with no such identity check; rebuilding from the
-    module-level Scenario class sidesteps the whole problem.
-
-    `resolution_h` (hours per snapshot, e.g. 0.5 at 30 min) is passed as an
-    explicit argument, not smuggled through the scenario dict, so it stays
-    honest across the process boundary and both build_network and extract_results
-    integrate energy over real hours.
+    Pass scenario fields as a dict so Streamlit hot reloads cannot leave workers
+    holding a stale pickled `Scenario` class. `resolution_h` is explicit so
+    network construction and result aggregation use the actual snapshot hours.
     """
     scenario = Scenario(**scenario_fields)
     n = build_network(ts, scenario, resolution_h=resolution_h)
     status, condition = solve(n, scenario, ts)
     result = extract_results(n, scenario, ts, status, condition, resolution_h=resolution_h)
 
-    # Release the network and its linopy model before returning.
-    #
-    # A forked worker exits after one year and the OS reclaims everything for
-    # free, so this only matters on the SERIAL in-process path -- which is
-    # exactly the path a memory-constrained container takes. Measured there,
-    # RSS climbed ~300 MB per year and reached 2,162 MB by year 8, killing the
-    # deployed app partway through a 15-year run (the "Oh no. Error running
-    # app." crash). The extracted result holds its own pandas objects and does
-    # not reference the network.
-    #
-    # `Network.model` is a read-only property, so the private backing attribute
-    # is cleared directly; guarded with getattr/try so a pypsa release that
-    # renames it degrades to the plain del rather than raising.
+    # Release the network and solver model before the next serial solve. The
+    # extracted result owns its data and does not reference the network.
+    # `Network.model` is read-only, so clear its private backing attribute when
+    # available; cleanup must never fail the solve.
     try:
         if hasattr(n, "_model"):
             n._model = None
@@ -249,7 +192,7 @@ def run_multi_year(
     resolution_h: float = 1.0,
 ) -> list[OptimisationResult]:
     """
-    Run `scenario.simulation_years` independent year-simulations in parallel.
+    Run independent annual simulations, using parallel workers when safe.
 
     Weather years (CF + prices) are cycled from the available historical keys.
     Using the same historical year for both CF and prices preserves correlations
@@ -257,12 +200,8 @@ def run_multi_year(
     historical base year to the simulation year via `scenario.price_escalation_rate`.
     Technology degradation is applied per-year via `scenario.*_degradation_rate`.
 
-    `run_id`, if given, registers this run with `ppa.run_registry` so a browser
-    disconnect (e.g. the caller's Streamlit session going away) starts a grace
-    timer instead of immediately abandoning the forked worker pool -- a page
-    refresh that reconnects with the same run_id within the grace window
-    (`ppa.run_registry.touch`) is spared; only a truly abandoned tab gets its
-    workers cancelled early, to free memory for the next run.
+    `run_id` enables cancellation after the associated browser session is
+    abandoned, while allowing a reconnect during the registry grace period.
     """
     if scenario.optimise_capacity:
         raise ValueError(
@@ -334,21 +273,13 @@ def run_multi_year(
         )
 
     def _run_serial() -> None:
-        # Serial, in-process. Required on memory-constrained hosts (e.g. Streamlit
-        # Community Cloud, ~1 GB): a single solve peaks ~735 MB, so two would not
-        # fit and even one *forked* worker would cost parent + child RAM at once
-        # and OOM (the "Oh no. Error running app." crash). Running in-process
-        # reuses the parent's memory, and single-threaded execution has no
-        # shared-heap corruption. Also the recovery path when forked workers are
-        # killed mid-run (see BrokenProcessPool below).
+        # Serial execution avoids parent-plus-child memory costs on constrained
+        # hosts and recovers years left unfinished after a worker-pool failure.
         for idx in range(n_years):
             if results[idx] is not None:
                 continue  # already solved before the pool died
-            # resolution_h crosses as an explicit positional argument (kept off
-            # the scenario dict). The 4-arg form is the resolution_h == 1.0
-            # default, retained so a caller/test double that predates the
-            # argument keeps working; the sub-hourly 5-arg form is used
-            # whenever resolution actually differs.
+            # Keep the default call shape for hourly solves; pass non-hourly
+            # resolution explicitly.
             args = (
                 idx,
                 first_sim_year + idx,
@@ -364,19 +295,9 @@ def run_multi_year(
         _run_serial()
         return results  # type: ignore[return-value]
 
-    # ProcessPoolExecutor, not threads: PyPSA/linopy/HiGHS run non-thread-safe C
-    # extensions (model build via pandas/xarray, then the HiGHS solver). Running
-    # them concurrently in one process corrupts the shared heap — manifesting as
-    # `free(): invalid next size` core dumps and stray ArrowStringArray errors.
-    # Separate processes = separate heaps = safe true parallelism. The years are
-    # independent; the scenario crosses as a plain dict (see _solve_one_year) and
-    # the DataFrame/OptimisationResult pickle cleanly.
-    #
-    # "fork" specifically: spawn/forkserver re-import the __main__ module, which
-    # blows up under Streamlit (it runs the app script as __main__, so each worker
-    # would re-execute the whole app). fork inherits the interpreter as-is and
-    # still isolates each solve in its own process/heap. Windows has no fork, so
-    # fall back to spawn there (requires a `if __name__ == "__main__"` guard).
+    # Use processes because PyPSA/linopy/HiGHS extensions are not safe to run
+    # concurrently in threads. Fork avoids re-running Streamlit's __main__ app;
+    # platforms without fork use spawn.
     try:
         mp_context = multiprocessing.get_context("fork")
     except ValueError:  # pragma: no cover - Windows only
@@ -404,9 +325,7 @@ def run_multi_year(
                     for idx in range(n_years)
                 }
 
-                # Polled in short slices (rather than as_completed's unbounded
-                # block) so an abandoned browser tab can be detected and its
-                # workers reclaimed instead of running to completion unwatched.
+                # Poll periodically so abandoned browser runs can be cancelled.
                 pending = set(futures)
                 while pending:
                     done, pending = wait(pending, timeout=2.0, return_when=FIRST_COMPLETED)
@@ -420,16 +339,8 @@ def run_multi_year(
                             f"{run_registry.GRACE_SECONDS:.0f}s) — cancelling to free memory."
                         )
         except BrokenProcessPool:
-            # A worker was killed outright — almost always the OOM killer, which
-            # sends SIGKILL with no traceback and no exit code. Forking is what
-            # makes this likely: fork is copy-on-write, but CPython refcounting
-            # dirties nearly every page a child touches, so each worker ends up
-            # costing roughly the parent's own RSS. If a big object (e.g. the
-            # capacity-sizing LP) is still resident in the parent, N workers
-            # multiply it N times.
-            #
-            # Recover rather than die: the serial path reuses the parent's memory
-            # and re-solves only the years that never came back.
+            # A worker may have been killed for memory use. Resume unfinished
+            # years serially to reduce peak memory.
             remaining = sum(1 for r in results if r is None)
             st.warning(
                 f"Parallel workers were killed (most likely out of memory) after "

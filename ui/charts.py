@@ -197,31 +197,7 @@ def make_price_24h_chart(prices_avg: "pd.DataFrame", title: str = "Average spot 
     midpoint."""
     x = prices_avg["slot"]
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=prices_avg["p90"],
-            mode="lines",
-            line=dict(color="rgba(255,111,0,0)", width=0),
-            fill=None,
-            name="P90",
-            showlegend=False,
-            hoverinfo="skip",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=prices_avg["p10"],
-            mode="lines",
-            line=dict(color="rgba(255,111,0,0)", width=0),
-            fill="tonexty",
-            fillcolor="rgba(255,111,0,0.15)",
-            name="P10-P90 band",
-            showlegend=False,
-            hoverinfo="skip",
-        )
-    )
+    _add_percentile_band(fig, x, prices_avg, "255,111,0")
     fig.add_trace(
         go.Scatter(
             x=x,
@@ -244,30 +220,7 @@ def make_soc_24h_chart(soc_avg: "pd.DataFrame", bess_mwh: float) -> go.Figure:
     """Average BESS state of charge by time-of-day with a P10-P90 band."""
     x = soc_avg["slot"]
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=soc_avg["p90"],
-            mode="lines",
-            line=dict(color="rgba(21,101,192,0)", width=0),
-            name="P90",
-            showlegend=False,
-            hoverinfo="skip",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=soc_avg["p10"],
-            mode="lines",
-            line=dict(color="rgba(21,101,192,0)", width=0),
-            fill="tonexty",
-            fillcolor="rgba(21,101,192,0.15)",
-            name="P10-P90 band",
-            showlegend=False,
-            hoverinfo="skip",
-        )
-    )
+    _add_percentile_band(fig, x, soc_avg, "21,101,192")
     fig.add_trace(
         go.Scatter(
             x=x,
@@ -292,6 +245,22 @@ def make_soc_24h_chart(soc_avg: "pd.DataFrame", bess_mwh: float) -> go.Figure:
         height=300,
     )
     return fig
+
+
+def _add_percentile_band(fig: go.Figure, x, values: pd.DataFrame, rgb: str) -> None:
+    invisible_line = dict(color=f"rgba({rgb},0)", width=0)
+    for percentile, fill in (("p90", None), ("p10", "tonexty")):
+        fig.add_trace(go.Scatter(
+            x=x,
+            y=values[percentile],
+            mode="lines",
+            line=invisible_line,
+            fill=fill,
+            fillcolor=f"rgba({rgb},0.15)" if fill else None,
+            name=f"{percentile.upper()} band" if fill else percentile.upper(),
+            showlegend=False,
+            hoverinfo="skip",
+        ))
 
 
 def make_price_vs_ppa_chart(ts: "pd.DataFrame", ppa_price: float = 100.0) -> go.Figure:

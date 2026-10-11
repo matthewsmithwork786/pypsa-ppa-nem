@@ -9,9 +9,6 @@ from ppa.financial_model import _irr, _npv
 from ppa.scenario import Scenario
 from ppa.results import OptimisationResult
 
-HOURS_PER_YEAR = 8_760
-
-
 @dataclass
 class CapexBreakdown:
     capex_wind: float
@@ -31,9 +28,7 @@ def build_capex(scenario: Scenario) -> CapexBreakdown:
     capex_total = capex_wind + capex_pv + capex_bess
     devex_total = capex_total * s.devex_pct_of_capex
     total_investment = capex_total + devex_total
-    # Per-technology fixed O&M (ppa.assumptions), not a %-of-capex rate --
-    # TASK_financial_assumptions_refactor.md Phase 2 -- plus Gohdes (2026)
-    # Table 2's maintenance capex (0.05% of capex p.a., all technologies).
+    # Fixed O&M plus Gohdes (2026) maintenance capex.
     annual_opex = (
         A.WIND_FIXED_OM_AUD_MW_YR * s.onsw_mw
         + A.PV_FIXED_OM_AUD_MW_YR * s.pv_mw
@@ -96,15 +91,7 @@ def run_multi_year_financial_analysis(
     year_results: list[OptimisationResult],
     first_sim_year: int = 2025,
 ) -> MultiYearFinancialResult:
-    """
-    Compute project-level financials from per-year LP results.
-
-    Each year's revenue is computed from the actual optimised dispatch. In
-    representative-year mode a single dispatch is reused as compact annual
-    financial records: quantities stay fixed and spot prices escalate, without
-    allocating duplicate hourly frames or running further LPs.
-    CAPEX is invested at year 0; OPEX is charged each year.
-    """
+    """Compute project-level cash flows from annual dispatch results."""
     s = scenario
 
     # ── CAPEX / OPEX ──────────────────────────────────────────────────────────
@@ -170,13 +157,8 @@ def run_multi_year_financial_analysis(
         # generation and must not increase the lifetime generation/LCOE base.
         total_gen_mwh += summ.wind_generation_mwh + summ.pv_generation_mwh
 
-    # Extend cashflows to project_life_yrs if fewer years were simulated.
-    # The average of the simulated years is used for the remaining periods so that
-    # NPV/IRR always reflect the full project life regardless of simulation_years.
+    # Extend short simulations with average cash flow, up to the financial life.
     n_sim = n_records
-    # Fast mode's requested projection horizon is the financial life, including
-    # a one-year projection. Do not silently extend a short projection to the
-    # separate lifetime assumption used to annualise the sizing objective.
     n_life = (
         s.simulation_years
         if getattr(s, "dispatch_mode", "full_multi_year") == "representative_year"
