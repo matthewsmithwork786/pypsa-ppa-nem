@@ -57,7 +57,7 @@ def list_cached_futures_years(cache_dir: Path = NEM_CACHE_DIR) -> list:
 # ── Loader ───────────────────────────────────────────────────────────────────
 
 def load_aer_base_futures(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> pd.DataFrame:
-    """Load, normalize, and deduplicate the cached futures rows for `year`."""
+    """Load, normalise, and deduplicate the cached futures rows for `year`."""
     path = futures_path(year, cache_dir)
     if not path.exists():
         raise FileNotFoundError(
