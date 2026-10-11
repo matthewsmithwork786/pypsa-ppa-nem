@@ -1,53 +1,10 @@
 #!/usr/bin/env python3
-"""
-One-time acquisition script: build a NEM wind/solar plant registry (DUID, name,
-region, fuel type, capacity, lat/lon, and an optional first-power date) via the
-OpenNEM / Open Electricity API.
+"""Build a wind/solar plant registry from the Open Electricity facilities API.
 
-*** NOT PART OF THE STREAMLIT APP. NEVER IMPORTED BY `ppa/` OR `ui/`. ***
-
-Run this in a SEPARATE environment with real network access (this repo's dev
-sandbox blocks `api.openelectricity.org.au`). Copy/commit the resulting
-`nem_plant_registry.parquet` into `data/cache/nem/registry/` in this repo --
-that's what `ppa/data/nem_data.py` actually reads at runtime (cache-only, no
-network imports).
-
-API: GET https://api.openelectricity.org.au/v4/facilities/
-Requires a free API key from https://platform.openelectricity.org.au/,
-supplied via the OPENELECTRICITY_API_KEY environment variable.
-
-UNVERIFIED DETAILS (this planning/dev session could not reach the live API or
-its docs -- verify against https://docs.openelectricity.org.au/api-reference/facilities/get-facilities/
-before relying on this script):
-  - Auth header format: this script sends `Authorization: Bearer <key>`, the
-    typical convention for REST APIs of this style. If the real API expects a
-    different header (e.g. `X-API-Key`) or query param, update `_auth_headers()`.
-  - Response envelope/pagination shape: this script defensively handles a few
-    common shapes (`{"data": [...]}`, a bare list, `{"data": [...], "meta":
-    {"next_page": ...}}` etc.) via `_extract_records()` / `_next_page_params()`,
-    but the exact keys should be confirmed by inspecting one real response
-    (e.g. `curl` the endpoint and eyeball the JSON) before trusting this at
-    scale.
-  - Field names for fuel technology, capacity, and coordinates: this script
-    tries a short list of plausible candidate keys per field (see
-    `_first_present()`) and logs which one it actually used, but the true
-    OpenElectricity/OpenNEM facility schema should be checked against the docs
-    link above -- especially the exact `fueltech` taxonomy strings for wind vs
-    utility-scale solar (this script assumes something like
-    "wind"/"solar_utility"; the live API's enum may differ, e.g.
-    "wind_offshore" vs "wind_onshore" splits, or "solar_utility" vs
-    "solar_rooftop").
-  - The optional `first_power_date` column: this script tries plausible
-    commencement/first-seen field names per unit (see `_first_present()`) and
-    normalises the result to YYYY-MM-DD. `ppa/data/nem_data.py` treats the
-    column as OPTIONAL (an old cached parquet without it keeps working); the
-    map tooltip falls back to a SCADA-derived "first 2025 output" date when the
-    registry lacks it.
-  - Whether records are per-unit (multiple rows per DUID) or per-facility with
-    a `units` sub-list: this script inspects the response at runtime and
-    handles both a flat per-unit list and a nested `units` list per facility
-    (see `_iter_units()`), but again -- verify against a real response.
-"""
+Requires `OPENELECTRICITY_API_KEY`. Writes `nem_plant_registry.parquet` to the
+registry cache directory and refuses to replace an existing file unless `--overwrite`
+is passed. The AEMO fallback option is currently a stub. Install the acquisition
+requirements separately and consult `--help` before running."""
 from __future__ import annotations
 
 import argparse
@@ -69,17 +26,12 @@ API_KEY_ENV_VAR = "OPENELECTRICITY_API_KEY"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT_DIR = REPO_ROOT / "data" / "cache" / "nem" / "registry"
 
-# AEMO's public (no-auth) Generation & Exemption List -- used only by the
-# fallback path below. URL/format not directly verified from this sandboxed
-# session; check the current link on https://aemo.com.au before relying on it
-# (search AEMO's site for "NEM Registration and Exemption List").
+# Informational pointer for the currently unimplemented AEMO fallback.
 AEMO_NEM_REGISTRATION_LIST_URL_HINT = (
     "https://aemo.com.au (search: 'NEM Registration and Exemption List')"
 )
 
-# Candidate fueltech strings for wind/utility-solar. VERIFY against the live
-# taxonomy at https://docs.openelectricity.org.au/api-reference/facilities/get-facilities/
-# -- update this default if the real enum differs.
+# Open Electricity fueltech identifiers accepted by default.
 DEFAULT_FUEL_TECHS = "wind,solar_utility"
 
 # Maps raw API fueltech taxonomy strings (lower-case) -> title-case output values,
@@ -95,19 +47,12 @@ FUEL_TECH_DISPLAY_MAP = {
     "solar": "Solar",
 }
 
-# The real API's operational-status field is `status_id`, with values observed
-# in a live export including "operating" and "commissioning". Default to only
-# "operating" facilities (excludes not-yet-operational plant like "commissioning").
+# Exclude facilities that are not yet operating by default.
 DEFAULT_STATUS = "operating"
 
 
 def _auth_headers(api_key: str) -> dict:
-    """Bearer-token header, the typical convention for this class of REST API.
-
-    UNVERIFIED: confirm the real auth scheme against the live API docs (see
-    module docstring) -- it may instead expect `X-API-Key: <key>` or a query
-    param. Update here if so.
-    """
+    """Return request headers for the API key."""
     return {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
 
 
@@ -128,13 +73,7 @@ def _extract_records(payload: Any) -> list[dict]:
 
 
 def _next_page_params(payload: Any, current_params: dict) -> dict | None:
-    """Return params for the next page, or None if this looks like the last page.
-
-    UNVERIFIED pagination shape -- handles a `meta.next_page`/`meta.page` style
-    cursor/offset if present, else falls back to "no more pages" after one call
-    (safe default: better to under-fetch and let the summary report a low
-    count than to loop forever against an unverified API).
-    """
+    """Return next-page parameters when pagination metadata is present."""
     if not isinstance(payload, dict):
         return None
     meta = payload.get("meta") or payload.get("pagination")
@@ -149,7 +88,7 @@ def _next_page_params(payload: Any, current_params: dict) -> dict | None:
 
 
 def _first_present(record: dict, candidates: list[str]) -> Any:
-    """Return the value of the first key in `candidates` that exists in `record` (case-insensitive)."""
+    """Return the first matching candidate field, ignoring case."""
     lower_map = {k.lower(): k for k in record.keys()}
     for candidate in candidates:
         actual_key = lower_map.get(candidate.lower())
@@ -159,23 +98,7 @@ def _first_present(record: dict, candidates: list[str]) -> Any:
 
 
 def _iter_units(facility: dict):
-    """Yield per-unit dicts for a facility record, handling both nested and flat shapes.
-
-    The real OpenElectricity v4 facility shape (confirmed against a live export,
-    `opennem_facilities_raw.csv`) is: a facility-level record (`facility_code`,
-    `facility_name`, `network_region`, lat/lon, ...) containing a nested `units`
-    list, where EACH unit carries its OWN `unit_code`/`duid` (the actual DUID) plus
-    its own `fueltech_id`/`status_id`/capacity fields. A facility-level `code` field
-    (if present) is NOT a DUID -- it is the facility code, which is shared by
-    multiple units, so it must never be treated as a unit DUID.
-
-    We therefore check for a nested units/generators list FIRST and, if present,
-    always descend into it -- yielding each unit merged with the parent facility's
-    metadata (name/region/lat/lon) so the unit inherits facility-level fields it
-    doesn't carry itself, while the unit's own fields (including its own duid/
-    unit_code) win over the facility's. Only if no nested list is found do we fall
-    back to treating the record itself as a flat per-unit record.
-    """
+    """Yield unit records from nested facility data or flat unit records."""
     units = _first_present(facility, ["units", "generators", "unit_list"])
     if isinstance(units, list) and units:
         for unit in units:
@@ -361,39 +284,9 @@ def normalise_facilities(
 
 
 def fetch_via_aemo_fallback(min_capacity_mw: float) -> pd.DataFrame:  # noqa: ARG001
-    """
-    STUB / TODO: fallback path when no OPENELECTRICITY_API_KEY is available.
-
-    AEMO publishes a free, no-auth "NEM Registration and Exemption List" Excel
-    workbook (search AEMO's site -- see AEMO_NEM_REGISTRATION_LIST_URL_HINT
-    above; the exact download URL was not fetchable from this sandboxed
-    planning session and should be located/confirmed live). That workbook
-    gives DUID, station name, region, participant, and registered capacity --
-    but NOT lat/lon coordinates.
-
-    To fully implement this fallback:
-      1. Download the workbook (`requests.get(<confirmed URL>)`).
-      2. `pd.read_excel(..., sheet_name=<the "Generators and Scheduled Loads"
-         sheet, name TBC>)` and select DUID/StationName/Region/
-         RegisteredCapacity/FuelType-like columns (exact column headers TBC --
-         inspect the real file).
-      3. Filter to wind/solar fuel types and capacity >= min_capacity_mw, as
-         `normalise_facilities()` does above.
-      4. lat/lon are NOT in this workbook. For the (small, post-filter) set of
-         qualifying plants, either maintain a small manually-curated CSV
-         lookup (station name -> lat/lon, sourced by hand from public plant
-         info) or geocode station names via a free geocoding API -- both are
-         manual/semi-manual steps outside what this planning session could
-         verify end-to-end, hence this function is a stub.
-
-    Raises NotImplementedError until someone completes step 2 above against
-    the real downloaded file.
-    """
+    """Placeholder for an AEMO registry fallback; not implemented."""
     raise NotImplementedError(
-        "fetch_via_aemo_fallback() is a documented stub -- see its docstring. "
-        "Get an OPENELECTRICITY_API_KEY instead if at all possible; it's free. "
-        "If you must use this fallback, implement steps 1-4 in the docstring "
-        "against the real AEMO Registration and Exemption List file."
+        "The AEMO registry fallback is not implemented. Use the Open Electricity API."
     )
 
 
@@ -461,8 +354,7 @@ def main() -> int:
         if not api_key:
             log.error(
                 "%s is not set. Get a free key from https://platform.openelectricity.org.au/ "
-                "and `export %s=...`, or re-run with --fallback-no-api-key "
-                "(note: that path is currently a documented stub, see fetch_via_aemo_fallback()).",
+                "and `export %s=...`; the AEMO fallback is not implemented.",
                 API_KEY_ENV_VAR,
                 API_KEY_ENV_VAR,
             )

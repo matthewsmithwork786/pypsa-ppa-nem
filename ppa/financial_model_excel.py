@@ -1,29 +1,8 @@
-"""Export a streamlined, *live* project-finance workbook.
+"""Export the live project-finance workbook and hourly dispatch workbook.
 
-Produces an ``.xlsx`` that mirrors :mod:`ppa.financial_model`: editable Inputs, a
-pre-filled Energy (PyPSA interface) sheet, a single combined Hourly dispatch
-sheet, a transposed annual Model sheet and a fully formula-driven Outputs sheet.
-
-Conventions (year 0):
-* The Model sheet's periods run **year 0 .. n-1**; year 0 is the base year, so
-  no indexation/escalation is applied there (multipliers are 1.0 at year 0 and
-  compound ``(1 + rate)^year`` thereafter).
-* Devex and capex are broken out **by technology** (wind / solar / BESS) with
-  subtotal rows.
-* The revenue block is preceded by a *volumes & prices* block: PPA volume,
-  merchant volumes and penalty volume, each with an average price per MWh, and
-  the revenue rows are formulas multiplying those rows together.
-* The debt schedule is shown as a **corkscrew**: opening balance → drawdown →
-  IDC/interest → repayment → closing balance, with closing feeding the next
-  period's opening.
-* Every number on the Outputs sheet is a live formula referencing the Model /
-  Energy / Hourly sheets, so editing an input recomputes the KPIs.
-
-The revenue → EBITDA → depreciation → tax → cash-flow chain and the IRR/NPV/DSCR
-outputs are written as live Excel formulas. The debt sizing (front-loaded
-drawdown, IDC, DSCR tranche split) is circular by nature, so it is written as
-toolkit-computed values that the live formulas reference — clearly flagged so it
-can be overridden.
+Inputs and Energy feed annual Model formulas and Outputs. Hourly dispatch can be
+embedded in the finance workbook or exported separately. Debt sizing is computed
+by the toolkit because drawdown and IDC are circular.
 """
 
 from __future__ import annotations
@@ -74,14 +53,7 @@ def _text(cell, value):
 
 
 def export_hourly_timeseries(year_results: list) -> bytes:
-    """The stacked hourly dispatch as its own workbook.
-
-    25 years x 8760 rows is ~219k rows of thirteen columns: slow to build and
-    heavy to move, which made the financial model itself slow to download for no
-    benefit to anyone reading the P&L. The hours ship separately so the finance
-    workbook stays small, and carry the same per-year aggregate block so they
-    remain auditable on their own.
-    """
+    """Export stacked annual dispatch and its per-year aggregate block."""
     if not year_results:
         raise ValueError("export_hourly_timeseries needs at least one year of results")
 
@@ -103,13 +75,7 @@ def export_financial_model(
     result: ProjectFinanceResult,
     year_results: list | None = None,
 ) -> bytes:
-    """The project-finance workbook.
-
-    Passing `year_results` embeds the hourly sheet and makes the Energy totals
-    roll up from it. The app no longer does: the hours ship via
-    `export_hourly_timeseries` and the Energy tab carries hard values instead.
-    The argument is kept so a single self-contained workbook remains available.
-    """
+    """Export a finance workbook, optionally embedding hourly dispatch."""
     wb = Workbook()
     inputs_cells = _write_inputs(wb, p)
     # One combined Hourly sheet holding every simulated year stacked vertically;

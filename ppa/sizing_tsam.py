@@ -1,23 +1,8 @@
-"""W14: better sizing representation via `tsam` typical periods.
+"""Typical-period representation for the capacity-sizing LP.
 
-The sizing LP (`ppa.sizing.optimise_capacities`) can run over the full hourly
-year, or — with the optional `tsam` dependency — typical periods at full
-hourly resolution. Typical weeks preserve intra-day variability while
-keeping the LP ~2 orders of magnitude smaller than the full year.
-
-STORAGE NOTE. Clustered sizing under-sizes storage against the exact LP
-(207 vs 299 MW on the Corporate PPA under a hard SLA), which is ordinary
-clustering error -- use `ppa.sizing.validate_sizing_representation` to measure
-it for a given scenario.
-
-It used to size storage to *exactly zero* under every configuration. That was
-not a clustering limitation but a units error: the occurrence count was being
-used as `snapshot_weightings["stores"]`, i.e. as the dt in the storage energy
-balance, making one snapshot span up to ~55 h so that no short-duration battery
-could shift anything (docs/sizing_experiments.md E9). Fixed in
-`ppa.network.build_network` via `intra_period_hours`. W14's earlier diagnosis
-(cyclic SoC within a representative day) and its proposed remedy (typical
-weeks) were both wrong -- weeks were tested and changed nothing.
+Typical weeks retain consecutive daily resource patterns while reducing the
+LP size. Storage sizing can differ from the exact hourly result; use
+`ppa.sizing.validate_sizing_representation` to quantify that difference.
 """
 from __future__ import annotations
 
@@ -37,16 +22,7 @@ def tsam_available() -> bool:
 
 def _aggregate_with_aligned_occurrences(data, n_periods, hours_per_period,
                                         representation, extreme_periods):
-    """Keep zero-occurrence cluster IDs aligned during tsam 3.4.2 rescaling.
-
-    Moving the sole member of a base cluster into an extreme cluster leaves
-    the base representative in place but removes its ID from the occurrence
-    dictionary. Upstream rescaling indexes that shortened dictionary as a
-    dense array, corrupting weights or raising IndexError. Fill the missing
-    IDs with zero before calling the unchanged upstream rescaler. This local
-    subclass affects only our aggregation; extremes, representation, partial
-    final-period weights and column-mean preservation are unchanged.
-    """
+    """Keep cluster IDs aligned when tsam rescales occurrence counts."""
     from tsam.config import REPRESENTATION_MAPPING
     from tsam.exceptions import LegacyAPIWarning
     from tsam.timeseriesaggregation import TimeSeriesAggregation
@@ -104,22 +80,16 @@ def cluster_typical_periods(
     tsam's `addPeakMax`/`addPeakMin`) so the sized fleet must still cover the
     hours that matter instead of optimising only for the average day.
 
-    BESS caveat: clustered sizing under-sizes storage relative to the exact LP
-    (ordinary clustering error, not the structural zero it used to be — see the
-    module docstring).
+    Storage capacity can differ from the exact hourly result.
     """
     if not tsam_available():
         raise ImportError(
             "Typical-days sizing needs the optional 'tsam' package. "
-            "Install it (`pixi add --pypi tsam` or `pip install tsam`)."
+            "Install it (`pip install tsam`)."
         )
 
-    # You cannot ask for more clusters than there are periods to cluster. The
-    # period-reference path solves a user-chosen window (a calendar month is
-    # ~4.3 weeks), so the 16-week default exceeded the sample count and tsam
-    # raised "cannot extract more clusters than samples". Clamp instead: a
-    # window with fewer periods than clusters is already its own best
-    # representation.
+    # Limit clusters to the available periods; short reference windows may
+    # contain fewer periods than the requested default representation.
     available_periods = len(ts) // max(1, hours_per_period)
     if available_periods < 2:
         # Nothing to cluster — hand back the window itself, weighted one hour
@@ -132,24 +102,8 @@ def cluster_typical_periods(
     cols = ["ts_PVGen", "ts_WindGen", "ts_MktPrice", "ppaload_mw"]
     data = ts[cols]
 
-    # Typical WEEKS with MEAN representation, measured against the exact hourly
-    # LP (docs/sizing_experiments.md E11). The two settings matter jointly:
-    #
-    #   16 weeks, mean     RMSE 11.8   fleet +10.5%   BESS  -4%    15 s
-    #   26 weeks, mean     RMSE  7.2   fleet  +8.8%   BESS +10%    47 s
-    #    8 weeks, medoid   RMSE 16.9   fleet -11.8%   BESS -82%     4 s
-    #   12 days,  medoid   RMSE 39.0   fleet +46.0%   BESS +164%    2 s   (old default)
-    #
-    # Medoid picks one real period per cluster, and a single real week is a poor
-    # proxy for storage stress -- it under-sizes the BESS by 47-90%. Averaging
-    # the cluster keeps the weekly load/generation shape while smoothing the
-    # period-to-period noise the battery is not sized against.
-    #
-    # Weeks beat days because a 168 h period contains the real day-to-day
-    # sequence, so the LP sees consecutive poor-resource days rather than
-    # 24 h fragments stitched together by cyclic state of charge.
-    # Peak generation is retained alongside load/dark-lull extremes: it sets
-    # the connection capacity required by the subsequent full hourly solve.
+    # Mean weeks retain consecutive resource patterns. Extreme periods retain
+    # peak load and generation conditions that affect connection sizing.
     reps, occ = _aggregate_with_aligned_occurrences(
         data, n_periods, hours_per_period, representation, extreme_periods
     )
@@ -171,14 +125,8 @@ def cluster_typical_periods(
     weights = pd.Series([float(occ[c]) for c in cluster_ids], dtype=float)
     weights.index = clustered.index
 
-    # WP8 period-block labels for daily SLA groups in `ppa.solver.solve`. tsam
-    # returns each cluster's rows in chronological order, so a per-cluster
-    # cumulative count is the hour-within-period. days_per_period is derived
-    # from hours_per_period (168 -> 7) rather than hard-coded; a period that is
-    # not a whole number of days cannot be sliced into meaningful representative
-    # days, so it falls back to one group per period (an approximation, but a
-    # bounded one). Extreme periods appended by tsam are extra clusters and are
-    # labelled exactly like the ordinary ones.
+    # Label representative days for daily SLA constraints. Non-integral-day
+    # periods use one group per period.
     cids = np.asarray(cluster_ids, dtype=int)
     hour_in_period = pd.Series(cluster_ids).groupby(cluster_ids).cumcount()
     days_per_period = hours_per_period // 24

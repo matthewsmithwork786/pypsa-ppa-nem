@@ -1,175 +1,46 @@
-# pypsa-ppa
+# pypsa-ppa-nem
 
-PyPSA-based toolkit for simulating and optimising Power Purchase Agreements (PPAs) under different scenarios.
+A Streamlit app for exploring renewable Power Purchase Agreements in the Australian National Electricity Market (NEM). The dispatch model uses PyPSA and Linopy with HiGHS; financial calculations are reported separately from dispatch.
 
-## Overview
+## Run locally
 
-The current testing build defaults to **one PyPSA dispatch year with a 25-year
-financial projection**. It repeats the solved year's energy volumes, applies
-financial indexation and avoids 25 separate dispatch solves or duplicated hourly
-datasets. Full multi-year dispatch remains selectable to model degradation and
-changing operation. See [free Streamlit testing](docs/STREAMLIT_TESTING.md) for
-setup and the approximation's limits.
-
-This project models renewable portfolios (wind, solar, battery storage) operating under long-term PPAs. It uses [PyPSA](https://pypsa.readthedocs.io) to find the least-cost hourly dispatch across a full month of real Australian NEM market data, honouring contractual delivery obligations, shortfall allowances, penalty regimes, and market interaction caps.
-
-A Streamlit web app provides an interactive interface with four predefined case studies, a customisable scenario form, and detailed results (KPIs, financial analysis, supply mix charts).
-
-The app supports multi-year portfolios: pick a range of historical weather years at 5/15/30/60-minute resolution, choose which year the capacity-sizing optimisation tunes against, and layer tiered service-level agreements (monthly and/or daily minimum delivery shares, enforced as hard constraints) on top of the annual delivery obligation.
-
-## Setup
-
-This project uses [pixi](https://pixi.sh) for reproducible environment management.
-
-### 1. Install pixi
+Use Python 3.13 and install the app plus test dependencies:
 
 ```bash
-curl -fsSL https://pixi.sh/install.sh | bash
-# Restart your shell or run: source ~/.bashrc
+python3.13 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python -m pip install -r requirements-dev.txt
+streamlit run streamlit_app.py
 ```
 
-### 2. Install the environment
+Open <http://localhost:8501>. Run the test suite with:
 
 ```bash
-cd pypsa-ppa
-pixi install
+MPLCONFIGDIR=/tmp/mplcache python -m pytest -q -p no:cacheprovider
 ```
 
-This creates a fully pinned environment (see `pixi.lock`) with all dependencies resolved from conda-forge, including PyPSA, HiGHS, Linopy, Streamlit, and SciPy.
-
-### 3. Run the Streamlit app
+You can build a Docker image locally for a consistent runtime:
 
 ```bash
-pixi run app
+docker build -t pypsa-ppa-nem .
+docker run --rm -p 8501:8501 pypsa-ppa-nem
 ```
 
-The app opens at `http://localhost:8501`. Navigate through the tabs:
+## Current pilot scope
 
-. **Welcome** — capabilities overview and navigation guide
-1. **Case Setup** — select a predefined case study and customise parameters
-2. **Get Data** — download necessary time series data
-3. **Optimisation** — review the scenario and click *Run Optimisation*
-4. **Results** — financial analysis (LCOE, IRR, NPV), daily dispatch detail
-5. **Financial model** — project-finance appraisal layered on the energy-model results
-6. **Sensitivity analysis** — financial-parameter sensitivity
-7. **HELP** — PPA key concepts and terminology
+The default workflow solves one operating year and projects financials over 25 years by repeating that year's energy volumes. It does not solve future dispatch years, weather, degradation, augmentation, or price responses. Treat future delivery and financial outputs as scenario projections, not forecasts. Full multi-year dispatch is available separately and is more demanding.
 
-### 4. Run the Jupyter notebook (worked example)
+Bundled data covers 2025. The app reads committed NEM cache files and runs without acquisition credentials or external data access. The plant selector uses AEMO UIGF availability profiles; UIGF represents available output before network constraints, while SCADA represents sent-out output and can include curtailment. Do not substitute SCADA for UIGF as the model's availability bound. Data sources, cache layout, and acquisition instructions are in [Data acquisition](docs/DATA_ACQUISITION.md).
 
-```bash
-pixi run notebook
-```
+Sizing defaults to `tsam` typical-week clustering to reduce LP size. Clustering is an approximation and can change the selected fleet, particularly storage. Monthly SLA constraints are not supported with clustered sizing; use full-hourly sizing where calendar-month constraints are required. See [model assumptions](docs/model_assumptions.md) for the load-bearing modelling conventions and [financial assumptions](docs/financial_assumptions.md) for the cost inputs and sources.
 
-Opens the original worked example notebook at `notebooks/pypsa_ppa_example_v1.ipynb`.
+## Project map
 
-## Project structure
+- `streamlit_app.py`, `ui/` — Streamlit application and user interface.
+- `ppa/` — scenario, data readers, network, sizing, dispatch, and finance models.
+- `data/cache/nem/` — bundled NEM availability, price, registry, and hedge data.
+- `scripts/` — offline cache builders, data acquisition tools, and focused benchmarks.
+- `docs/` — current user and maintainer guidance.
+- `tests/` — model, data, and UI regression tests.
 
-```
-pypsa-ppa/
-├── streamlit_app.py             # App entry point (pixi run app)
-├── pixi.toml                    # Environment definition
-├── pixi.lock                    # Pinned dependency lockfile
-├── data/                        # Data
-│   ├── Scenario_definition.xls  # Template to define a scenario via Excel
-│   └── cache                    # Cached data
-│       └── nem                  # Cached NEM registry / SCADA / prices / hedges
-├── ppa/                         # Core library — no Streamlit dependency
-│   ├── counterfactuals.py       # Counterfactual comparison of PPA
-│   ├── data_loader.py           # CSV loading and timeseries preparation
-│   ├── financial_model_excel.py # Excel export of the Financial model
-│   ├── financial_model.py       # Financial model within the UI
-│   ├── financials.py            # CAPEX / LCOE / IRR / NPV / breakeven price
-│   ├── industrial_profiles.py   # Reference industrial load profiles
-│   ├── multi_year.py            # Simulation runner
-│   ├── network.py               # PyPSA network builder
-│   ├── results.py               # Result extraction into typed dataclasses
-│   ├── scenario.py              # Scenario dataclass + 4 predefined case studies
-│   ├── sensitivity.py           # Sensitivity analysis helpers
-│   ├── solver.py                # Linopy constraints + HiGHS solve
-│   └── data                     # Data handling libraries
-│       ├── aer_futures.py       # AER base-futures cache reader
-│       ├── nem_data.py          # NEM registry / SCADA / price cache reader
-│       └── timeseries_utils.py  # Shared timeseries helpers
-├── ui/                          # Streamlit UI layer
-│   ├── charts.py                # Plotly figure builders
-│   ├── scenario_form.py         # Interactive parameter form
-│   ├── state.py                 # Session state accessors
-│   └── tabs/                    # One module per tab
-└── notebooks/
-    └── pypsa_ppa_example_v1.ipynb        # Original worked example
-```
-
-## Predefined case studies
-
-| Case study | Portfolio | Key feature |
-|---|---|---|
-| ⚓ The Foundation Deal | 200 MW wind + 80 MW solar, no BESS | Baseline penalty exposure without storage |
-| ☀️ Solar + Storage Play | 50 MW wind + 300 MW solar + 120/480 BESS | Time-shifting via large battery |
-| 📈 Merchant Hybrid | Standard mix, 90% delivery, 2× penalty | Market buy at volatile NEM prices |
-| 🏢 Corporate PPA | Balanced 180/180/90 MW, 90% delivery, 1% market buy | Near-zero flexibility, premium tariff |
-
-## Data
-
-### Renewable & price timeseries
-
-Market prices and renewable capacity factors are sourced from the Australian NEM: AEMO regional spot prices and 5-minute SCADA output for user-selected wind/solar plants (cached via the acquisition scripts under `scripts/`).
-
-**Capacity sizing caveat:** only one weather year (2025 SCADA) is currently cached, so a sized portfolio is tuned to 2025 weather. Fetching additional SCADA years (e.g. via `scripts/fetch_nem_scada_prices.py` for earlier/later years) is a future TODO — the sizing code already cycles multiple cached weather years when present.
-
-## Memory
-
-The capacity-sizing LP is the memory peak of the whole app: a full-year hourly sizing model is ~306,000 rows × ~123,000 columns and costs multiple GB while it solves. Two mechanisms keep that from taking the process down, and both matter if you are changing this code:
-
-- **The sizing LP runs in a child process** (`ppa/sizing.py::run_sizing_subprocess`). Killing the child returns its memory to the OS immediately rather than leaving it resident in the app. Calling `optimise_capacities` directly in-process and then running a multi-year dispatch is the reliable way to get OOM-killed — the analysis scripts under `scripts/` all use the subprocess path for this reason.
-- **The multi-year dispatch forks its workers** (`ppa/multi_year.py`). Fork is copy-on-write, but CPython's reference counting writes to the header of nearly every object a child touches, so each worker ends up costing roughly the *parent's* whole footprint. The worker budget therefore accounts for the parent's RSS, not just a flat per-worker constant, and anything large is released before the fork.
-
-If a run is killed with no traceback and no exit code, that is the OOM killer (SIGKILL). Knobs:
-
-| Variable | Default | Effect |
-|---|---|---|
-| `PPA_WORKER_MEM_MB` | `1200` | Raise to budget more per dispatch worker (→ fewer workers) |
-| `PPA_RESERVE_MEM_MB` | `800` | Headroom left for the OS and the Streamlit process |
-
-Killed workers are recovered rather than fatal: the run falls back to the in-process serial path and re-solves only the years that never returned. To measure where the memory actually goes:
-
-```bash
-PYTHONPATH=. python3 scripts/measure_peak_rss.py --phase both --years 15
-```
-
-### Industrial load profiles
-
-Offtaker demand shapes for **cement** and **steel** are derived from real measured hourly profiles published by the [Forschungsstelle für Energiewirtschaft (FfE)](https://www.ffe.de) via their open data API (`id_opendata=59`), following the approach of [PyPSA-EUR PR #1875](https://github.com/PyPSA/pypsa-eur/pull/1875). The 2017 reference year data is bundled at `ppa/data/ffe_profiles.json` and mapped to any simulation year by averaging over (month, day-of-week, hour) triplets to preserve seasonal and weekday patterns.
-
-| Profile key | Data source | FfE sector |
-|---|---|---|
-| `flat` | Synthetic | — |
-| `cement_plant` | FfE open data | Non-metallic Minerals (id 4) |
-| `steel_eaf` | FfE open data | Iron & steel industry (id 1) |
-| `green_hydrogen` | Synthetic | — |
-| `data_center` | Synthetic | — |
-| `aluminum_smelter` | Synthetic | — |
-
-## Dependencies
-
-All managed by pixi from conda-forge:
-
-| Package | Purpose |
-|---|---|
-| pypsa | Energy system modelling and network optimisation |
-| highspy | HiGHS LP solver |
-| linopy | Linear programming backend for PyPSA |
-| streamlit | Web application framework |
-| plotly | Interactive charts |
-| scipy | Financial analysis (IRR via Brent's method) |
-| pypsatopo* | Network topology diagrams (notebook) |
-| tsam* | Optional: typical-day clustering for the capacity-sizing LP (falls back to coarse/full-hourly if absent) |
-
-\* Installed from PyPI via pixi's `[pypi-dependencies]`.
-
-**Optional solver extras:** HiGHS's HiPO interior-point solver needs the separate
-`highspy-extras` wheel (`pip install highspy-extras`; Apache-2.0, HiGHS core is MIT).
-It is not required — the app always solves on the default dual simplex, which the
-sizing benchmarks in `scripts/bench_solver.py` show is fastest for this LP size —
-but it lets you re-run that comparison yourself. Note that `tsam` pins
-`highspy<=1.15.0`, so installing `highspy-extras` (1.15.1) alongside tsam requires
-allowing a newer highspy at runtime; both work in practice.
+For maintainer constraints, read [AGENTS.md](AGENTS.md). Deployment and local container instructions are in [Deployment](docs/DEPLOYMENT.md).

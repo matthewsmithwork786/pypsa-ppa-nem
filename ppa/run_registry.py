@@ -1,29 +1,11 @@
-"""Tracks in-flight multi-year runs so an abandoned browser tab's worker pool
-gets reclaimed promptly, while a genuine page refresh (which reconnects with
-the same run_id in the URL, usually within a second or two) is spared.
-
-Streamlit gives no public "on disconnect" callback, so the owning session's
-liveness is polled via ``Runtime.is_active_session`` from inside the run loop
-itself (see ``ppa.multi_year.run_multi_year``). A dead session starts a grace
-timer instead of cancelling immediately; a fresh page load for the same
-run_id (``touch``) resets it, so the run only gets cancelled once nobody has
-reclaimed it for GRACE_SECONDS -- an actually abandoned tab, not a refresh.
-"""
+"""Track in-flight runs and cancel work only after its browser session is gone."""
 from __future__ import annotations
 
 import threading
 import time
 import uuid
 
-# Mobile Chrome (and most mobile browsers) suspends a backgrounded tab's
-# websocket almost immediately -- switching apps for a minute looks
-# identical, from the server's side, to the tab being closed for good. A
-# short grace period would cancel perfectly ordinary "I background the app
-# while a multi-minute optimisation runs" usage, which is worse than the
-# problem this module exists to solve. 15 minutes comfortably covers normal
-# task-switching while still reclaiming memory from tabs that are actually
-# gone, well before a truly abandoned run's workers would otherwise finish
-# and free it on their own.
+# Let backgrounded mobile tabs reconnect while still reclaiming abandoned work.
 GRACE_SECONDS = 900.0
 
 _lock = threading.Lock()

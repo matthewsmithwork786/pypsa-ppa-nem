@@ -306,9 +306,8 @@ def render() -> None:
     if not years_available:
         years_available = [nem_data.DEFAULT_YEAR]
         st.caption(
-            "No multi-year availability manifest is published yet, so only "
-            f"{nem_data.DEFAULT_YEAR} (the single shipped year) is available. "
-            "Once the manifest is published the full range will be offered here."
+            "No historical-year coverage is listed in the local cache; "
+            f"showing the default year ({nem_data.DEFAULT_YEAR})."
         )
     years_available = sorted(set(years_available))
     default_range = _year_range_default(years_available, current.nem_years)
@@ -331,7 +330,7 @@ def render() -> None:
 
     # ── Snapshot resolution ────────────────────────────────────────────────────
     resolution_labels = list(NEM_RESOLUTION_MINUTES)
-    default_resolution = int(getattr(current, "nem_resolution_minutes", 60))
+    default_resolution = current.nem_resolution_minutes
     default_label = next(
         (k for k, v in NEM_RESOLUTION_MINUTES.items() if v == default_resolution),
         "1 hour",
@@ -353,8 +352,8 @@ def render() -> None:
         )
 
     # ── Capacity-sizing year ───────────────────────────────────────────────────
-    sizing_year = int(getattr(current, "capacity_sizing_year", nem_data.DEFAULT_YEAR))
-    if bool(getattr(current, "optimise_capacity", False)):
+    sizing_year = int(current.capacity_sizing_year)
+    if current.optimise_capacity:
         sizing_options = list(selected_years)
         sizing_index = (
             sizing_options.index(sizing_year)
@@ -547,21 +546,6 @@ def render() -> None:
         "✅ Use these plants", type="primary", width="stretch",
         key="nm_use_plants", disabled=use_disabled,
     ):
-        from ppa.data import remote_cache
-
-        duids = [d for d in (wind_duid, pv_duid) if d]
-        missing = remote_cache.missing_plant_years(duids, selected_years)
-        if missing:
-            bar = st.progress(0.0, text="Downloading generation data ...")
-            try:
-                remote_cache.ensure_plant_years(
-                    duids, selected_years,
-                    progress=lambda f, msg: bar.progress(f, text=msg),
-                )
-                remote_cache.ensure_price_years([price_region], selected_years)
-            except remote_cache.RemoteFetchError as exc:
-                st.error(f"Could not download the plant data: {exc}")
-                return
         updated = dataclasses.replace(
             current,
             data_source="nem_map",

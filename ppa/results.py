@@ -47,10 +47,7 @@ class SummaryVolumes:
     allowed_shortfall_share_actual: float
     buy_share_of_ppa_delivery: float
     penalty_share_of_load: float
-    # Tiered SLA reporting (WP9): worst achieved per-period delivery share and
-    # how many periods fell below the scenario's target. Defaults keep an old
-    # pickled run_store payload readable — an unused tier must never LOOK like a
-    # violation, so the min starts at 1.0 when the tier is off.
+    # An unused SLA tier defaults to a non-violating share of 1.0.
     min_monthly_delivery_share: float = 1.0
     min_daily_delivery_share: float = 1.0
     n_months_below_sla: int = 0
@@ -117,11 +114,10 @@ def extract_results(
     solver_condition: str,
     resolution_h: float = 1.0,
 ) -> OptimisationResult:
-    """`resolution_h` is the hours each row of `ts`/`n`'s snapshots represents
-    (must match what was passed to `build_network`). All `.sum()`-based MW ->
-    MWh/`$` conversions below need it: summing MW samples only equals MWh when
-    each sample is exactly 1 hour, so at 30-/5-min resolution every volume and
-    $-flow figure would be overstated by 2x/12x without this factor.
+    """Extract dispatch, energy, delivery and revenue metrics from a solved network.
+
+    `resolution_h` must match `build_network` and converts summed MW samples
+    into MWh for sub-hourly runs.
     """
     s = scenario
 
@@ -173,12 +169,7 @@ def extract_results(
     )
     penalty_share_of_load = penalty_mwh / total_load_mwh if total_load_mwh > 0 else 0.0
 
-    # ── Tiered SLA reporting ──────────────────────────────────────────────────
-    # Per-period delivered share D/L, mirroring the solver's SLA constraints
-    # (`MinDelivery_Limit_M*` / `_D*`): delivered MWh is the IPPGen_to_PPAOfftake
-    # link flow, load is ts["ppaload_mw"], each weighted by resolution_h. This is
-    # the post-solve check of AGENTS.md §5.2 — if the constraint and this check
-    # ever disagree by more than solver tolerance, that disagreement IS the bug.
+    # Per-period delivered share, matching the solver's minimum-delivery measure.
     delivered_mwh = ppa_delivery * resolution_h
     load_mwh = ts["ppaload_mw"] * resolution_h
 
@@ -199,9 +190,7 @@ def extract_results(
     n_days_below_sla = 0
     warnings: list[str] = []
 
-    # A single-period run leaves the min at 1.0 (not the achieved share) so an
-    # unused/trivially-sized field never reads as a violation; the period series
-    # itself is still reported for inspection.
+    # A single period leaves the minimum at its non-violating default of 1.0.
     if s.sla_monthly_enabled:
         monthly_delivery_share = _period_delivery_share(ts.index.to_period("M"))
         if len(monthly_delivery_share) > 1:
@@ -217,14 +206,8 @@ def extract_results(
                 (daily_delivery_share < s.sla_daily_share - 1e-6).sum()
             )
 
-    # Verification (AGENTS.md §5.2): when a tier is enabled and the achieved
-    # minimum falls more than 0.5 percentage points below the requirement, the
-    # constraint and the post-solve measure disagree — surface that loudly in the
-    # UI rather than raising, so an infeasible-adjacent solve stays inspectable.
-    # Deliberately NOT gated on enforce_min_delivery: extract_results is also
-    # used as a post-hoc "what if this target applied" reporting tool against an
-    # already-solved network (see tests/test_sla_reporting.py), independent of
-    # which constraint form (if any) was actually active during that solve.
+    # Report a warning instead of raising so results remain inspectable. This
+    # also supports post-hoc reporting when no hard delivery floor was active.
     if monthly_delivery_share is not None and len(monthly_delivery_share) > 1:
         if min_monthly_delivery_share < s.sla_monthly_share - 0.005:
             warnings.append(

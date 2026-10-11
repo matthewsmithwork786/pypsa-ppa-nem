@@ -1,211 +1,46 @@
-# Deploying to Streamlit Community Cloud
+# Run and deploy the Streamlit app
 
-**For the current free-hosting pilot, follow [STREAMLIT_TESTING.md](STREAMLIT_TESTING.md).**
-It documents the deployment branch and default one-year dispatch / 25-year
-financial projection. The older runtime/memory notes below describe earlier
-configurations; their benchmark numbers are not guarantees for this release.
+## Local run
 
-## 1. What is already set up
-
-| File | Purpose |
-|---|---|
-| `streamlit_app.py` | Entry point — set this as the "Main file path" |
-| `requirements.txt` | Runtime dependencies **only** — includes `tsam==3.4.2` (see §2) |
-| `requirements-dev.txt` | Adds `pytest`; not installed on the deployed app |
-| `requirements-optional.txt` | Legacy — `tsam` now ships in `requirements.txt` |
-| `.python-version` | `3.13` |
-| `.streamlit/config.toml` | Upload limit, XSRF, theme |
-
-**No secrets are needed to run the app.** All NEM data is committed under
-`data/cache/` and read from disk. The acquisition scripts in `scripts/` need
-`OPENELECTRICITY_API_KEY`, but they are run locally and never by the deployed app.
-
-## 2. tsam and the highspy pin — keep them together
-
-`tsam==3.4.2` requires `highspy<=1.15.0`, while newer highspy releases are
-otherwise fine. `requirements.txt` pins `highspy==1.15.0` **and** ships
-`tsam==3.4.2` so the two resolve together. Bump highspy past 1.15.0 and pip
-fails outright:
-
-```
-ERROR: ResolutionImpossible
-```
-
-tsam is not a deploy-time extra: it is the **default** sizing representation
-(`Scenario.sizing_method="tsam"`, 16 typical weeks — the app's radio default
-is "Typical weeks (tsam)"). It is what keeps the capacity-sizing LP small
-enough to fit a container (~400 MB vs ~1.1 GB for the exact hourly year)
-while staying more accurate than legacy coarse 3 h block-averaging. Keep both
-pins.
-
-## 3. Deploy steps
-
-1. <https://share.streamlit.io> → **New app** → **Deploy a public app from GitHub**
-2. Repository `matthewsmithwork786/pypsa-ppa-nem`, branch `main`, main file
-   `streamlit_app.py`
-3. **Advanced settings → Python version: 3.13** (matches `.python-version`)
-4. Deploy. The first build is slow — see §4.
-
-## 4. Expect a slow first deploy
-
-The repository carries ~450 MB of committed NEM data caches (SCADA, UIGF
-availability, prices, registry). Streamlit Cloud clones the whole repo, so the initial
-build takes several minutes. Subsequent restarts reuse the checkout.
-
-The data is committed deliberately: the cloud container cannot run `nemosis`, so
-without it the app would have no generation data at all.
-
-## 5. Runtime cache — data beyond the committed years
-
-All committed NEM data still ships in the image (`data/cache/`), but the multi-year
-feature reads through a layered cache first, so years or plants not in the repo can be
-fetched at runtime instead of being baked into the image.
-
-- `ppa/data/nem_data.py` resolves every file through `RUNTIME_CACHE_DIR` +
-  `_resolve()`: it looks in the packaged `data/cache/nem/` first, then
-  `$PPA_RUNTIME_CACHE_DIR` (default `~/.cache/pypsa-ppa-nem/nem`). `nem_data.py`
-  itself stays network-free — enforced by `tests/test_nem_data.py`.
-- `ppa/data/remote_cache.py` is the **only** runtime module permitted network access.
-  It fetches pinned Zenodo files by HTTP range requests (fsspec, falling back to a
-  full download when the server does not support ranges) into the runtime cache, so
-  reading a handful of plants out of a wide per-year parquet transfers a small
-  fraction of the file. Callers run `ensure_plant_years`/`ensure_price_years`
-  **before** asking `nem_data.py` to read anything.
-- **The Zenodo record is not published yet.** `ppa/data/zenodo_manifest.json`
-  currently holds a placeholder `record_id`
-  (`PLACEHOLDER_NOT_YET_PUBLISHED`); publishing the real dataset is a manual step
-  (Hanan's Zenodo account). Until that happens, any real fetch raises
-  `RemoteFetchError`, which the UI surfaces as a clean `st.error`, not a crash.
-- **First-fetch latency:** Streamlit Cloud / Cloud Run containers are ephemeral, so
-  the runtime cache is empty on every cold start and refills on demand. Expect the
-  first run after a cold start to spend time downloading whichever year/plant files
-  the scenario needs; column pruning keeps range transfers small, but a wide
-  multi-year pick is slower.
-- **Network egress:** containers must be able to reach `zenodo.org` over outbound
-  HTTPS. Streamlit Cloud and Cloud Run both allow this by default, but an
-  egress-restricted deployment will break multi-year fetching. This is a new
-  runtime requirement — the committed single-year cache needs no network at all.
-
-## 6. Memory — the real constraint
-
-The capacity-sizing LP is the memory peak of the whole app, and Streamlit Community
-Cloud is memory-limited (~1 GB historically; check your current tier). Measured
-locally:
-
-| Phase | Peak RSS |
-|---|---|
-| Baseline after data load | ~350 MB |
-| Sizing LP, **tsam typical weeks (the default)** | **~400 MB** (18 s) |
-| Sizing LP, coarse 3 h (legacy) | ~780 MB |
-| Sizing LP, full hourly (exact) | ~1,143 MB (171 s) |
-| Dispatch, 2 forked workers | ~1,770 MB |
-| Dispatch, 1 worker (serial) | ~725 MB |
-
-> **The default tsam sizing LP (~400 MB) fits any tier, so coarse is no longer
-> the memory fallback.** tsam is both lighter *and* more accurate than coarse:
-> typical weeks keep hourly intra-day resolution, which coarse's 3 h
-> block-averages smooth away (the shape storage sizing depends on). Only the
-> exact full-hourly year (~1.1 GB) needs a multi-GB tier — pick it if you want
-> the exact answer and have the memory, otherwise leave the default.
-
-The app already defends itself:
-
-- `ppa/sizing.py::run_sizing_subprocess` solves the sizing LP in a **child process**, so
-  its multi-GB working set is returned to the OS the moment it finishes rather than
-  staying resident.
-- `ppa/multi_year.py::_safe_worker_count` reads **cgroup** limits, not just host memory,
-  and collapses to the in-process serial path on a constrained container.
-- `clamp_sizing_years` shortens the sizing horizon to fit available RAM.
-- A killed worker pool falls back to serial instead of dying silently.
-
-**If the deployed app still runs out of memory**, in order of preference:
-
-1. Keep the default **Typical weeks (tsam)** — ~400 MB and more accurate than
-   coarse. Only the exact **full-hourly** year (~1.1 GB) is too big for a 1 GB
-   tier.
-2. Reduce **simulation years** — the dispatch phase solves every year.
-3. Raise `PPA_WORKER_MEM_MB` (default `1200`) so fewer workers are started; setting it
-   above the container limit forces the serial path.
-4. Reduce the **max build** caps, which shrinks the LP.
-
-Environment variables are set under **App settings → Advanced → Environment variables**.
-
-## 7. Sanity checks after deploying
-
-Walk `docs/UAT_checklist.md`. The quickest smoke test:
-
-1. **Get Data** tab renders the plant map and markers show CUF% and first-power date.
-2. **Case Setup** → pick a case study → **Optimisation** → run a **1-year** simulation
-   with capacity sizing **off**. This exercises the whole pipeline cheaply.
-3. Only then try capacity sizing, and watch the memory notice in the sizing status line.
-4. **Financial Model** → export XLSX → confirm Excel opens it with no repair prompt.
-
-## 8. Local development
+Use Python 3.13. From the repository root:
 
 ```bash
-pip install -r requirements-dev.txt
-MPLCONFIGDIR=$TMPDIR python3 -m pytest -q -p no:cacheprovider   # 269 tests
+python3.13 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
 streamlit run streamlit_app.py
 ```
 
-See `AGENTS.md` for environment quirks and repo conventions.
+The app listens at <http://localhost:8501>. Runtime data is included under `data/cache/nem/`; the app does not need acquisition credentials or an external data service.
 
-## 9. Deploying to Google Cloud Run via Cloud Build
+## Streamlit Community Cloud
 
-Same repo, containerised instead of Streamlit Cloud. The repo ships:
+Create or update the app from the GitHub repository with these settings:
 
-| File | Purpose |
+| Setting | Value |
 |---|---|
-| `Dockerfile` | Multi-stage build (Python 3.13, matches `.python-version`); installs `requirements.txt` into a venv, runs as non-root, binds `PORT` (default 8501) |
-| `.dockerignore` | Keeps `.git`, dev envs, notebooks, tests and docs out of the image |
-| `cloudbuild.yaml` | Cloud Build pipeline: build → push to Artifact Registry → deploy to Cloud Run |
+| Repository | `matthewsmithwork786/pypsa-ppa-nem` |
+| Branch | `refactor/oet-handover` for this handover; use the deployment branch selected by the project after handover |
+| Main file | `streamlit_app.py` |
+| Python version | `3.13` |
 
-### One-time setup
+The app installs dependencies from `requirements.txt` and uses the committed NEM cache. No app secrets are required for the bundled 2025 data. The deployment branch must include the requirements and cache files described in the repository.
 
-```bash
-# 1. Enable the APIs
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com
+## Docker
 
-# 2. Create the Artifact Registry repo (adjust region if needed)
-gcloud artifacts repositories create pypsa-ppa-nem \
-    --repository-format=docker --location=us-central1
-```
-
-### Deploy
+The Dockerfile builds an image locally and copies the bundled cache into it:
 
 ```bash
-# From the repo root
-gcloud builds submit --config cloudbuild.yaml
+docker build -t pypsa-ppa-nem .
+docker run --rm -p 8501:8501 pypsa-ppa-nem
 ```
 
-This builds `australia-southeast1-docker.pkg.dev/$PROJECT/pypsa-ppa-nem/pypsa-ppa-explorer:<build-id>`,
-pushes it, and creates/updates a Cloud Run service `pypsa-ppa-explorer` in
-`us-central1` with `--allow-unauthenticated` (public URL).
+Set `PORT` to change the container listening port; the default is 8501. Memory needs depend on dispatch years and sizing method. Typical-period sizing is the lower-memory default; full-hourly sizing and parallel multi-year runs can require substantially more memory. See [model assumptions](model_assumptions.md).
 
-To deploy on every push to `main`, add a **Cloud Build trigger** (Cloud Console →
-Cloud Build → Triggers → Create trigger): event *Push to a branch*, branch
-`^main$`, config *Cloud Build configuration file*, location *Repository*,
-`cloudbuild.yaml`.
-
-### Configuration notes
-
-- **Memory/CPU:** `--memory=8Gi --cpu=4` — sized for a 4-worker dispatch
-  (reserve 800 MB + 4 x `PPA_WORKER_MEM_MB` 1200 MB = 5.6 GB, see §5), with
-  4 vCPU so the 4 processes actually run in parallel instead of contending for
-  cores. On a smaller tier lower `PPA_WORKER_MEM_MB`/worker count or reduce
-  simulation years. `PPA_WORKER_MEM_MB` / `PPA_RESERVE_MEM_MB` are set as
-  container env vars.
-- **Port:** Cloud Run injects `PORT`; `cloudbuild.yaml` deploys with
-  `--port=8501` and the Dockerfile binds `${PORT:-8501}`.
-- **Public data:** all NEM data caches are committed under `data/cache/` and
-  read from disk — no secrets or external APIs needed at runtime. The
-  `OPENELECTRICITY_API_KEY` is only used by the local acquisition scripts in
-  `scripts/`.
-
-### Local container check
+## Tests
 
 ```bash
-docker build -t pypsa-ppa-explorer .
-docker run --rm -p 8501:8501 pypsa-ppa-explorer
-# open http://localhost:8501
+MPLCONFIGDIR=/tmp/mplcache python3 -m pytest -q -p no:cacheprovider
 ```
+
+The GitHub Actions workflow runs this suite on pushes and pull requests. For data-source setup and cache refresh procedures, see [data acquisition](DATA_ACQUISITION.md).

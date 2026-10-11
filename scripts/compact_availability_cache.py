@@ -1,24 +1,9 @@
 #!/usr/bin/env python3
-"""Rewrite the availability cache in the compact values-only format.
+"""Convert timestamped availability Parquet files to the values-only canonical 5-minute format.
 
-A naive per-interval parquet spends ~64% of its bytes on the timestamp index,
-which is entirely redundant: AEMO dispatch intervals are a fixed 5-minute grid.
-Storing the values alone against `nem_data.canonical_5min_index(year)` cuts the
-shipped cache from ~197 MB to ~71 MB, which is download time on every cold
-start of the deployed app.
-
-Gaps are written as NaN rather than filled, so `whole_year_check`'s coverage
-test still sees a short year. `semidispatchcap` is dropped: only the fetch
-script ever wrote it, and nothing reads it now that curtailment reporting
-(which needed both SCADA and UIGF) is not computable from the shipped cache.
-
-The conversion is verified per file: the rewritten series must reproduce the
-original exactly on the original timestamps, or the file is left alone.
-
-Usage:
-    PYTHONPATH=. python3 scripts/compact_availability_cache.py --year 2025
-    PYTHONPATH=. python3 scripts/compact_availability_cache.py --year 2025 --dry-run
-"""
+Each file is checked against the original values before it is replaced. Use `--dry-run`
+to inspect proposed changes. Examples:
+`PYTHONPATH=. python3 scripts/compact_availability_cache.py --year 2025 --dry-run`"""
 from __future__ import annotations
 
 import argparse

@@ -87,3 +87,95 @@ st.write(len(state.get_multi_year_financial().yearly))
     assert payload["scenario"].simulation_years == 25
     assert len(payload["results"]) == 1
 
+    restored = AppTest.from_string('''
+import streamlit as st
+from ui.tabs.optimisation import restore_from_query_params
+st.query_params["run"] = "012345abcdef"
+restore_from_query_params()
+''', default_timeout=30).run()
+    assert not restored.exception
+    assert len(restored.session_state["multi_year_financial"].yearly) == 25
+
+    # Carry the persisted one-year result through the same finance, workbook,
+    # and sensitivity interfaces the Results tabs consume.
+    from io import BytesIO
+
+    import openpyxl
+
+    from ppa.financial_model import (
+        ProjectFinanceInputs,
+        energy_inputs_from_result,
+        run_project_finance,
+    )
+    from ppa.financial_model_excel import export_financial_model
+    from ppa.sensitivity import run_what_if
+
+    energy = energy_inputs_from_result(payload["results"][0])
+    finance_inputs = ProjectFinanceInputs(operating_life=25)
+    finance = run_project_finance(finance_inputs, energy)
+    workbook_bytes = export_financial_model(finance_inputs, energy, finance)
+    workbook = openpyxl.load_workbook(BytesIO(workbook_bytes), data_only=False)
+    assert {"Model", "Energy"}.issubset(workbook.sheetnames)
+    assert run_what_if(energy, finance_inputs, ppa_tariff=finance_inputs.ppa_tariff + 1).project_irr != finance.project_irr
+
+    from dataclasses import fields
+
+    def render_deep_dive(results, fin, scenario):
+        deep_dive = AppTest.from_string('''
+from ui.tabs.results_deep_dive import render
+render()
+''', default_timeout=30)
+        deep_dive.session_state["scenario"] = scenario
+        deep_dive.session_state["multi_year_results"] = results
+        deep_dive.session_state["multi_year_financial"] = fin
+        return deep_dive.run()
+
+    representative = render_deep_dive(
+        payload["results"], payload["fin"], payload["scenario"],
+    )
+    assert not representative.exception
+    assert representative.selectbox[0].options == ["2025"]
+    assert any(
+        "Counterfactuals use solved dispatch years only" in caption.value
+        for caption in representative.caption
+    )
+    assert any(
+        "Solved-year effective price" in frame.value.columns
+        and "Total cost over solved years" in frame.value.columns
+        for frame in representative.dataframe
+    )
+    for year in representative.selectbox[0].options:
+        representative.selectbox[0].select(year).run()
+        assert not representative.exception
+
+    result = payload["results"][0]
+    shifted_dispatch = dataclasses.replace(
+        result.dispatch,
+        **{
+            field.name: getattr(result.dispatch, field.name).set_axis(
+                getattr(result.dispatch, field.name).index + pd.DateOffset(years=1)
+            )
+            for field in fields(result.dispatch)
+        },
+    )
+    second_year = dataclasses.replace(
+        result,
+        scenario=dataclasses.replace(result.scenario, first_sim_year=2026),
+        dispatch=shifted_dispatch,
+        market_prices=result.market_prices.set_axis(
+            result.market_prices.index + pd.DateOffset(years=1)
+        ),
+    )
+    two_year_finance = dataclasses.replace(payload["fin"], yearly=payload["fin"].yearly[:2])
+    full_multi_year = dataclasses.replace(
+        payload["scenario"], dispatch_mode="full_multi_year", simulation_years=2,
+    )
+    full = render_deep_dive(
+        [result, second_year], two_year_finance, full_multi_year,
+    )
+    assert not full.exception
+    assert full.selectbox[0].options == ["2025", "2026"]
+    for year in full.selectbox[0].options:
+        full.selectbox[0].select(year).run()
+        assert not full.exception
+

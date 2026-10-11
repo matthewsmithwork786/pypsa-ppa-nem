@@ -37,56 +37,41 @@ with st.popover("Disclaimer", width="stretch", icon="⚠️"):
         """
     )
 
-# Six tabs, ordered by the ACTUAL dependency: plants must be chosen before a
-# scenario means anything, so Get Data comes first. Custom Data folded into
-# Get Data and Sensitivity Analysis into Results -- both are downstream of a
-# result rather than peers of it.
-tabs = st.tabs([
-    "| 👋 Welcome",
-    "| ① 📡 Pick Plants",
-    "| ② 🔬 Set Terms",
-    "| ③ ⚙️ Run",
-    "| 📊 Results",
-    "| 📖 Help",
-], on_change="rerun")
+tabs = st.tabs(
+    ["👋 Welcome", "① 📡 Pick Plants", "② 🔬 Set Terms", "③ ⚙️ Run", "📊 Results", "📖 Help"],
+    on_change="rerun",
+)
 
-i = 0
-if tabs[i].open:
-    with tabs[i]:
+if tabs[0].open:
+    with tabs[0]:
         welcome.render()
 
-i += 1
-if tabs[i].open:
-    with tabs[i]:
+if tabs[1].open:
+    with tabs[1]:
         nem_map.render()
-        st.divider()
-        with st.expander("📤 Advanced: upload your own timeseries instead", expanded=False):
+        with st.expander("📤 Advanced: upload your own timeseries", expanded=False):
             custom_data.render()
 
-i += 1
-if tabs[i].open:
-    with tabs[i]:
+if tabs[2].open:
+    with tabs[2]:
         case_study.render()
 
-i += 1
-if tabs[i].open:
-    with tabs[i]:
+if tabs[3].open:
+    with tabs[3]:
         optimisation.render()
 
-i += 1
-if tabs[i].open:
-    with tabs[i]:
-        _res, _fin, _sens = st.tabs(
-            ["| Dispatch & delivery", "| Financial model", "| Sensitivity"]
+if tabs[4].open:
+    with tabs[4]:
+        dispatch_tab, finance_tab, sensitivity_tab = st.tabs(
+            ["Dispatch & delivery", "Financial model", "Sensitivity"]
         )
-        with _res:
+        with dispatch_tab:
             results_deep_dive.render()
-        with _fin:
+        with finance_tab:
             financial_model.render()
-        with _sens:
+        with sensitivity_tab:
             sensitivity_analysis.render()
 
-i += 1
-if tabs[i].open:
-    with tabs[i]:
+if tabs[5].open:
+    with tabs[5]:
         introduction.render()

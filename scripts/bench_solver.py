@@ -1,22 +1,8 @@
 #!/usr/bin/env python3
-"""W15: benchmark HiGHS solver algorithms on the capacity-sizing LP.
+"""Benchmark HiGHS algorithms on a capacity-sizing LP built from synthetic timeseries.
 
-Builds the sizing LP for a given scenario and times the default dual simplex
-against the interior-point variants available in this HiGHS build:
-
-    {default (dual simplex), "solver": "ipm", "solver": "hipo"}
-
-with `run_crossover` off for the IPM family (the LP is a sizing decision; we
-care about the optimum, not a vertex). Prints model dimensions and wall-clock
-per solver so the HiPO-vs-simplex decision can be measured, not assumed.
-
-Usage:
-    python scripts/bench_solver.py [--hours 8760] [--periods 12] [--method tsam]
-
-The timeseries is synthetic (deterministic sinusoidal PV/wind/price + constant
-load) so the script is self-contained and doesn't need NEM data. `--periods`
-only applies to the tsam method (typical-day clustering).
-"""
+Usage: `python3 scripts/bench_solver.py [--hours N] [--periods N] [--method tsam]`
+The synthetic inputs make this benchmark independent of the NEM data cache."""
 from __future__ import annotations
 
 import argparse
@@ -31,7 +17,6 @@ import pandas as pd
 
 from ppa.network import build_network
 from ppa.scenario import Scenario
-from ppa.sizing import optimise_capacities
 from ppa.solver import solve
 
 

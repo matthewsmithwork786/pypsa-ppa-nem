@@ -1,29 +1,8 @@
 #!/usr/bin/env python3
-"""W14: compare sizing representations — solve time and sized MW.
+"""Compare sizing representations by solve time, model dimensions, sized fleet, and dispatch outcome.
 
-The plan (W14 item 7) asks for `{full hourly, tsam 8/12/24 typical days,
-legacy 3 h coarse}` benchmarked on one case study, so the default
-(`sizing_method="tsam"`, 12 periods) is a measured choice rather than an
-assumed one.
-
-Two things matter and both are reported:
-
-  * **Cost** — wall-clock for the sizing LP, and the LP's dimensions.
-  * **Fidelity** — how close the sized fleet is to the exact full-hourly
-    answer, and the gap between the delivery share the sizing LP *believes*
-    it achieves on its own representation and the delivery share the sized
-    portfolio actually achieves in the full hourly simulation (W14 item 6).
-    A large gap means the representation dropped something that matters.
-
-Full hourly is the reference row: `Δ fleet` is the total-MW error against it.
-
-Usage:
-    PYTHONPATH=. python3 scripts/bench_sizing_method.py
-    PYTHONPATH=. python3 scripts/bench_sizing_method.py --case foundation_deal
-
-Needs the cached NEM SCADA/price parquets under `data/cache/nem/`, and `tsam`
-installed for the typical-day rows (they are skipped otherwise).
-"""
+Usage: `PYTHONPATH=. python3 scripts/bench_sizing_method.py [--case ID]`
+Requires bundled NEM availability and price caches. Typical-period rows require `tsam`."""
 from __future__ import annotations
 
 import argparse

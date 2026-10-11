@@ -1,39 +1,9 @@
 #!/usr/bin/env python3
-"""
-One-time acquisition script: pull AER's free quarterly "base futures price"
-chart-data CSV and normalise it into this repo's hedge-price cache schema.
+"""Download AER quarterly base-futures data and write the hedge cache schema.
 
-*** NOT PART OF THE STREAMLIT APP. NEVER IMPORTED BY `ppa/` OR `ui/`. ***
-
-Run this in a SEPARATE environment with real network access (this repo's dev
-sandbox blocks `aer.gov.au`). Copy/commit the resulting
-`aer_base_futures_{year}.parquet` into `data/cache/nem/hedge/` in this repo --
-that's what `ppa/data/aer_futures.py` actually reads at runtime (cache-only,
-no network imports).
-
-Background page (human-readable, chart + "Download CSV" link):
-    https://www.aer.gov.au/industry/registers/charts/quarterly-base-futures-prices-and-volume-traded
-
-VERIFIED 2026-08-05 against the live export. Two things to know:
-
-* aer.gov.au sits behind Akamai bot verification, so a plain `requests.get` of
-  the CSV returns a JavaScript interstitial rather than data. `download_raw_csv`
-  therefore drives the chart page in headless Chromium (Playwright) to clear
-  the check, then pulls the CSV inside that browser context.
-* The export is WIDE, not long: one row per quarter, one price and one volume
-  column per region, e.g.
-
-      Quarter,Queensland price ($ per megawatt hour),New South Wales price ...
-      2026 Q1,65.5,73.5,43,88.8,1925,2105,1338,1
-
-  Only QLD/NSW/VIC/SA are published -- ASX Energy lists no Tasmanian base
-  future, so TAS1 is legitimately absent and callers must cope with that.
-
-The quarters published are forward ones (2026 Q1..2029 Q4 as at April 2026),
-so `--year` names the cache file the app looks up by `nem_year`, not a filter
-on the quarters: the whole published strip is written and the app chooses which
-quarters to average.
-"""
+Requires the separate acquisition environment; see `scripts/README.md`. The script
+follows AER's download link where available and normalises published regions and
+quarters into `data/cache/nem/hedge/aer_base_futures_<year>.parquet`."""
 from __future__ import annotations
 
 import argparse
@@ -45,7 +15,6 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
-import requests
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("fetch_aer_futures")

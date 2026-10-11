@@ -13,25 +13,11 @@ from ppa.scenario import BASE_SCENARIO
 from ui import state
 from ui.charts import year_axis
 from ui.config_summary import render_config_summary
-from ui.constants import NEM_RESOLUTION_MINUTES
 from ui.exports import csv_download_button
 
 
 def restore_from_query_params() -> None:
-    """Reload a completed run after a page refresh wipes session state.
-
-    Streamlit gives every full-page reload a brand-new session -- there is no
-    "resume" of the old one, so st.session_state is empty regardless of what
-    was on screen a moment ago. The run button stashes its run_id in the URL
-    (?run=...) precisely so a refresh can recover from it: this restores the
-    scenario and results a completed run saved to disk (ppa.run_store), and
-    -- for a run still in flight when the refresh happened -- reclaims it from
-    ppa.run_registry's abandonment grace period so it isn't cancelled out from
-    under the user just because their old session dropped.
-
-    Called once per script run from streamlit_app.py, before any tab renders,
-    so results are available regardless of which tab is active on reload.
-    """
+    """Restore the run named in the URL after a page refresh."""
     run_id = st.query_params.get("run")
     if not run_id or state.has_multi_year_results():
         return
@@ -67,25 +53,18 @@ def _sized_banner_text(sized) -> str:
 
 
 def _sizing_method_label(sized) -> str:
-    """Human-readable sizing representation for the success message."""
-    labels = {
-        "tsam": "typical-day clustering (tsam)",
-        "full_hourly": "full hourly year",
-    }
-    return labels.get(getattr(sized, "sizing_method", "tsam"), "sizing LP")
+    labels = {"tsam": "typical-day clustering (tsam)", "full_hourly": "full hourly year"}
+    return labels.get(sized.sizing_method, "sizing LP")
 
 
 def _sizing_method_caption(scenario) -> str:
-    """Describe the sizing representation actually in use."""
-    method = getattr(scenario, "sizing_method", "tsam")
-    if method == "tsam":
+    if scenario.sizing_method == "tsam":
         return f"{scenario.sizing_n_periods} typical weeks"
     return "full hourly"
 
 
 def _render_sizing_diagnostics() -> None:
-    """Sizing diagnostics expander (plan W12e): per-technology economics and
-    which caps bind, so "strange sizing results" become an explainable answer."""
+    """Show sizing economics, binding limits, and SLA diagnostics."""
     if not state.has_sizing_diagnostics():
         return
     diag = state.get_sizing_diagnostics()
@@ -104,40 +83,22 @@ def _render_sizing_diagnostics() -> None:
         st.dataframe(diag["tech_rows"], width="stretch")
         st.markdown("**Connection links**")
         st.dataframe(diag["link_rows"], width="stretch")
-        # WP9: which SLA tiers were live in the sizing LP and how much work they
-        # did. `sla_constraint_count` comes from ppa.sizing.SizedCapacities (the
-        # solver stores it in n.meta["sla_constraint_count"]) — a positive count
-        # means the tier was a genuine constraint on the build, not just a price
-        # signal, and the daily tier is the biggest multiplier (one per day).
         scn = state.get_effective_scenario()
         sla_constraints = int(diag.get("sla_constraint_count", 0))
+        tiers = [
+            ("Monthly", scn.sla_monthly_enabled, scn.sla_monthly_share),
+            ("Daily", scn.sla_daily_enabled, scn.sla_daily_share),
+            ("Min-delivery floor", scn.enforce_min_delivery, scn.required_delivery_share),
+        ]
         sla_rows = [
             {
-                "SLA tier": "Monthly",
-                "Active": "Yes" if getattr(scn, "sla_monthly_enabled", False) else "No",
-                "Target share": (
-                    f"{scn.sla_monthly_share:.0%}"
-                    if getattr(scn, "sla_monthly_enabled", False) else "—"
-                ),
-            },
-            {
-                "SLA tier": "Daily",
-                "Active": "Yes" if getattr(scn, "sla_daily_enabled", False) else "No",
-                "Target share": (
-                    f"{scn.sla_daily_share:.0%}"
-                    if getattr(scn, "sla_daily_enabled", False) else "—"
-                ),
-            },
-            {
-                "SLA tier": "Min-delivery floor",
-                "Active": "Yes" if getattr(scn, "enforce_min_delivery", False) else "No",
-                "Target share": (
-                    f"{getattr(scn, 'required_delivery_share', 0.0):.0%}"
-                    if getattr(scn, "enforce_min_delivery", False) else "—"
-                ),
-            },
-            {"SLA tier": "Constraints added", "Active": "—", "Target share": str(sla_constraints)},
+                "SLA tier": name,
+                "Active": "Yes" if enabled else "No",
+                "Target share": f"{share:.0%}" if enabled else "—",
+            }
+            for name, enabled, share in tiers
         ]
+        sla_rows.append({"SLA tier": "Constraints added", "Active": "—", "Target share": str(sla_constraints)})
         st.markdown("**SLA tiers**")
         st.dataframe(pd.DataFrame(sla_rows), width="stretch")
         if sla_constraints > 0:
@@ -171,8 +132,6 @@ def _render_sizing_diagnostics() -> None:
             "A single cached weather year (2025) means the sized fleet is tuned to 2025 "
             "weather; multi-year data is a TODO (see README)."
         )
-
-# ── scenario summary ──────────────────────────────────────────────────────────
 
 def _render_scenario_summary(s) -> None:
     with st.expander("Scenario summary", expanded=False):
@@ -253,8 +212,6 @@ def _render_scenario_summary(s) -> None:
                 )
 
 
-# ── data status (compact) ─────────────────────────────────────────────────────
-
 def _render_nem_data_status(s) -> tuple[bool, bool]:
     from ppa.data import nem_data
     from ui.nem_cache_status import cached_cache_status
@@ -279,10 +236,6 @@ def _render_nem_data_status(s) -> tuple[bool, bool]:
                 f"run `python scripts/fetch_nem_scada_prices.py --year {s.nem_year}`."
             )
 
-    # Applies identically to "nem_map" and "nem_default": both silently drive
-    # zero renewable generation if the scenario's own DUIDs are empty/not
-    # ready, regardless of whether *some* plant elsewhere in the cache is
-    # simulation-ready.
     cf_ok, problems = nem_data.nem_generation_ready(
         s.data_source, s.nem_pv_duid, s.nem_wind_duid, year=s.nem_year
     )
@@ -316,8 +269,6 @@ def _render_data_status(s) -> tuple[bool, bool]:
     return False, False
 
 
-# ── Simulation runner ────────────────────────────────────────────────
-
 def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
     import time
 
@@ -330,7 +281,7 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
     if scenario.dispatch_mode == "representative_year":
         st.info(REPRESENTATIVE_YEAR_NOTE)
 
-    res_min = int(getattr(scenario, "nem_resolution_minutes", 60))
+    res_min = scenario.nem_resolution_minutes
     resolution_h = res_min / 60.0
     if res_min < 30 and scenario.dispatch_years > 2:
         raise RuntimeError(
@@ -364,7 +315,6 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
     progress_bar = st.progress(0, text="Starting optimisation ...")
     status_text = st.empty()
 
-    # ── Capacity co-optimisation pre-step ─────────────────────────────────────
     sizing_seconds = None
     if scenario.optimise_capacity:
         from ppa.sizing import (
@@ -376,8 +326,6 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
             sizing_diagnostics,
         )
 
-        # The sizing control names one historical year, independently of the
-        # operating-life projection. Do not concatenate the 25-year horizon.
         sizing_year = scenario.capacity_sizing_year if scenario.is_nem else min(pv_by_year)
         sizing_pv = {sizing_year: pv_by_year[sizing_year]}
         sizing_wind = {sizing_year: wind_by_year[sizing_year]}
@@ -387,8 +335,6 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
         n_sizing_years, notice = clamp_sizing_years(n_sizing_years, resolution_h)
         if notice:
             st.warning(notice)
-        # Warn BEFORE the solve: an out-of-memory kill arrives as a silent
-        # SIGKILL with no traceback, which is impossible to diagnose from the UI.
         mem_advice = sizing_memory_advice(scenario)
         if mem_advice:
             st.warning(mem_advice)
@@ -419,19 +365,12 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
             raise RuntimeError(
                 f"Capacity sizing LP failed: {sized.status} / {sized.condition}"
             )
-        # Keep the sized scenario local to this run: the user's scenario keeps
-        # optimise_capacity=True so re-runs re-size; the optimised fleet is
-        # surfaced via state.set_optimised_sizes.
         scenario = apply_sizing(scenario, sized)
         state.set_optimised_sizes(sized)
         state.set_sizing_diagnostics(
             sizing_diagnostics(sized, scenario, sizing_ts)
         )
-        # Release the full-year sizing frame before run_multi_year forks its
-        # workers. Fork is copy-on-write, but CPython refcounting dirties nearly
-        # every page a child touches, so whatever is still resident here is paid
-        # for once per worker. `sized` (a small dataclass) and the diagnostics
-        # are all that is needed from here on.
+        # Free the sizing frame before dispatch workers fork, to limit memory use.
         del sizing_ts
         gc.collect()
         horizon_msg = (
@@ -468,9 +407,6 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
     dispatch_seconds = time.monotonic() - _t_dispatch
     state.set_multi_year_results(results)
 
-    # Compare the sizing LP's delivery share against the full hourly simulation
-    # of the sized portfolio (plan W14 item 6): a large gap means the typical-
-    # period representation dropped something the hourly year has.
     if sizing_seconds is not None and state.has_sizing_diagnostics():
         diag = state.get_sizing_diagnostics()
         diag["delivery_share_full"] = float(
@@ -503,7 +439,7 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
         status_text.success(f"Completed {scenario.simulation_years} year(s) successfully{timing}.")
 
 
-# ── multi-year results display ────────────────────────────────────────────────
+# Multi-year results display
 
 def _render_results(fin, n_years: int) -> None:
     s = state.get_effective_scenario()
@@ -546,7 +482,6 @@ def _render_results(fin, n_years: int) -> None:
         if n_years == 1:
             return
 
-    # st.markdown("---")
     with st.expander("Charts & data tables", expanded=True):
         tab_charts, tab_table = st.tabs([
             "| Charts", 
@@ -625,40 +560,66 @@ def _render_first_year_energy_tables(result, s) -> None:
         )
 
 
+def _yearly_results_frame(fin) -> pd.DataFrame:
+    return pd.DataFrame([
+        {
+            "Year": year.year,
+            "PPA Revenue (A$M)": year.ppa_revenue / 1e6,
+            "Merchant Revenue (A$M)": year.merch_revenue / 1e6,
+            "Market Buy Cost (A$M)": year.market_buy_cost / 1e6,
+            "Penalty Cost (A$M)": year.penalty_cost / 1e6,
+            "Transmission Cost (A$M)": year.transmission_cost / 1e6,
+            "OPEX (A$M)": year.opex / 1e6,
+            "Net Cash Flow (A$M)": year.net_cashflow / 1e6,
+            "Delivery Rate (%)": year.fulfilled_share * 100,
+            "Wind Gen (GWh)": year.wind_gen_mwh / 1e3,
+            "PV Gen (GWh)": year.pv_gen_mwh / 1e3,
+        }
+        for year in fin.yearly
+    ]).set_index("Year")
+
+
 def _render_revenue_chart(fin) -> None:
-    years = [y.year for y in fin.yearly]
+    yearly = _yearly_results_frame(fin)
+    years = yearly.index
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=years, y=[round(y.ppa_revenue / 1e6, 2) for y in fin.yearly], name="PPA revenue"))
-    fig.add_trace(go.Bar(x=years, y=[round(y.merch_revenue / 1e6, 2) for y in fin.yearly], name="Merchant revenue"))
-    fig.add_trace(go.Bar(x=years, y=[round(-y.market_buy_cost / 1e6, 2) for y in fin.yearly], name="Market buy cost"))
-    fig.add_trace(go.Bar(x=years, y=[round(-y.penalty_cost / 1e6, 2) for y in fin.yearly], name="Penalty cost"))
-    fig.add_trace(go.Bar(x=years, y=[round(-y.transmission_cost / 1e6, 2) for y in fin.yearly], name="Transmission cost"))
-    fig.add_trace(go.Bar(x=years, y=[round(-y.opex / 1e6, 2) for y in fin.yearly], name="OPEX"))
+    series = [
+        ("PPA Revenue (A$M)", "PPA revenue", 1),
+        ("Merchant Revenue (A$M)", "Merchant revenue", 1),
+        ("Market Buy Cost (A$M)", "Market buy cost", -1),
+        ("Penalty Cost (A$M)", "Penalty cost", -1),
+        ("Transmission Cost (A$M)", "Transmission cost", -1),
+        ("OPEX (A$M)", "OPEX", -1),
+    ]
+    for column, label, sign in series:
+        fig.add_trace(go.Bar(x=years, y=sign * yearly[column].round(2), name=label))
     fig.update_layout(
         barmode="relative", title="Annual Revenue Breakdown",
         xaxis_title="Year", yaxis_title="A$M", height=400,
         xaxis=year_axis(years),
     )
     st.plotly_chart(fig, width="stretch")
+    export = yearly.rename(columns={
+        "PPA Revenue (A$M)": "ppa_revenue_aud_m",
+        "Merchant Revenue (A$M)": "merchant_revenue_aud_m",
+        "Market Buy Cost (A$M)": "market_buy_cost_aud_m",
+        "Penalty Cost (A$M)": "penalty_cost_aud_m",
+        "Transmission Cost (A$M)": "transmission_cost_aud_m",
+        "OPEX (A$M)": "opex_aud_m",
+    }).rename_axis("year").reset_index()
     csv_download_button(
-        pd.DataFrame({
-            "year": years,
-            "ppa_revenue_aud_m": [y.ppa_revenue / 1e6 for y in fin.yearly],
-            "merchant_revenue_aud_m": [y.merch_revenue / 1e6 for y in fin.yearly],
-            "market_buy_cost_aud_m": [y.market_buy_cost / 1e6 for y in fin.yearly],
-            "penalty_cost_aud_m": [y.penalty_cost / 1e6 for y in fin.yearly],
-            "transmission_cost_aud_m": [y.transmission_cost / 1e6 for y in fin.yearly],
-            "opex_aud_m": [y.opex / 1e6 for y in fin.yearly],
-        }),
+        export[["year", "ppa_revenue_aud_m", "merchant_revenue_aud_m", "market_buy_cost_aud_m",
+                "penalty_cost_aud_m", "transmission_cost_aud_m", "opex_aud_m"]],
         "annual_revenue_breakdown.csv", key="dl_revenue",
     )
 
 
 def _render_delivery_chart(fin) -> None:
-    years = [y.year for y in fin.yearly]
+    yearly = _yearly_results_frame(fin)
+    years = yearly.index
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=years, y=[round(y.fulfilled_share,3) * 100 for y in fin.yearly],
+        x=years, y=(yearly["Delivery Rate (%)"] / 100).round(3) * 100,
         mode="lines+markers", name="PPA Delivery Rate",
         line=dict(color="#4CAF50", width=2),
     ))
@@ -670,32 +631,31 @@ def _render_delivery_chart(fin) -> None:
     )
     st.plotly_chart(fig, width="stretch")
     csv_download_button(
-        pd.DataFrame({"year": years, "delivery_rate_pct": [round(y.fulfilled_share, 3) * 100 for y in fin.yearly]}),
+        (yearly["Delivery Rate (%)"] / 100).round(3).mul(100)
+        .rename("delivery_rate_pct").rename_axis("year").reset_index(),
         "ppa_delivery_rate.csv", key="dl_delivery",
     )
 
 
 def _render_yearly_table(fin) -> None:
-    rows = [
-        {
-            "Year": y.year,
-            "PPA Revenue (A$M)": round(y.ppa_revenue / 1e6, 2),
-            "Merchant Revenue (A$M)": round(y.merch_revenue / 1e6, 2),
-            "Market Buy Cost (A$M)": round(y.market_buy_cost / 1e6, 2),
-            "Penalty Cost (A$M)": round(y.penalty_cost / 1e6, 2),
-            "Transmission Cost (A$M)": round(y.transmission_cost / 1e6, 2),
-            "OPEX (A$M)": round(y.opex / 1e6, 2),
-            "Net Cash Flow (A$M)": round(y.net_cashflow / 1e6, 2),
-            "Delivery Rate (%)": round(y.fulfilled_share * 100, 1),
-            "Wind Gen (GWh)": round(y.wind_gen_mwh / 1e3, 1),
-            "PV Gen (GWh)": round(y.pv_gen_mwh / 1e3, 1),
-        }
-        for y in fin.yearly
-    ]
-    st.dataframe(pd.DataFrame(rows).set_index("Year"), width="stretch", height="content")
+    yearly = _yearly_results_frame(fin)
+    st.dataframe(
+        yearly.round({
+            "PPA Revenue (A$M)": 2,
+            "Merchant Revenue (A$M)": 2,
+            "Market Buy Cost (A$M)": 2,
+            "Penalty Cost (A$M)": 2,
+            "Transmission Cost (A$M)": 2,
+            "OPEX (A$M)": 2,
+            "Net Cash Flow (A$M)": 2,
+            "Delivery Rate (%)": 1,
+            "Wind Gen (GWh)": 1,
+            "PV Gen (GWh)": 1,
+        }),
+        width="stretch",
+        height="content",
+    )
 
-
-# ── main render ───────────────────────────────────────────────────────────────
 
 def render() -> None:
     st.title("⚙️ Optimisation")
@@ -705,10 +665,6 @@ def render() -> None:
     s = state.get_scenario()
 
     _render_scenario_summary(s)
-    # st.markdown("---")
-
-    # ── Simulation ───────────────────────────────────────────────────
-    # st.subheader("Optimisation")
     with st.expander("Optimisation", expanded=True):
         prices_ok, cf_ok = _render_data_status(s)
         data_ready = prices_ok and cf_ok
@@ -758,13 +714,12 @@ def render() -> None:
             st.rerun()
 
     if state.has_multi_year_financial():
-        # st.markdown("---")
         if s.optimise_capacity and state.has_optimised_sizes():
             sized = state.get_optimised_sizes()
             st.info(
                 f"⚡ **Optimised portfolio** — {_sized_banner_text(sized)} "
                 f"(sized over {sized.sizing_years_used} year(s) "
-                f"at {getattr(sized, 'resolution_h', 1)}h resolution; dispatch & financials run hourly)"
+                f"at {sized.resolution_h}h resolution; dispatch & financials run hourly)"
             )
             _render_sizing_diagnostics()
         _render_results(state.get_multi_year_financial(), s.simulation_years)

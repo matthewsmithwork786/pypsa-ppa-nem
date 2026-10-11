@@ -35,6 +35,8 @@ def tiny_ts():
 
 def test_wedged_child_is_killed_and_reported(monkeypatch, tiny_ts):
     monkeypatch.setattr(sizing, "_sizing_worker", _wedged_worker)
+    # Isolate the watchdog from /proc visibility inside PID-isolated runners.
+    monkeypatch.setattr(sizing, "_process_cpu_seconds", lambda pid: 0.0)
     t0 = time.monotonic()
     with pytest.raises(RuntimeError, match="stopped making progress"):
         sizing.run_sizing_subprocess(
@@ -47,6 +49,7 @@ def test_wedged_child_is_killed_and_reported(monkeypatch, tiny_ts):
 
 def test_hard_timeout_bounds_the_wait(monkeypatch, tiny_ts):
     monkeypatch.setattr(sizing, "_sizing_worker", _wedged_worker)
+    monkeypatch.setattr(sizing, "_process_cpu_seconds", lambda pid: 0.0)
     with pytest.raises(RuntimeError, match="was stopped|stopped making progress"):
         sizing.run_sizing_subprocess(
             tiny_ts, BASE_SCENARIO, poll_interval=0.05,
