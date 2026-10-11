@@ -195,8 +195,8 @@ delivery link makes the model treat delivery as commercially valuable — the co
     st.markdown(
         "The six-bus commercial network used in this app connects physical generation assets "
         "to contractual outcomes through a central IPP aggregation point. "
-        "The diagram below shows the base scenario configuration — it updates live "
-        "to reflect the active case study once you select one."
+        "The diagram below shows the base scenario and updates to reflect the active scenario "
+        "after you apply changes in Set Terms."
     )
 
     from ui import state as _state

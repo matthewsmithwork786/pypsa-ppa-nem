@@ -312,8 +312,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 rf"BESS A\${_assumptions.BESS_FIXED_OM_AUD_MWH_YR:,.0f}/MWh"
             )
             st.caption(
-                "Per-technology benchmark, not a scenario input — see "
-                "ppa/assumptions.py."
+                "Per-technology benchmark; fixed across scenarios."
             )
         cols = st.columns(4)
         discount_rate = cols[0].number_input("Discount rate / WACC (%)", 1.0, 30.0,
@@ -518,7 +517,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 "Switch off only to reproduce older results, or to model taking offtake from "
                 "a specific **existing** plant, where its actual metered energy is what "
                 "you would receive — this needs a local SCADA cache, which the shipped "
-                "app does not carry. See the ❓ UIGF explainer on the Get Data tab."
+                "app does not carry. See the ❓ UIGF explainer in Pick Plants."
             ),
         )
 

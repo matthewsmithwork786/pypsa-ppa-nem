@@ -20,11 +20,11 @@ Create or update the app from the GitHub repository with these settings:
 | Setting | Value |
 |---|---|
 | Repository | `matthewsmithwork786/pypsa-ppa-nem` |
-| Branch | `refactor/oet-handover` for this handover; use the deployment branch selected by the project after handover |
+| Branch | `main` |
 | Main file | `streamlit_app.py` |
 | Python version | `3.13` |
 
-The app installs dependencies from `requirements.txt` and uses the committed NEM cache. No app secrets are required for the bundled 2025 data. The deployment branch must include the requirements and cache files described in the repository.
+The app installs dependencies from `requirements.txt` and uses the committed NEM cache. No app secrets are required for the bundled 2025 data. After the repository transfers to OET, configure Streamlit Community Cloud to use the OET-owned repository, select the `main` branch, and set `streamlit_app.py` as the main file.
 
 ## Docker
 

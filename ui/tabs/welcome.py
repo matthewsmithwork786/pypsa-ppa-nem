@@ -6,41 +6,28 @@ import streamlit as st
 def render() -> None:
     st.markdown(
         """
-# 👋 Welcome to the PyPSA PPA Toolkit!
+# 👋 Welcome to the PyPSA PPA Toolkit
 
-**Interactive, full flexible and open-source toolkit** for modelling renewable portfolios under different 
-**Power Purchase Agreement (PPA)** assumptions.
-**PyPSA** — an open-source energy system optimisation framework — is used to optimise how a renewable portfolio
-(wind, solar, battery storage) should be dispatched when bound by the commercial terms of a PPA.
+An open-source tool for exploring how wind, solar and battery portfolios operate under different
+**Power Purchase Agreement (PPA)** terms. PyPSA models how the portfolio is dispatched against the contract.
 
 ## How to use this toolkit
 Three steps, left to right. Each one needs the step before it.
 
 ### ① 📡 Pick Plants
-Choose real Australian NEM wind and/or solar plants on the map. Their 2025
-generation profiles drive everything downstream, so nothing else means much
-until this is done. Your own timeseries can be uploaded here instead.
+Choose Australian NEM wind and/or solar plants on the map, or upload your own
+timeseries.
 
 ### ② 🔬 Set Terms
-Start from one of the four predefined case studies — each poses a concrete
-question, and loading one fills in a complete, sensible scenario. Adjust from
-there only if you want to:
-
-* *Portfolio*: wind + solar + battery co-located at a single connection point.
-* *PPA contract*: offtake load and profile, delivery obligation, shortfall cap, penalty multiplier.
-* *Market interaction*: spot buy/sell with caps and bid-offer spread.
-* *Financial assumptions*: capex, discount rate, target IRR, project life.
-* *Simulation*: horizon, price escalation, technology degradation.
-
-**Capacity co-optimisation** is off by default for a quick first test. Turn it on
-to size wind, solar and storage; otherwise enter the fleet capacities yourself.
+Set portfolio capacity, PPA terms, market assumptions and financial inputs.
+Apply your changes before running the model.
 
 ### ③ ⚙️ Run
-The default **Fast** mode solves one operating year, then repeats its energy
+By default, **Fast** mode solves one operating year, then repeats its energy
 volumes over the **25-year financial projection**. Financial prices and costs
 can escalate; later-year degradation and changing dispatch are not simulated.
-Choose **Full** mode to solve every operating year instead. Capacity sizing is
-a separate solve and can take substantially longer than fixed-capacity dispatch.
+Choose **Full** mode to solve every operating year. Capacity sizing can take
+substantially longer than fixed-capacity dispatch.
 
 ### 📊 Results
 Dispatch and delivery, the full project-finance model (CAPEX, LCOE, IRR, NPV,
