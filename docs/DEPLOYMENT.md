@@ -37,6 +37,13 @@ docker run --rm -p 8501:8501 pypsa-ppa-nem
 
 Set `PORT` to change the container listening port; the default is 8501. Memory needs depend on dispatch years and sizing method. Typical-period sizing is the lower-memory default; full-hourly sizing and parallel multi-year runs can require substantially more memory. See [model assumptions](model_assumptions.md).
 
+Capacity sizing launches `python -m ppa.sizing_worker` in a fresh interpreter.
+This avoids inheriting locks from Streamlit or an earlier HiGHS solve. The
+worker uses one numerical/solver thread and private temporary files; cancellation
+or a timeout kills it and removes those files. The selected typical-week count
+and model constraints are unchanged. Recheck peak memory on the deployed host:
+`PYTHONPATH=. python3 scripts/measure_peak_rss.py --method tsam --years 1 --phase sizing`.
+
 ## Tests
 
 ```bash

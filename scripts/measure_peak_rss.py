@@ -9,11 +9,21 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import gc
+import glob
 import os
 import threading
 import time
 
 PAGE_SIZE = os.sysconf("SC_PAGE_SIZE")
+
+
+def _visible_pid() -> int:
+    """Use the PID exposed by /proc, including inside PID-isolated runners."""
+    try:
+        with open("/proc/self/stat") as fh:
+            return int(fh.read().split()[0])
+    except (OSError, ValueError):
+        return os.getpid()
 
 
 def _rss_mb(pid: int) -> float:
@@ -24,21 +34,39 @@ def _rss_mb(pid: int) -> float:
         return 0.0
 
 
+def _pss_mb(pid: int) -> float:
+    """Proportional memory avoids counting shared library pages twice."""
+    try:
+        with open(f"/proc/{pid}/smaps_rollup") as fh:
+            for line in fh:
+                if line.startswith("Pss:"):
+                    return int(line.split()[1]) / 1024
+    except (OSError, ValueError):
+        pass
+    return 0.0
+
+
 def _descendants(pid: int) -> list[int]:
-    """All descendant PIDs of *pid*, via /proc/<pid>/task/*/children."""
-    out: list[int] = []
-    stack = [pid]
-    while stack:
-        current = stack.pop()
+    """Read parent PIDs even where /proc/task/children is unavailable."""
+    children: dict[int, list[int]] = {}
+    for name in glob.glob("/proc/[0-9]*/stat"):
         try:
-            for task in os.listdir(f"/proc/{current}/task"):
-                with open(f"/proc/{current}/task/{task}/children") as fh:
-                    kids = [int(p) for p in fh.read().split()]
-                out.extend(kids)
-                stack.extend(kids)
-        except (OSError, ValueError):
+            with open(name) as fh:
+                raw = fh.read()
+            child = int(raw.split()[0])
+            parent = int(raw.rsplit(") ", 1)[1].split()[1])
+            children.setdefault(parent, []).append(child)
+        except (OSError, ValueError, IndexError):
             continue
-    return out
+    found = set()
+    pending = list(children.get(pid, []))
+    while pending:
+        child = pending.pop()
+        if child in found:
+            continue
+        found.add(child)
+        pending.extend(children.get(child, []))
+    return list(found)
 
 
 class PeakSampler:
@@ -47,14 +75,17 @@ class PeakSampler:
     def __init__(self, interval: float = 0.25):
         self.interval = interval
         self.peak_mb = 0.0
+        self.peak_pss_mb = 0.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
     def _run(self) -> None:
-        me = os.getpid()
+        me = _visible_pid()
         while not self._stop.is_set():
-            total = _rss_mb(me) + sum(_rss_mb(p) for p in _descendants(me))
+            pids = [me, *_descendants(me)]
+            total = sum(_rss_mb(p) for p in pids)
             self.peak_mb = max(self.peak_mb, total)
+            self.peak_pss_mb = max(self.peak_pss_mb, sum(_pss_mb(p) for p in pids))
             self._stop.wait(self.interval)
 
     def __enter__(self) -> "PeakSampler":
@@ -101,7 +132,7 @@ def main() -> None:
 
     print(f"Case: {case.name} · {scn.simulation_years} year(s) · sizing {args.method} "
           f"· workers {args.workers}")
-    print(f"baseline RSS after data load: {_rss_mb(os.getpid()):,.0f} MB\n")
+    print(f"baseline RSS after data load: {_rss_mb(_visible_pid()):,.0f} MB\n")
 
     sized = None
     if args.phase in ("sizing", "both"):
@@ -113,11 +144,12 @@ def main() -> None:
         with PeakSampler() as sampler:
             sized = run_sizing_subprocess(sizing_ts, scn)
         print(f"SIZING   peak RSS {sampler.peak_mb:8,.0f} MB   "
+              f"peak PSS {sampler.peak_pss_mb:,.0f} MB   "
               f"{time.monotonic() - t0:6.1f}s   status={sized.status}")
         # Release the sizing inputs before forking dispatch workers.
         del sizing_ts
         gc.collect()
-        print(f"         parent RSS after release: {_rss_mb(os.getpid()):,.0f} MB")
+        print(f"         parent RSS after release: {_rss_mb(_visible_pid()):,.0f} MB")
 
     if args.phase in ("dispatch", "both"):
         sim_scn = apply_sizing(scn, sized) if sized is not None else scn
@@ -135,7 +167,7 @@ def main() -> None:
         print(f"DISPATCH peak RSS {sampler.peak_mb:8,.0f} MB   "
               f"{time.monotonic() - t0:6.1f}s")
 
-    print(f"\nfinal parent RSS: {_rss_mb(os.getpid()):,.0f} MB")
+    print(f"\nfinal parent RSS: {_rss_mb(_visible_pid()):,.0f} MB")
 
 
 if __name__ == "__main__":
