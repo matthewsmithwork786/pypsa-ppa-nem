@@ -14,12 +14,16 @@ from __future__ import annotations
 
 import dataclasses
 import math
-import multiprocessing
+import json
+import pickle
+import subprocess
+import sys
+import tempfile
 import os
 import time
-import traceback
 from dataclasses import dataclass
 from typing import Callable
+from pathlib import Path
 
 import pandas as pd
 
@@ -222,7 +226,9 @@ def build_sizing_timeseries(
     return sizing_ts
 
 
-def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities:
+def optimise_capacities(
+    ts: pd.DataFrame, scenario: Scenario, *, solver_options: dict | None = None,
+) -> SizedCapacities:
     """Solve the investment LP and extract optimal capacities.
 
     `ts` is the hourly timeseries. How it is represented before the solve is
@@ -280,7 +286,9 @@ def optimise_capacities(ts: pd.DataFrame, scenario: Scenario) -> SizedCapacities
     else:  # full_hourly
         n = build_network(ts, sizing_scn, resolution_h=resolution_h)
 
-    status, condition = solve(n, sizing_scn, ts, period_labels=period_labels)
+    status, condition = solve(
+        n, sizing_scn, ts, period_labels=period_labels, solver_options=solver_options,
+    )
 
     # max(0, ·) clamps solver noise (e.g. -0.0 / -1e-9) at zero builds
     if "p_nom_opt" in n.generators.static.columns:
@@ -543,21 +551,6 @@ def sizing_diagnostics(sized: SizedCapacities, scenario: Scenario, ts: pd.DataFr
     }
 
 
-def _sizing_worker(conn, ts: pd.DataFrame, scenario_fields: dict) -> None:
-    """Child-process entry point: solve the sizing LP and send the result back.
-
-    Takes the scenario as a plain dict for the same Streamlit class-reload
-    pickling reason as `ppa.multi_year._solve_one_year`.
-    """
-    try:
-        sized = optimise_capacities(ts, Scenario(**scenario_fields))
-        conn.send(("ok", sized))
-    except BaseException:
-        conn.send(("err", traceback.format_exc()))
-    finally:
-        conn.close()
-
-
 def _process_cpu_seconds(pid: int) -> float | None:
     """CPU time (user+system) burned by `pid`, or None where /proc is absent.
 
@@ -584,110 +577,72 @@ def run_sizing_subprocess(
     stall_timeout: float = 180.0,
     hard_timeout: float = 3600.0,
 ) -> SizedCapacities:
-    """Run `optimise_capacities` in a killable child process.
+    """Solve in a fresh interpreter, without inheriting Streamlit's thread locks.
 
-    The solve is one blocking native HiGHS call, so it cannot be interrupted
-    in-process (Streamlit's Stop button, Ctrl+C and SIGTERM are all deferred
-    until the solver returns). Running it in a child process makes it
-    cancellable — `heartbeat` is invoked every `poll_interval` seconds and may
-    raise (e.g. a Streamlit StopException); the child is then killed by the
-    finally block. Killing the child also returns the LP's multi-GB memory to
-    the OS immediately instead of leaving it in the app process.
-
-    The child is forked from a Streamlit server process that runs several
-    threads, so it can inherit a lock already held by a thread that does not
-    exist in the child and deadlock before it reaches the solver. That child
-    never exits and never sends, so waiting on it alone hangs forever behind a
-    ticking heartbeat. Two guards bound the wait: the child is killed if it
-    burns no CPU for `stall_timeout` (deadlocked, not solving), and in any case
-    after `hard_timeout`.
-
-    `fork` is kept deliberately. `forkserver` would avoid the inherited-lock
-    deadlock outright, but it needs a Unix socket (blocked on some hosts) and
-    its child shares no pages with the parent: measured peak was 748 MB via
-    fork's copy-on-write against a 1 GB Streamlit Cloud cap, so a fresh child
-    re-importing pypsa would trade a rare deadlock for a likely OOM.
+    Only local, private temporary files cross the process boundary. Keep logs on
+    disk so solver output cannot fill a pipe and block the child. Cancellation
+    and both watchdogs always kill and reap the worker before removing its files.
     """
-    try:
-        mp_context = multiprocessing.get_context("fork")
-    except ValueError:  # pragma: no cover - Windows only
-        mp_context = multiprocessing.get_context("spawn")
+    root = Path(__file__).resolve().parents[1]
+    with tempfile.TemporaryDirectory(prefix="ppa-sizing-") as work:
+        work = Path(work)
+        request, response = work / "request.pkl", work / "response.json"
+        with request.open("wb") as fh:
+            pickle.dump((ts, dataclasses.asdict(scenario)), fh)
+        env = os.environ.copy()
+        for key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                    "NUMEXPR_NUM_THREADS", "POLARS_MAX_THREADS"):
+            env[key] = "1"
+        with (work / "worker.log").open("w+b") as log:
+            proc = subprocess.Popen(
+                _sizing_command(request, response), cwd=root, env=env,
+                stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+            )
+            started = last_progress = time.monotonic()
+            last_cpu = _process_cpu_seconds(proc.pid) or 0.0
+            try:
+                while proc.poll() is None:
+                    now = time.monotonic()
+                    cpu = _process_cpu_seconds(proc.pid)
+                    if cpu is None:
+                        last_progress = now
+                    elif cpu - last_cpu > 0.5:
+                        last_cpu, last_progress = cpu, now
+                    if now - last_progress > stall_timeout:
+                        raise RuntimeError(
+                            f"Capacity sizing stopped making progress: no CPU activity "
+                            f"for {stall_timeout:.0f}s. The worker has been stopped."
+                        )
+                    if now - started > hard_timeout:
+                        raise RuntimeError(
+                            f"Capacity sizing exceeded {hard_timeout / 60:.0f} minutes "
+                            "and was stopped. Reduce the typical-week count or run locally."
+                        )
+                    if heartbeat is not None:
+                        heartbeat()
+                    time.sleep(poll_interval)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait()
 
-    parent_conn, child_conn = mp_context.Pipe(duplex=False)
-    proc = mp_context.Process(
-        target=_sizing_worker,
-        args=(child_conn, ts, dataclasses.asdict(scenario)),
-        daemon=True,
-    )
-    proc.start()
-    child_conn.close()
-
-    started = time.monotonic()
-    last_cpu = _process_cpu_seconds(proc.pid) or 0.0
-    last_progress = started
-
-    # A child killed mid-flight leaves the pipe readable-at-EOF, so `poll()`
-    # returns True and `recv()` raises EOFError. Surfacing that bare EOFError
-    # buried the out-of-memory diagnosis this code exists to give.
-    crashed = RuntimeError(
-        "Sizing subprocess died without returning a result "
-        "(likely killed by the OS — out of memory?). Reduce the typical-week "
-        "count or the max-build caps, or run the app locally."
-    )
-
-    try:
-        while True:
-            if parent_conn.poll(poll_interval):
-                try:
-                    kind, payload = parent_conn.recv()
-                except EOFError:
-                    raise crashed from None
-                break
-            if not proc.is_alive():
-                # Drain a result sent just before exit, else it truly crashed
-                if parent_conn.poll(0):
-                    try:
-                        kind, payload = parent_conn.recv()
-                    except EOFError:
-                        raise crashed from None
-                    break
-                raise crashed
-
-            now = time.monotonic()
-            cpu = _process_cpu_seconds(proc.pid)
-            if cpu is None:
-                last_progress = now  # cannot measure — rely on hard_timeout only
-            elif cpu - last_cpu > 0.5:
-                last_cpu, last_progress = cpu, now
-
-            if now - last_progress > stall_timeout:
+            if proc.returncode != 0 or not response.is_file():
+                log.seek(0, os.SEEK_END)
+                log.seek(max(0, log.tell() - 4096))
+                detail = log.read().decode("utf-8", errors="replace")
                 raise RuntimeError(
-                    f"The capacity sizing subprocess stopped making progress: it "
-                    f"used no CPU for {stall_timeout:.0f}s, so it is wedged rather "
-                    "than solving (a child forked from the Streamlit server can "
-                    "deadlock on a lock inherited from another thread). It has "
-                    "been stopped. Try running the optimisation again — this is "
-                    "intermittent — and if it keeps happening, reduce the "
-                    "typical-week count or the max-build caps, or run the app "
-                    "locally where memory is not capped."
+                    f"Sizing subprocess died without returning a result "
+                    f"(exit {proc.returncode}; it may have exceeded available memory). "
+                    "Reduce the typical-week count or run locally.\n" + detail
                 )
-            if now - started > hard_timeout:
-                raise RuntimeError(
-                    f"Capacity sizing exceeded {hard_timeout / 60:.0f} minutes and "
-                    "was stopped. Reduce the sizing horizon, the typical-week "
-                    "count, or the max-build caps, or run the app locally."
-                )
-            if heartbeat is not None:
-                heartbeat()  # may raise (user cancelled) → finally kills child
-    finally:
-        if proc.is_alive():
-            proc.kill()
-        proc.join(timeout=5)
-        parent_conn.close()
+            payload = json.loads(response.read_text())
+            if payload["kind"] == "err":
+                raise RuntimeError("Capacity sizing LP failed in subprocess:\n" + payload["error"])
+            return SizedCapacities(**payload["sized"])
 
-    if kind == "err":
-        raise RuntimeError(f"Capacity sizing LP failed in subprocess:\n{payload}")
-    return payload
+
+def _sizing_command(request: Path, response: Path) -> list[str]:
+    return [sys.executable, "-m", "ppa.sizing_worker", str(request), str(response)]
 
 
 def apply_sizing(scenario: Scenario, sized: SizedCapacities) -> Scenario:
