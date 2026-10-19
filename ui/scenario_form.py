@@ -527,7 +527,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
             min_value=0.0, max_value=500.0,
             step=5.0,
             key="sf_cal_forward_price",
-            help="Indicative baseload base-futures price for the next calendar year — use the "
+            help="Indicative baseload base-futures price for the selected delivery quarters — use the "
                  "AER quote below or enter your own estimate.",
         )
         cal_hedge_fraction = cols[2].slider(
@@ -540,6 +540,22 @@ def render_scenario_form(initial: Scenario) -> Scenario:
 
         st.markdown("**AER indicative hedge price**")
         from ppa.data import aer_futures
+
+        st.link_button("AER futures prices — source website ↗", aer_futures.AER_FUTURES_URL)
+        with st.popover("? Futures prices and the blended comparison"):
+            st.markdown("""
+**Base futures** are electricity contracts for a fixed baseload volume across all hours of a delivery quarter. AER publishes indicative quarterly prices from ASX Energy; these are not live executable quotes.
+
+**The app uses a saved data snapshot.** The date beside the average is the date recorded in that cache, not today's date. Follow the source link to check the latest AER release. AER's data date and the CSV publication date can differ.
+
+**Choosing a price:** the initial default averages the first complete calendar year in the cache. The preview is a simple, unweighted average of the quarters you select. Click **Use AER indicative average**, then **Apply changes**, and run the model to use that price. Changing the region or quarters alone does not replace the entered price. You can enter a manual price instead.
+
+**Base-futures comparison:** the entered price × total load. This treats the hedge as following actual consumption; a traded baseload contract covers fixed MW and can leave volume/shape exposure when load varies.
+
+**Blended comparison:** hedge fraction × base-futures cost + remaining fraction × spot-only cost. For an 80% hedge, futures at A$100/MWh and load-weighted spot at A$120/MWh give A$104/MWh. This is a futures/spot blend, not a wind/solar blend.
+
+Both comparisons exclude retailer/network charges and penalty compensation. In multi-year dispatch the entered futures price follows the model's price escalation assumption; Fast mode compares only the solved dispatch year.
+""")
 
         _aer_year = int(nem_year)
         if not aer_futures.has_futures_cache(_aer_year):

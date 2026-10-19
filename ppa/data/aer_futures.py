@@ -18,6 +18,7 @@ DEFAULT_PRODUCT = "Base"
 _REGION_ALIASES = {"NSW": "NSW1", "QLD": "QLD1", "SA": "SA1", "TAS": "TAS1", "VIC": "VIC1"}
 DISCLAIMER_TEMPLATE = "Indicative only — AER published base futures, non-tradable, as at {as_at}."
 DISCLAIMER_UNKNOWN_DATE = "Indicative only — AER published base futures, non-tradable (as-at date unknown)."
+AER_FUTURES_URL = "https://www.aer.gov.au/industry/registers/charts/quarterly-base-futures-prices-and-volume-traded"
 SOURCE_MANUAL = "manual"
 SOURCE_AER = "aer_indicative"
 
@@ -226,7 +227,7 @@ def forward_price_for_scenario(scenario, quarters=None, cache_dir: Path = NEM_CA
 
     df = load_aer_base_futures(year, cache_dir)
     if quarters is None:
-        quarters_used = tuple(available_quarters(df, region=region))
+        quarters_used = tuple(first_full_calendar_year(available_quarters(df, region=region)))
     else:
         quarters_used = tuple(quarters)
 

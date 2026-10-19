@@ -116,3 +116,20 @@ def test_apply_pending_aer_idempotent_on_repeat_calls():
     assert first is True
     assert second is False
     assert session_state["sf_cal_forward_price"] == 95.0
+
+
+def test_aer_source_and_explanation_are_visible_in_scenario_form():
+    from ppa.scenario import BASE_SCENARIO
+    from streamlit.testing.v1 import AppTest
+    app = AppTest.from_string("""
+from ppa.scenario import BASE_SCENARIO
+from ui.scenario_form import render_scenario_form
+render_scenario_form(BASE_SCENARIO)
+""").run()
+    assert not app.exception
+    assert any(p.proto.popover.label == "? Futures prices and the blended comparison" for p in app.get("popover"))
+    assert any(link.url == aer_futures.AER_FUTURES_URL for link in app.get("link_button"))
+    from ppa.data.aer_futures import load_aer_base_futures, quarterly_average, available_quarters, first_full_calendar_year
+    df = load_aer_base_futures()
+    quarters = first_full_calendar_year(available_quarters(df, region=BASE_SCENARIO.nem_price_region))
+    assert app.number_input(key="sf_cal_forward_price").value == pytest.approx(quarterly_average(df, region=BASE_SCENARIO.nem_price_region, quarters=quarters))
