@@ -1,0 +1,11 @@
+{
+  "source_page": "https://www.aer.gov.au/industry/registers/charts/quarterly-base-futures-prices-and-volume-traded",
+  "source_csv": "https://www.aer.gov.au/sites/default/files/2026-08/AER_Contract%20prices_Quarterly%20base%20future%20prices%20and%20volume%20traded%20DATA_2_20260807084219_0.CSV",
+  "price_as_at": "2026-06-30",
+  "csv_publication_date": "2026-08-07",
+  "imported_on": "2026-10-19",
+  "raw_csv": "source/aer_base_futures_20260807.csv",
+  "sha256": "9db29167215b66caf925a4061866e1c578c14dacd450772b4678670409565f68",
+  "cache_file": "aer_base_futures_2025.parquet",
+  "note": "2025 in the cache filename is the historical NEM weather-data lookup year, not the futures delivery year. Prices were imported from the user-provided AER download; price date verified against the AER source page."
+}

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import io
-import re
 import logging
 import sys
 from datetime import date
@@ -49,10 +48,6 @@ DEFAULT_OUT_DIR = REPO_ROOT / "data" / "cache" / "nem" / "hedge"
 
 DEFAULT_PRODUCT = "Base"
 
-# Publication timestamp recovered from the CSV file name by main(); the export
-# carries no trade-date column of its own.
-AS_AT_OVERRIDE: "date | None" = None
-
 _QUARTER_COL_CANDIDATES = ["quarter", "Quarter", "Delivery Quarter", "delivery_period"]
 
 
@@ -81,22 +76,6 @@ def _discover_csv_url(page_html_locator) -> str | None:
                 return "https://www.aer.gov.au" + href
             return href
     return None
-
-
-def _stamp_as_at_from_url(url: str) -> None:
-    """Recover the publication date from the CSV file name (…_20260407173757.CSV)."""
-    global AS_AT_OVERRIDE
-    match = re.search(r"_(\d{8})\d{6}\.csv", url, flags=re.IGNORECASE)
-    if match:
-        try:
-            AS_AT_OVERRIDE = date(
-                int(match.group(1)[:4]), int(match.group(1)[4:6]), int(match.group(1)[6:8])
-            )
-            log.info("Publication date from file name: %s", AS_AT_OVERRIDE)
-            return
-        except ValueError:
-            pass
-    log.warning("No publication date in %s -- stamping today's date instead", url)
 
 
 def download_raw_csv(url: str | None = None, timeout: int = 180) -> "tuple[bytes, str]":
@@ -148,7 +127,7 @@ def download_raw_csv(url: str | None = None, timeout: int = 180) -> "tuple[bytes
     return body, csv_url
 
 
-def parse_raw_csv(raw_bytes: bytes, year: int) -> pd.DataFrame:
+def parse_raw_csv(raw_bytes: bytes, year: int, as_at: date) -> pd.DataFrame:
     """Normalise AER's wide export into the hedge-cache schema.
 
     Input has one row per quarter and one column per region, e.g.
@@ -218,10 +197,8 @@ def parse_raw_csv(raw_bytes: bytes, year: int) -> pd.DataFrame:
             "formatting that needs stripping. Inspect the raw CSV."
         )
 
-    # The export carries no trade date; the publication date lives in the file
-    # name (…_20260407173757.CSV). main() passes it in via AS_AT_OVERRIDE when
-    # it can be recovered, else today's download date is stamped.
-    df["as_at_date"] = pd.Timestamp(AS_AT_OVERRIDE or date.today())
+    # AER's quote date comes from the source page, not the CSV publication timestamp.
+    df["as_at_date"] = pd.Timestamp(as_at)
 
     return df[["region", "quarter_label", "product", "price_aud_mwh", "as_at_date"]]
 
@@ -235,6 +212,8 @@ def main() -> int:
         )
     )
     parser.add_argument("--year", type=int, default=2025)
+    parser.add_argument("--input-csv", type=Path, help="Import an already downloaded AER CSV without network access.")
+    parser.add_argument("--as-at", type=date.fromisoformat, help="Price observation/settlement date stated on the AER source page (YYYY-MM-DD), not the file publication date.")
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument(
         "--overwrite",
@@ -252,10 +231,12 @@ def main() -> int:
         print(f"SKIP (exists): {out_file}")
         return 0
 
+    if args.as_at is None:
+        parser.error("--as-at is required when refreshing prices; use the price date stated on the AER source page.")
+
     try:
-        raw_bytes, source_url = download_raw_csv()
-        _stamp_as_at_from_url(source_url)
-        df = parse_raw_csv(raw_bytes, args.year)
+        raw_bytes = args.input_csv.read_bytes() if args.input_csv else download_raw_csv()[0]
+        df = parse_raw_csv(raw_bytes, args.year, args.as_at)
     except AerFetchError as exc:
         log.error("%s", exc)
         print("\n" + "=" * 70)
