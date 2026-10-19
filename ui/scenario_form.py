@@ -552,7 +552,7 @@ def render_scenario_form(initial: Scenario) -> Scenario:
 
 **Base-futures comparison:** the entered price × total load. This treats the hedge as following actual consumption; a traded baseload contract covers fixed MW and can leave volume/shape exposure when load varies.
 
-**Blended comparison:** hedge fraction × base-futures cost + remaining fraction × spot-only cost. For an 80% hedge, futures at A$100/MWh and load-weighted spot at A$120/MWh give A$104/MWh. This is a futures/spot blend, not a wind/solar blend.
+**Blended comparison:** hedge fraction × base-futures cost + remaining fraction × spot-only cost. For an 80% hedge, futures at AUD 100/MWh and load-weighted spot at AUD 120/MWh give AUD 104/MWh. This is a futures/spot blend, not a wind/solar blend.
 
 Both comparisons exclude retailer/network charges and penalty compensation. In multi-year dispatch the entered futures price follows the model's price escalation assumption; Fast mode compares only the solved dispatch year.
 """)
