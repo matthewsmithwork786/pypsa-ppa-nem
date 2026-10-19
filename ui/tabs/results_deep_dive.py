@@ -257,12 +257,19 @@ def _render_gen_stats(result, s) -> None:
 
 
 def _render_multi_year_counterfactuals(results, fin, s) -> None:
+    if not s.enable_counterfactual:
+        st.info("Enable ‘Compare to counterfactual strategies’ in Set Terms, apply changes and run again.")
+        return
     # Older saved runs may not include market prices.
     if not any(getattr(r, "market_prices", None) is not None for r in results):
         return
 
     st.caption(
-        "Compares the offtaker's all-in cost under the PPA versus alternative sourcing strategies. "
+        "Compares the offtaker's wholesale energy cost under the PPA versus alternative sourcing strategies. "
+        "PPA cost is payment for delivered energy plus spot purchases for residual load; "
+        "retail/network charges and penalty compensation are excluded. "
+        "The futures comparison fixes a fraction of each interval's load at the entered price "
+        "(a load-following proxy, rather than a fixed-MW baseload swap). "
         "The base-futures price is escalated year-on-year at the same rate as market prices. "
         "Counterfactuals use solved dispatch years only, which may be a subset of the financial projection."
     )
@@ -321,6 +328,7 @@ def _render_multi_year_counterfactuals(results, fin, s) -> None:
          f"A${(total_blended - total_ppa) / 1e6:+.2f}M vs PPA"),
     ], columns=["Strategy", "Solved-year effective price", "Total cost over solved years", "vs PPA"])
     st.dataframe(tbl, hide_index=True, width="stretch")
+    csv_download_button(tbl, "counterfactual_costs.csv", key="dl_counterfactuals")
 
 
 def _render_offtaker(result) -> None:
@@ -472,7 +480,7 @@ def _render_multi_year_deep_dive() -> None:
         cols[0].metric("PPA Revenue", f"A${yf.ppa_revenue / 1e6:.2f}M")
         cols[1].metric("Merchant Revenue", f"A${yf.merch_revenue / 1e6:.2f}M")
         cols[2].metric("Net Cash Flow", f"A${yf.net_cashflow / 1e6:.2f}M")
-        cols[3].metric("Delivery Rate", f"{yf.fulfilled_share:.1%}")
+        cols[3].metric(f"Delivery rate ({selected_year})", f"{yf.fulfilled_share:.1%}")
         cols[4].metric("Wind+PV Gen", f"{(yf.wind_gen_mwh + yf.pv_gen_mwh) / 1e3:.0f} GWh")
 
     with st.expander("Lifetime project economics", expanded=False):
@@ -497,17 +505,19 @@ def _render_multi_year_deep_dive() -> None:
             irr_str = f"{fin.irr:.1%}" if fin.irr == fin.irr else "n/a"
             lcoe_str = f"A${fin.lcoe:.2f}/MWh" if fin.lcoe == fin.lcoe else "n/a"
             payback_str = f"{fin.simple_payback:.1f} yrs" if fin.simple_payback < 1e8 else "n/a"
-            avg_delivery = sum(y.fulfilled_share for y in fin.yearly) / len(fin.yearly) if fin.yearly else 0.0
+            avg_delivery = fin.delivery_share
             econ_df = pd.DataFrame(
                 [
                     ("NPV", _fmt_m(fin.npv), f"at {s.discount_rate:.0%} WACC"),
-                    ("Project IRR", irr_str, f"{s.project_life_yrs}-yr life"),
+                    ("Operating cash-flow IRR (pre-tax)", irr_str, "Upfront CAPEX + devex; see Financial model for construction, debt and tax"),
                     ("LCOE", lcoe_str, f"at {s.discount_rate:.0%} WACC"),
                     ("Simple payback", payback_str, ""),
                     ("Total lifetime revenue", _fmt_m(fin.total_lifetime_revenue), ""),
                     ("Total lifetime generation", f"{fin.total_lifetime_generation_mwh / 1e3:.0f} GWh", ""),
-                    ("Achieved PPA delivery (avg)", f"{avg_delivery:.1%}",
-                     f"vs {s.required_delivery_share:.0%} required"),
+                    ("PPA delivery (projection, load-weighted)", f"{avg_delivery:.1%}",
+                     f"Target {s.required_delivery_share:.0%}; "
+                     + ("hard floor in sizing" if s.enforce_min_delivery else "shortfall allowance; delivery not guaranteed")
+                     + ("; penalty regime on" if s.enable_penalty else "; no penalty charge")),
                     ("Breakeven PPA for target IRR",
                      f"A${fin.breakeven_ppa_price:.2f}/MWh" if fin.breakeven_ppa_price == fin.breakeven_ppa_price else "n/a",
                      f"at {s.target_irr:.0%} vs A${s.ppa_price:.0f}/MWh contracted"),

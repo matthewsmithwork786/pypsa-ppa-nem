@@ -291,8 +291,8 @@ def _read_5min_values(path: Path, column: str, year: int) -> "pd.Series | None":
 def load_availability(duid: str, year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> pd.Series:
     """Read 5-minute unconstrained availability (MW) from DISPATCHLOAD.
 
-    Unlike SCADA, UIGF is before network and economic curtailment. It is an
-    optional cache; callers can fall back to SCADA when absent.
+    UIGF is the availability bound, before network and economic curtailment.
+    Missing data raises an acquisition hint; SCADA is never substituted.
     """
     duid = duid.strip().upper()
     path = availability_path(duid, year, cache_dir)
@@ -867,35 +867,14 @@ def cache_status(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> d
 
 # ── Optimiser-facing adapters ────────────────────────────────────────────────
 
-def _generation_series(
-    duid: str, year: int, cache_dir: Path, unconstrained: bool = True
-) -> pd.Series:
-    """The 5-min generation series to model and assess this DUID with.
-
-    Single source of truth, so every path that builds capacity factors or
-    checks eligibility uses the same series.
-
-    The shipped cache carries **UIGF availability only** — the constrained
-    SCADA traces were removed to halve the deployed payload. Availability is
-    also the correct input for a new build: the LP treats the profile as an
-    upper bound and applies its own curtailment, so a constrained trace would
-    double-count someone else's network limits and contractual curtailment.
-
-    `unconstrained=False` still reads SCADA when a local cache is present (for
-    reproducing pre-U4 results, or for modelling offtake from a specific
-    existing plant); it raises the usual FileNotFoundError otherwise.
-    """
-    if unconstrained and has_availability(duid, year, cache_dir):
-        return load_availability(duid, year, cache_dir)
-    # Either SCADA was asked for explicitly, or no availability is cached for
-    # this DUID. Both fall through to SCADA, which raises with acquisition
-    # instructions if it is absent too.
-    return load_scada(duid, year, cache_dir)
+def _generation_series(duid: str, year: int, cache_dir: Path) -> pd.Series:
+    """UIGF availability is the generation bound; never substitute sent-out SCADA."""
+    return load_availability(duid, year, cache_dir)
 
 
 def _cf_dict_for_duid(
     duid: str | None, years, cache_dir: Path, registry: "pd.DataFrame | None",
-    unconstrained: bool = True, resolution_minutes: int = 60,
+    resolution_minutes: int = 60,
 ) -> dict:
     result: dict = {}
     for year in years:
@@ -906,19 +885,7 @@ def _cf_dict_for_duid(
             result[year] = pd.Series(np.zeros(periods), index=idx, name="cf")
             continue
         capacity_mw = plant_capacity_mw(duid, registry=registry, cache_dir=cache_dir)
-        # UNCONSTRAINED availability (UIGF) is the correct input and the
-        # default. The LP treats the CF series as p_max_pu -- an upper bound it
-        # then curtails against itself (negative prices, connection limits,
-        # satisfied offtake). Feeding it constrained SCADA would bound the new
-        # build by *another* plant's network constraints and by whatever
-        # economic curtailment that plant's own offtake contract incentivised,
-        # and then curtail again on top: a double-count, and one that varies
-        # ~0-71% per plant so it cannot be corrected with a flat factor.
-        #
-        # SCADA remains the fallback for the handful of DUIDs with no UIGF
-        # (older wind farms predating semi-scheduling: 5 of 184 in the 2025
-        # cache) and for installs without the optional availability cache.
-        series = _generation_series(duid, year, cache_dir, unconstrained)
+        series = _generation_series(duid, year, cache_dir)
         cf_5min = capacity_factor_series(series, capacity_mw)
         result[year] = to_resolution(cf_5min, year, resolution_minutes)
     return result
@@ -926,12 +893,11 @@ def _cf_dict_for_duid(
 
 def get_cf_dicts(
     pv_duid, wind_duid, years=(DEFAULT_YEAR,), cache_dir=NEM_CACHE_DIR, registry=None,
-    unconstrained: bool = True,
 ) -> tuple:
     if registry is None and (pv_duid or wind_duid):
         registry = load_plant_registry(cache_dir)
-    pv_cf_by_year = _cf_dict_for_duid(pv_duid, years, cache_dir, registry, unconstrained)
-    wind_cf_by_year = _cf_dict_for_duid(wind_duid, years, cache_dir, registry, unconstrained)
+    pv_cf_by_year = _cf_dict_for_duid(pv_duid, years, cache_dir, registry)
+    wind_cf_by_year = _cf_dict_for_duid(wind_duid, years, cache_dir, registry)
     return pv_cf_by_year, wind_cf_by_year
 
 
@@ -945,7 +911,7 @@ def get_price_dict(region=DEFAULT_REGION, years=(DEFAULT_YEAR,), cache_dir=NEM_C
 
 def get_cf_dicts_multi(
     pv_duid, wind_duid, years, resolution_minutes=60,
-    cache_dir=NEM_CACHE_DIR, registry=None, unconstrained=True,
+    cache_dir=NEM_CACHE_DIR, registry=None,
 ) -> tuple:
     """Like `get_cf_dicts` but across multiple years at a non-hourly
     resolution: returns `(pv_cf_by_year, wind_cf_by_year)`, each a dict keyed
@@ -955,10 +921,10 @@ def get_cf_dicts_multi(
     if registry is None and (pv_duid or wind_duid):
         registry = load_plant_registry(cache_dir)
     pv_cf_by_year = _cf_dict_for_duid(
-        pv_duid, years, cache_dir, registry, unconstrained, resolution_minutes
+        pv_duid, years, cache_dir, registry, resolution_minutes
     )
     wind_cf_by_year = _cf_dict_for_duid(
-        wind_duid, years, cache_dir, registry, unconstrained, resolution_minutes
+        wind_duid, years, cache_dir, registry, resolution_minutes
     )
     return pv_cf_by_year, wind_cf_by_year
 
@@ -998,12 +964,8 @@ def reference_month_ts(scenario, month: int = 3, cache_dir: Path = NEM_CACHE_DIR
     region = getattr(scenario, "nem_price_region", DEFAULT_REGION)
     year = getattr(scenario, "nem_year", DEFAULT_YEAR)
 
-    # Duck-typed like every other attribute here, so callers without the field
-    # (tests, fake scenarios) keep working.
-    unconstrained = bool(getattr(scenario, "use_unconstrained_cf", True))
-
     pv_by_year, wind_by_year = get_cf_dicts(
-        pv_duid, wind_duid, years=(year,), cache_dir=cache_dir, unconstrained=unconstrained
+        pv_duid, wind_duid, years=(year,), cache_dir=cache_dir
     )
     prices_by_year = get_price_dict(region, years=(year,), cache_dir=cache_dir)
 
@@ -1065,11 +1027,6 @@ def period_ts(
     wind_duid = getattr(scenario, "nem_wind_duid", "")
     region = getattr(scenario, "nem_price_region", DEFAULT_REGION)
     year = getattr(scenario, "nem_year", DEFAULT_YEAR)
-    # Same resource assumption as the sizing and multi-year paths. Previously
-    # this read SCADA directly, so the Optimisation tab's reference period used
-    # constrained output while the simulation it fed used UIGF -- one scenario
-    # meaning two different things depending on the tab.
-    unconstrained = bool(getattr(scenario, "use_unconstrained_cf", True))
 
     start_ts = pd.Timestamp(start)
     end_ts = pd.Timestamp(end)
@@ -1097,7 +1054,7 @@ def period_ts(
     if pv_duid:
         capacity_mw = plant_capacity_mw(pv_duid, registry=registry, cache_dir=cache_dir)
         pv_native = capacity_factor_series(
-            _generation_series(pv_duid, year, cache_dir, unconstrained), capacity_mw
+            _generation_series(pv_duid, year, cache_dir), capacity_mw
         )
         pv_r = _resampled(pv_native, f"PV generation for {pv_duid}")
     else:
@@ -1106,7 +1063,7 @@ def period_ts(
     if wind_duid:
         capacity_mw = plant_capacity_mw(wind_duid, registry=registry, cache_dir=cache_dir)
         wind_native = capacity_factor_series(
-            _generation_series(wind_duid, year, cache_dir, unconstrained), capacity_mw
+            _generation_series(wind_duid, year, cache_dir), capacity_mw
         )
         wind_r = _resampled(wind_native, f"Wind generation for {wind_duid}")
     else:
@@ -1141,13 +1098,9 @@ def get_timeseries_dicts(scenario, cache_dir=NEM_CACHE_DIR) -> tuple:
     years = tuple(getattr(scenario, "nem_years", (single_year,)))
     resolution_minutes = int(getattr(scenario, "nem_resolution_minutes", 60))
 
-    # Duck-typed like every other attribute here, so callers without the field
-    # (tests, fake scenarios) keep working.
-    unconstrained = bool(getattr(scenario, "use_unconstrained_cf", True))
-
     pv_by_year, wind_by_year = get_cf_dicts_multi(
         pv_duid, wind_duid, years, resolution_minutes=resolution_minutes,
-        cache_dir=cache_dir, unconstrained=unconstrained,
+        cache_dir=cache_dir,
     )
     prices_by_year = get_price_dict_multi(
         region, years, resolution_minutes=resolution_minutes, cache_dir=cache_dir

@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from ppa.financial_model import SOLAR_HOUR_END, SOLAR_HOUR_START
+from ppa.results import merchant_sales_frame, bess_utilisation
 from ppa.scenario import BASE_SCENARIO
 from ui import state
 from ui.charts import year_axis
@@ -162,7 +162,7 @@ def _render_scenario_summary(s) -> None:
             st.markdown("**PPA contract**")
             st.markdown(f"- Offtake: **{s.ppaload_mw:.0f} MW** flat")
             st.markdown(f"- Tariff: **A${s.ppa_price:.0f}/MWh**")
-            st.markdown(f"- Required delivery: **{s.required_delivery_share:.0%}**")
+            st.markdown(f"- Delivery target: **{s.required_delivery_share:.0%}**")
             if s.sla_monthly_enabled:
                 st.markdown(f"- Monthly minimum: **{s.sla_monthly_share:.0%}**")
             if s.sla_daily_enabled:
@@ -447,17 +447,17 @@ def _render_results(fin, n_years: int) -> None:
     if s.dispatch_mode == "representative_year":
         st.caption(f"Financial projection: {n_years} operating years based on one solved dispatch year.")
     with st.expander("Optimisation results", expanded=True):
-        avg_delivery = sum(y.fulfilled_share for y in fin.yearly) / len(fin.yearly) if fin.yearly else 0.0
+        avg_delivery = fin.delivery_share
         cols = st.columns(6)
         cols[0].metric("Peak demand", f"{s.ppaload_mw:,.0f} MW")
         cols[1].metric(
-            "Achieved PPA delivery (avg)", f"{avg_delivery:.1%}",
-            help="Average share of contracted PPA load actually delivered "
-                 "from renewables/storage + market purchase, across all simulated years.",
+            "PPA delivery (projection, load-weighted)", f"{avg_delivery:.1%}",
+            help="Total delivered MWh divided by total load MWh across projected years. "
+                 "In Full mode, degradation and changing dispatch can reduce later-year delivery.",
         )
         cols[2].metric(
             "PPA price", f"A${s.ppa_price:,.0f}/MWh",
-            help=f"Required delivery share: {s.required_delivery_share:.0%}.",
+            help=f"Delivery target: {s.required_delivery_share:.0%}; penalties and hard delivery floors are separate settings.",
         )
         cols[3].metric(
             "Merchant sell share", f"{s.sizing_merchant_value_share:.0%}",
@@ -507,20 +507,10 @@ def _render_first_year_energy_tables(result, s) -> None:
     no financial metrics -- those are computed once the financial modelling
     options are set."""
     summ = result.summary
-    res_h = result.n_period_hours / len(result.dispatch.market_sell) if len(result.dispatch.market_sell) else 1.0
-
-    idx = result.dispatch.market_sell.index
-    hour = idx.hour
-    solar_mask = (hour >= SOLAR_HOUR_START) & (hour < SOLAR_HOUR_END)
-
-    solar_sold_mwh = float(result.dispatch.market_sell.where(solar_mask, 0.0).sum()) * res_h
-    nonsolar_sold_mwh = float(result.dispatch.market_sell.where(~solar_mask, 0.0).sum()) * res_h
-
-    prices = result.market_prices
-    solar_rev = float((result.dispatch.market_sell.where(solar_mask, 0.0) * prices).sum()) * res_h
-    nonsolar_rev = float((result.dispatch.market_sell.where(~solar_mask, 0.0) * prices).sum()) * res_h
-    solar_price = solar_rev / solar_sold_mwh if solar_sold_mwh > 0 else 0.0
-    nonsolar_price = nonsolar_rev / nonsolar_sold_mwh if nonsolar_sold_mwh > 0 else 0.0
+    merchant = merchant_sales_frame(result)
+    solar, nonsolar = merchant.iloc[0], merchant.iloc[1]
+    def price(value):
+        return f"A${value:,.2f}/MWh" if pd.notna(value) else "n/a (no sales)"
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -539,11 +529,14 @@ def _render_first_year_energy_tables(result, s) -> None:
         st.markdown("**First-year merchant volumes (solar / non-solar)**")
         st.dataframe(
             pd.DataFrame({
-                "Sold to market — solar hours": f"{solar_sold_mwh/1e3:.1f} GWh",
-                "Sold to market — non-solar hours": f"{nonsolar_sold_mwh/1e3:.1f} GWh",
+                "Sold to market — solar hours": f"{solar['Energy sold (MWh)']/1e3:.1f} GWh",
+                "Sold to market — non-solar hours": f"{nonsolar['Energy sold (MWh)']/1e3:.1f} GWh",
                 "Total sold to market": f"{summ.sold_to_market_mwh/1e3:.1f} GWh",
-                "Achieved solar-hour price": f"A${solar_price:,.0f}/MWh",
-                "Achieved non-solar-hour price": f"A${nonsolar_price:,.0f}/MWh",
+                "Solar-hour spot capture": price(solar["Spot capture (A$/MWh)"]),
+                "Non-solar-hour spot capture": price(nonsolar["Spot capture (A$/MWh)"]),
+                "Solar-hour net capture incl. LGC": price(solar["Net capture incl. LGC (A$/MWh)"]),
+                "Non-solar-hour net capture incl. LGC": price(nonsolar["Net capture incl. LGC (A$/MWh)"]),
+                "Merchant revenue": f"A${merchant['Merchant revenue (A$)'].sum()/1e6:.2f}M",
             }, index=["Volume"]).T,
             width="stretch", height="content",
         )
@@ -551,13 +544,31 @@ def _render_first_year_energy_tables(result, s) -> None:
         st.markdown("**First-year penalty volumes**")
         st.dataframe(
             pd.DataFrame({
-                "Penalties": f"{summ.penalty_mwh/1e3:.1f} GWh",
+                "Uncovered load beyond allowance": f"{summ.penalty_mwh/1e3:.1f} GWh",
                 "Share of PPA load": f"{summ.penalty_share_of_load:.1%}",
                 "Shortfall (allowed)": f"{summ.allowed_shortfall_mwh/1e3:.1f} GWh",
-                "Contracted penalty price": f"A${s.penalty_price:,.0f}/MWh",
+                "Penalty price (zero when disabled)": f"A${s.penalty_price:,.0f}/MWh",
             }, index=["Volume"]).T,
             width="stretch", height="content",
         )
+
+    st.caption(
+        "Capture prices are weighted by energy sold, not average market prices. "
+        "Solar hours are 09:00–17:00; NEM inputs use AEST and custom inputs use their supplied timestamps. "
+        "Net capture adds LGC revenue and deducts the A$/MWh spread. The optimiser can "
+        "divert energy from the PPA or storage into high-price sales."
+    )
+    csv_download_button(merchant, "first_year_merchant_sales.csv", key="dl_merchant_sales")
+    if result.scenario.effective_bess_mwh > 0:
+        st.markdown("**First-year BESS utilisation**")
+        battery = pd.DataFrame([bess_utilisation(result)])
+        st.dataframe(battery, hide_index=True, width="stretch")
+        st.caption(
+            "Equivalent full cycles = discharged MWh ÷ (usable MWh × discharge efficiency). "
+            "This measures internal battery energy throughput; usable capacity includes modelled fade. "
+            "Cycles per day use the actual solved period."
+        )
+
 
 
 def _yearly_results_frame(fin) -> pd.DataFrame:
@@ -574,6 +585,11 @@ def _yearly_results_frame(fin) -> pd.DataFrame:
             "Delivery Rate (%)": year.fulfilled_share * 100,
             "Wind Gen (GWh)": year.wind_gen_mwh / 1e3,
             "PV Gen (GWh)": year.pv_gen_mwh / 1e3,
+            "BESS charge (GWh)": year.bess_charge_gwh,
+            "BESS discharge (GWh)": year.bess_discharge_gwh,
+            "BESS usable capacity (MWh)": year.bess_usable_mwh,
+            "BESS equivalent full cycles": year.bess_cycles,
+            "BESS cycles per day": year.bess_cycles_per_day,
         }
         for year in fin.yearly
     ]).set_index("Year")

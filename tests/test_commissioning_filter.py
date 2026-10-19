@@ -95,10 +95,10 @@ def test_summary_reports_commissioning_status(tmp_path):
     """scada_summary must surface the status and an explanatory reason."""
     from ppa.data import nem_data
 
-    (tmp_path / "scada").mkdir(parents=True)
+    (tmp_path / "availability").mkdir(parents=True)
     ramp = _series({1: 0.09, **{m: 0.10 * m for m in range(2, 13)}})
-    pd.DataFrame({"scadavalue": ramp.to_numpy()}, index=ramp.index).to_parquet(
-        tmp_path / "scada" / "RAMP1_2025.parquet"
+    pd.DataFrame({"availability": ramp.to_numpy()}, index=ramp.index).to_parquet(
+        tmp_path / "availability" / "RAMP1_2025.parquet"
     )
 
     summary = nem_data.scada_summary("RAMP1", 100.0, YEAR, tmp_path)

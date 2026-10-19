@@ -345,10 +345,11 @@ def render() -> None:
     )
     resolution_minutes = int(NEM_RESOLUTION_MINUTES[resolution_label])
     if resolution_minutes < 60:
-        st.caption(
-            f"Sub-hourly resolution multiplies LP size and memory by "
-            f"60/{resolution_minutes} — 15 and 5 minutes are only practical for "
-            f"short simulation horizons."
+        st.warning(
+            f"At {resolution_minutes}-minute resolution there are {60 // resolution_minutes}× "
+            "as many snapshots as at one hour. This increases solve time and memory use "
+            "and may prevent the model completing on Streamlit hosting. "
+            "Use one-hour resolution for reliable hosted runs."
         )
 
     # ── Capacity-sizing year ───────────────────────────────────────────────────
@@ -496,7 +497,7 @@ def render() -> None:
     else:
         center_lat = float(filtered["lat"].mean())
         center_lon = float(filtered["lon"].mean())
-        fmap = folium.Map(location=(center_lat, center_lon), zoom_start=4, tiles="CartoDB positron")
+        fmap = folium.Map(location=(center_lat, center_lon), zoom_start=4, tiles="OpenStreetMap")
         for _, row in filtered.iterrows():
             style = _marker_style(row)
             folium.CircleMarker(
