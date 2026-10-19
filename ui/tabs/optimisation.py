@@ -11,6 +11,7 @@ import streamlit as st
 from ppa.results import merchant_sales_frame, bess_utilisation
 from ppa.scenario import BASE_SCENARIO
 from ui import state
+from ui.result_display import chart_help, number_table, result_chart
 from ui.charts import year_axis
 from ui.config_summary import render_config_summary
 from ui.exports import csv_download_button
@@ -517,11 +518,11 @@ def _render_first_year_energy_tables(result, s) -> None:
         st.markdown("**First-year PPA volumes**")
         st.dataframe(
             pd.DataFrame({
-                "PPA load": f"{summ.total_load_mwh/1e3:.1f} GWh",
-                "PPA delivered": f"{summ.ppa_delivered_mwh/1e3:.1f} GWh",
-                "  · from renewables & storage": f"{summ.renewable_and_storage_to_ppa_mwh/1e3:.1f} GWh",
-                "  · via market purchase": f"{summ.market_buy_to_ppa_mwh/1e3:.1f} GWh",
-                "Allowed shortfall": f"{summ.allowed_shortfall_mwh/1e3:.1f} GWh",
+                "PPA load": f"{summ.total_load_mwh/1e3:,.1f} GWh",
+                "PPA delivered": f"{summ.ppa_delivered_mwh/1e3:,.1f} GWh",
+                "  · from renewables & storage": f"{summ.renewable_and_storage_to_ppa_mwh/1e3:,.1f} GWh",
+                "  · via market purchase": f"{summ.market_buy_to_ppa_mwh/1e3:,.1f} GWh",
+                "Allowed shortfall": f"{summ.allowed_shortfall_mwh/1e3:,.1f} GWh",
             }, index=["Volume"]).T,
             width="stretch", height="content",
         )
@@ -529,14 +530,14 @@ def _render_first_year_energy_tables(result, s) -> None:
         st.markdown("**First-year merchant volumes (solar / non-solar)**")
         st.dataframe(
             pd.DataFrame({
-                "Sold to market — solar hours": f"{solar['Energy sold (MWh)']/1e3:.1f} GWh",
-                "Sold to market — non-solar hours": f"{nonsolar['Energy sold (MWh)']/1e3:.1f} GWh",
-                "Total sold to market": f"{summ.sold_to_market_mwh/1e3:.1f} GWh",
+                "Sold to market — solar hours": f"{solar['Energy sold (MWh)']/1e3:,.1f} GWh",
+                "Sold to market — non-solar hours": f"{nonsolar['Energy sold (MWh)']/1e3:,.1f} GWh",
+                "Total sold to market": f"{summ.sold_to_market_mwh/1e3:,.1f} GWh",
                 "Solar-hour spot capture": price(solar["Spot capture (A$/MWh)"]),
                 "Non-solar-hour spot capture": price(nonsolar["Spot capture (A$/MWh)"]),
                 "Solar-hour net capture incl. LGC": price(solar["Net capture incl. LGC (A$/MWh)"]),
                 "Non-solar-hour net capture incl. LGC": price(nonsolar["Net capture incl. LGC (A$/MWh)"]),
-                "Merchant revenue": f"A${merchant['Merchant revenue (A$)'].sum()/1e6:.2f}M",
+                "Merchant revenue": f"A${merchant['Merchant revenue (A$)'].sum()/1e6:,.2f}M",
             }, index=["Volume"]).T,
             width="stretch", height="content",
         )
@@ -544,9 +545,9 @@ def _render_first_year_energy_tables(result, s) -> None:
         st.markdown("**First-year penalty volumes**")
         st.dataframe(
             pd.DataFrame({
-                "Uncovered load beyond allowance": f"{summ.penalty_mwh/1e3:.1f} GWh",
+                "Uncovered load beyond allowance": f"{summ.penalty_mwh/1e3:,.1f} GWh",
                 "Share of PPA load": f"{summ.penalty_share_of_load:.1%}",
-                "Shortfall (allowed)": f"{summ.allowed_shortfall_mwh/1e3:.1f} GWh",
+                "Shortfall (allowed)": f"{summ.allowed_shortfall_mwh/1e3:,.1f} GWh",
                 "Penalty price (zero when disabled)": f"A${s.penalty_price:,.0f}/MWh",
             }, index=["Volume"]).T,
             width="stretch", height="content",
@@ -562,7 +563,7 @@ def _render_first_year_energy_tables(result, s) -> None:
     if result.scenario.effective_bess_mwh > 0:
         st.markdown("**First-year BESS utilisation**")
         battery = pd.DataFrame([bess_utilisation(result)])
-        st.dataframe(battery, hide_index=True, width="stretch")
+        st.dataframe(number_table(battery), hide_index=True, width="stretch")
         st.caption(
             "Equivalent full cycles = discharged MWh ÷ (usable MWh × discharge efficiency). "
             "This measures internal battery energy throughput; usable capacity includes modelled fade. "
@@ -614,7 +615,8 @@ def _render_revenue_chart(fin) -> None:
         xaxis_title="Year", yaxis_title="A$M", height=400,
         xaxis=year_axis(years),
     )
-    st.plotly_chart(fig, width="stretch")
+    chart_help("Annual revenue and costs", "Positive bars are PPA and merchant revenue; negative bars are market purchases, penalties, transmission costs and operating costs. Values are A$ million. Their net is operating cash flow before project financing and tax. In Fast mode later years repeat solved volumes with the selected escalations, rather than new dispatch forecasts.")
+    result_chart(fig, width="stretch")
     export = yearly.rename(columns={
         "PPA Revenue (A$M)": "ppa_revenue_aud_m",
         "Merchant Revenue (A$M)": "merchant_revenue_aud_m",
@@ -645,7 +647,8 @@ def _render_delivery_chart(fin) -> None:
         yaxis=dict(range=[0, 105]), height=400,
         xaxis=year_axis(years),
     )
-    st.plotly_chart(fig, width="stretch")
+    chart_help("Annual delivery rate", "Delivered PPA energy divided by contracted load for each year, shown as a percentage. A high annual rate does not guarantee delivery in every interval or compliance with monthly/daily SLAs. In Fast mode energy volumes repeat from one solved year.")
+    result_chart(fig, width="stretch")
     csv_download_button(
         (yearly["Delivery Rate (%)"] / 100).round(3).mul(100)
         .rename("delivery_rate_pct").rename_axis("year").reset_index(),
@@ -656,18 +659,7 @@ def _render_delivery_chart(fin) -> None:
 def _render_yearly_table(fin) -> None:
     yearly = _yearly_results_frame(fin)
     st.dataframe(
-        yearly.round({
-            "PPA Revenue (A$M)": 2,
-            "Merchant Revenue (A$M)": 2,
-            "Market Buy Cost (A$M)": 2,
-            "Penalty Cost (A$M)": 2,
-            "Transmission Cost (A$M)": 2,
-            "OPEX (A$M)": 2,
-            "Net Cash Flow (A$M)": 2,
-            "Delivery Rate (%)": 1,
-            "Wind Gen (GWh)": 1,
-            "PV Gen (GWh)": 1,
-        }),
+        number_table(yearly),
         width="stretch",
         height="content",
     )
