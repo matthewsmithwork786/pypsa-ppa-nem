@@ -32,3 +32,23 @@ Keep `nemosis_cache/` outside tracked source. A full-year MMS acquisition can co
 ## Interpretation
 
 UIGF (`DISPATCHLOAD.AVAILABILITY`) represents available output before network constraints. SCADA is actual sent-out output and may include network or contract-driven curtailment. They are different measures and should not be interchanged as model inputs. Cache readers in `ppa/data/` must remain offline; network access belongs only in acquisition scripts.
+
+
+## AER futures snapshot
+
+The bundled hedge cache uses the AER prices dated **30 June 2026**, from the CSV
+published **7 August 2026** and imported on 19 October 2026. The original CSV
+and source URLs/checksum are retained in `data/cache/nem/hedge/source/`.
+The 2025 cache filename is the historical NEM data lookup year, not the
+futures delivery year. The first complete delivery year in this snapshot is 2027.
+
+To reproduce this refresh without network access:
+
+```bash
+python3 scripts/fetch_aer_futures.py --year 2025 \
+  --input-csv data/cache/nem/hedge/source/aer_base_futures_20260807.csv \
+  --as-at 2026-06-30 --overwrite
+```
+
+Always supply the price observation/settlement date from the AER source page.
+Do not infer that date from the CSV publication timestamp or the download date.
