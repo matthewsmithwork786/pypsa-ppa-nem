@@ -244,3 +244,20 @@ def test_disclaimer_text_none_graceful():
 def test_disclaimer_text_nat_graceful():
     text = aer_futures.disclaimer_text(pd.NaT)
     assert "date unknown" in text.lower()
+
+
+def test_default_forward_quote_uses_one_calendar_year_not_the_full_strip(tmp_path):
+    cache = tmp_path / "nem"
+    (cache / "hedge").mkdir(parents=True)
+    rows = [
+        {"region": "NSW1", "quarter_label": f"{year} Q{q}", "product": "Base",
+         "price_aud_mwh": price, "as_at_date": pd.Timestamp("2026-06-30")}
+        for year, price in [(2027, 100), (2028, 200)] for q in range(1, 5)
+    ]
+    pd.DataFrame(rows).to_parquet(cache / "hedge" / "aer_base_futures_2025.parquet", index=False)
+    scenario = type("S", (), {"nem_price_region": "NSW1", "nem_year": 2025})()
+    quote = aer_futures.forward_price_for_scenario(scenario, cache_dir=cache)
+    assert quote.price_aud_mwh == 100
+    assert quote.quarters == tuple(f"2027 Q{q}" for q in range(1, 5))
+    explicit = aer_futures.forward_price_for_scenario(scenario, quarters=["2028 Q1"], cache_dir=cache)
+    assert explicit.price_aud_mwh == 200
