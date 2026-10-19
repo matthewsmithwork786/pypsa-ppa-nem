@@ -7,7 +7,7 @@ import numpy as np
 from ppa import assumptions as A
 from ppa.financial_model import _irr, _npv
 from ppa.scenario import Scenario
-from ppa.results import OptimisationResult
+from ppa.results import OptimisationResult, bess_utilisation
 
 @dataclass
 class CapexBreakdown:
@@ -64,6 +64,13 @@ class YearlyFinancials:
     wind_gen_mwh: float
     pv_gen_mwh: float
     transmission_cost: float = 0.0
+    total_load_mwh: float = 0.0
+    ppa_delivered_mwh: float = 0.0
+    bess_charge_gwh: float = 0.0
+    bess_discharge_gwh: float = 0.0
+    bess_usable_mwh: float = 0.0
+    bess_cycles: float = 0.0
+    bess_cycles_per_day: float = 0.0
 
 
 @dataclass
@@ -81,6 +88,14 @@ class MultiYearFinancialResult:
     total_lifetime_revenue: float = 0.0
     total_lifetime_generation_mwh: float = 0.0
     breakeven_ppa_price: float = float("nan")
+
+    @property
+    def delivery_share(self) -> float:
+        """Load-weighted delivered share across the financial projection."""
+        load = sum(getattr(y, "total_load_mwh", 0.0) for y in self.yearly)
+        if load > 0:
+            return sum(y.ppa_delivered_mwh for y in self.yearly) / load
+        return sum(y.fulfilled_share for y in self.yearly) / len(self.yearly) if self.yearly else 0.0
 
     # Running NPV series (index = year number 1..N, value = cumulative NPV)
     cumulative_npv: list[float] = field(default_factory=list)
@@ -135,6 +150,7 @@ def run_multi_year_financial_analysis(
         )
         net_cf = net_rev - annual_opex
 
+        battery = bess_utilisation(res)
         yearly.append(
             YearlyFinancials(
                 year=first_sim_year + idx,
@@ -147,6 +163,13 @@ def run_multi_year_financial_analysis(
                 opex=annual_opex,
                 net_cashflow=net_cf,
                 fulfilled_share=summ.fulfilled_share,
+                total_load_mwh=summ.total_load_mwh,
+                ppa_delivered_mwh=summ.ppa_delivered_mwh,
+                bess_charge_gwh=battery["BESS charge (GWh)"],
+                bess_discharge_gwh=battery["BESS discharge (GWh)"],
+                bess_usable_mwh=battery["BESS usable capacity (MWh)"],
+                bess_cycles=battery["BESS equivalent full cycles"],
+                bess_cycles_per_day=battery["BESS cycles per day"],
                 wind_gen_mwh=summ.wind_generation_mwh,
                 pv_gen_mwh=summ.pv_generation_mwh,
             )

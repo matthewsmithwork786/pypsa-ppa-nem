@@ -26,16 +26,6 @@ st.markdown(
     # PyPSA based PPA explorer - Australia
     """
 )
-with st.popover("Disclaimer", width="stretch", icon="⚠️"):
-    st.write(
-        """
-        This open-source explorer is for testing and scenario analysis. Historical
-        profiles and model assumptions do not constitute a forecast or investment
-        advice. Check the dispatch mode, data coverage and commercial assumptions
-        before using the results. Fast mode repeats one solved operating year;
-        it does not verify future-year delivery or model technology degradation.
-        """
-    )
 
 tabs = st.tabs(
     ["👋 Welcome", "① 📡 Pick Plants", "② 🔬 Set Terms", "③ ⚙️ Run", "📊 Results", "📖 Help"],

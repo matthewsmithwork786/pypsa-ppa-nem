@@ -84,6 +84,43 @@ class OptimisationResult:
     warnings: list[str] = field(default_factory=list)
 
 
+def merchant_sales_frame(result: OptimisationResult) -> pd.DataFrame:
+    """Interval-weighted capture prices and revenue, in NEM local time (09–17 solar)."""
+    d, s = result.dispatch, result.scenario
+    sales = d.market_sell.clip(lower=0.0)
+    dt = result.n_period_hours / len(sales) if len(sales) else 1.0
+    solar = (sales.index.hour >= 9) & (sales.index.hour < 17)
+    rows = []
+    for label, mask in (("Solar hours (09:00–17:00)", solar), ("Non-solar hours", ~solar)):
+        energy = sales.where(mask, 0.0) * dt
+        mwh = float(energy.sum())
+        spot_revenue = float((energy * result.market_prices).sum())
+        net_revenue = spot_revenue + mwh * (s.lgc_price_aud_mwh - s.market_spread)
+        rows.append({
+            "Period": label, "Energy sold (MWh)": mwh,
+            "Spot capture (A$/MWh)": spot_revenue / mwh if mwh > 1e-9 else float("nan"),
+            "Net capture incl. LGC (A$/MWh)": net_revenue / mwh if mwh > 1e-9 else float("nan"),
+            "Merchant revenue (A$)": net_revenue,
+        })
+    return pd.DataFrame(rows).set_index("Period")
+
+
+def bess_utilisation(result: OptimisationResult) -> dict[str, float]:
+    """Cycles use internal discharged MWh / usable MWh, allowing for discharge losses."""
+    s, v = result.scenario, result.summary
+    capacity = s.effective_bess_mwh
+    cycles = (v.bess_dispatch_mwh / (capacity * s.bess_efficiency_dispatch)
+              if capacity > 0 and s.bess_efficiency_dispatch > 0 else 0.0)
+    days = result.n_period_hours / 24.0
+    return {
+        "BESS charge (GWh)": v.bess_charge_mwh / 1000.0,
+        "BESS discharge (GWh)": v.bess_dispatch_mwh / 1000.0,
+        "BESS usable capacity (MWh)": capacity,
+        "BESS equivalent full cycles": cycles,
+        "BESS cycles per day": cycles / days if days > 0 else 0.0,
+    }
+
+
 def _extract_link_utilisation(n: pypsa.Network) -> pd.DataFrame:
     static = n.links.static
     if static.empty:

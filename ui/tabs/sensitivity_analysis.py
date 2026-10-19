@@ -55,7 +55,7 @@ def _get_base() -> tuple[EnergyInputs | None, ProjectFinanceInputs | None, list[
 
 METRIC_OPTIONS = {
     "project_irr": "Project IRR",
-    "equity_irr": "Equity IRR",
+    "equity_irr": "Levered equity IRR",
     "npv_project": "NPV (A$m)",
     "gearing": "Gearing",
     "lcoe": "LCOE (A$/MWh)",
@@ -137,7 +137,7 @@ def _what_if_panel(
         cols = st.columns(6)
         kpis = [
             ("Project IRR", "project_irr", True),
-            ("Equity IRR",  "equity_irr",  True),
+            ("Levered equity IRR",  "equity_irr",  True),
             ("Gearing",     "gearing",     True),
             ("NPV (A$m)",    "npv_project", False),
             ("Total capex (A$m)", "total_capex", False),

@@ -41,6 +41,9 @@ Key concepts and terminology for PPAs and PyPSA.
     with st.expander("Main packages and data sources", expanded=False):
         st.markdown(
             """
+Developed using the open-source work of [Open Energy Transition (OET)](https://openenergytransition.org/)
+and the PyPSA community.
+
 - [PyPSA](https://pypsa.readthedocs.io) — energy system modelling
 - [HiGHS](https://highs.dev) — LP solver
 - [Streamlit](https://streamlit.io) — web UI
@@ -48,5 +51,10 @@ Key concepts and terminology for PPAs and PyPSA.
 - and using *historical* Australian data from
   - AEMO NEM UIGF (5-minute unconstrained availability) for wind & solar output, and
   - AEMO NEM regional spot prices (the AER base-futures series for hedges).
+
+**UIGF** is unconstrained generation availability, used as the upper bound on
+wind and solar output. It is not metered generation: the optimiser applies its
+own economic curtailment and modelled connection limits. Historical network
+constraints are not reproduced by UIGF alone.
             """
         )

@@ -235,9 +235,9 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
 def _render_results(r) -> None:
     with st.expander("**Key results**", expanded=True):
         cols = st.columns(4)
-        irr = lambda v: f"{v:.1%}" if v == v else "n/a"
+        irr = lambda v: f"{v:.2%}" if v == v else "n/a"
         cols[0].metric("Project IRR", irr(r.project_irr), help="Unlevered FCFF return")
-        cols[1].metric("Equity IRR", irr(r.equity_irr), help="Levered FCFE return")
+        cols[1].metric("Levered equity IRR", irr(r.equity_irr), help="Calculated from equity contributions and after-tax distributions after interest and debt repayments; independent of the target IRR.")
         cols[2].metric("Gearing", f"{r.gearing:.1%}")
         cols[3].metric("NPV @ WACC", f"A${r.npv_project:,.0f}m")
 

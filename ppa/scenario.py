@@ -44,9 +44,6 @@ class Scenario:
     sizing_method: str = "tsam"
     # Number of representative weeks (168 h each).
     sizing_n_periods: int = 40
-    # Use AEMO unconstrained availability as the generation upper bound.
-    # Turn off to model an existing plant's sent-out SCADA output.
-    use_unconstrained_cf: bool = True
     # LGC revenue on surplus exports only; delivered certificates are bundled
     # into the PPA tariff. A$/MWh.
     lgc_price_aud_mwh: float = A.LGC_PRICE_AUD_MWH
@@ -182,7 +179,7 @@ class Scenario:
 
     @property
     def penalty_price(self) -> float:
-        return self.ppa_price * self.pen_mult if self.enable_penalty else self.ppa_price
+        return self.ppa_price * self.pen_mult if self.enable_penalty else 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)

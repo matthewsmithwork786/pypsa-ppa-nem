@@ -305,7 +305,7 @@ def test_excel_export_outputs_are_live_formulas():
     wb, _ = _load_model_ws()
     outputs_ws = wb["Outputs"]
     expected_labels = {
-        "Project IRR (FCFF)", "Equity IRR (FCFE)", "NPV @ WACC (project)",
+        "Project IRR (FCFF)", "Levered equity IRR (FCFE)", "NPV @ WACC (project)",
         "Gearing", "Total funding (incl. IDC)", "Total debt", "Total equity",
         "Minimum DSCR", "Average DSCR", "Equity payback", "LCOE",
     }

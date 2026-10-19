@@ -5,7 +5,6 @@ import dataclasses
 import streamlit as st
 
 from ppa import assumptions as _assumptions
-from ppa.data_loader import coerce_chosen_day
 from ppa.industrial_profiles import PROFILE_INFO, PROFILE_KEYS
 from ppa.scenario import Scenario
 from ui import state
@@ -500,26 +499,6 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         nem_year = cols[1].selectbox(
             "NEM data year", options=_year_options, index=_year_idx, key="sf_nem_year",
         )
-        use_unconstrained_cf = cols[2].toggle(
-            "Use unconstrained output (UIGF)",
-            value=bool(initial.use_unconstrained_cf),
-            key="sf_use_unconstrained_cf",
-            help=(
-                "**On by default — this is the correct input for sizing a new build.** "
-                "Models each plant's physically available output (AEMO's UIGF, from "
-                "DISPATCHLOAD) instead of what it actually sent out.\n\n"
-                "The optimiser treats the profile as an upper bound and applies its own "
-                "curtailment. The historical SCADA trace is already reduced by another "
-                "plant's network constraints and by whatever curtailment *that plant's* "
-                "offtake contract incentivised, so using it would count curtailment "
-                "twice — and per-plant curtailment ranges from ~0% to 71%, so it cannot "
-                "be corrected with a flat factor.\n\n"
-                "Switch off only to reproduce older results, or to model taking offtake from "
-                "a specific **existing** plant, where its actual metered energy is what "
-                "you would receive — this needs a local SCADA cache, which the shipped "
-                "app does not carry. See the ❓ UIGF explainer in Pick Plants."
-            ),
-        )
 
     with st.expander("Counterfactual sourcing", expanded=True):
         cols = st.columns(4)
@@ -623,16 +602,6 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         if cal_forward_source == aer_futures.SOURCE_AER:
             st.caption(cal_forward_note)
 
-    with st.expander("Reference day selection", expanded=True):
-        cols = st.columns(4)
-        # Display the date that the optimisation runner will use.
-        ts = state.get_timeseries()
-        if ts is not None:
-            chosen_day = coerce_chosen_day(ts, initial.chosen_day)
-        else:
-            chosen_day = initial.chosen_day
-        cols[0].write(f"Reference day for daily charts: **{chosen_day}**")
-
     return dataclasses.replace(
         initial,
         optimise_capacity=optimise_capacity,
@@ -666,7 +635,6 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         nem_price_region=nem_price_region,
         nem_years=(initial.nem_years if initial.data_source == "nem_map" else (int(nem_year),)),
         capacity_sizing_year=(initial.capacity_sizing_year if initial.data_source == "nem_map" else int(nem_year)),
-        use_unconstrained_cf=bool(use_unconstrained_cf),
         onsw_mw=float(onsw_mw),
         pv_mw=float(pv_mw),
         bess_mw=float(bess_mw) if include_bess else 0.0,
@@ -685,7 +653,6 @@ def render_scenario_form(initial: Scenario) -> Scenario:
         discount_rate=float(discount_rate),
         target_irr=float(target_irr),
         project_life_yrs=int(project_life_yrs),
-        chosen_day=str(chosen_day),
         transmission_cost_aud_mwh=float(transmission_cost_aud_mwh),
         simulation_years=simulation_years,
         dispatch_mode=dispatch_mode,

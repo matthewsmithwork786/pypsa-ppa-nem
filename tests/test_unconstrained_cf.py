@@ -6,8 +6,8 @@ incentivised. Using it as the capacity factor for a NEW build charges that
 curtailment twice. `DISPATCHLOAD.AVAILABILITY` is the physically available
 output, independent of both.
 
-The availability cache is optional, so every path here must degrade to SCADA
-rather than fail when it is absent.
+The availability cache is required; a missing UIGF file must never silently
+substitute constrained SCADA.
 """
 from __future__ import annotations
 
@@ -53,35 +53,21 @@ def test_missing_availability_raises_with_instructions(fake_cache):
         nem_data.load_availability("ABSENT1", 2025, fake_cache)
 
 
-def test_cf_dict_uses_availability_only_when_requested(fake_cache, monkeypatch):
+def test_cf_dict_always_uses_availability(fake_cache, monkeypatch):
     monkeypatch.setattr(nem_data, "plant_capacity_mw", lambda *a, **k: 100.0)
-
-    constrained = nem_data._cf_dict_for_duid("TESTWF1", (2025,), fake_cache, None, False)
-    unconstrained = nem_data._cf_dict_for_duid("TESTWF1", (2025,), fake_cache, None, True)
-
-    assert float(constrained[2025].mean()) == pytest.approx(0.20, abs=1e-6)
-    assert float(unconstrained[2025].mean()) == pytest.approx(0.50, abs=1e-6)
+    result = nem_data._cf_dict_for_duid("TESTWF1", (2025,), fake_cache, None)
+    assert float(result[2025].mean()) == pytest.approx(0.50, abs=1e-6)
 
 
-def test_falls_back_to_scada_when_availability_absent(tmp_path, monkeypatch):
-    """A missing availability cache must degrade silently, not raise.
-
-    The cache is optional; an install without it has to keep working exactly as
-    before rather than breaking when the flag is on.
-    """
-    (tmp_path / "scada").mkdir(parents=True)
-    _write_5min(tmp_path / "scada" / "TESTWF1_2025.parquet", "scadavalue", 20.0)
+def test_missing_uigf_does_not_fall_back_to_scada(fake_cache, monkeypatch):
     monkeypatch.setattr(nem_data, "plant_capacity_mw", lambda *a, **k: 100.0)
+    (fake_cache / "availability" / "TESTWF1_2025.parquet").unlink()
+    with pytest.raises(FileNotFoundError, match="fetch_nem_availability"):
+        nem_data._cf_dict_for_duid("TESTWF1", (2025,), fake_cache, None)
 
-    result = nem_data._cf_dict_for_duid("TESTWF1", (2025,), tmp_path, None, True)
-    assert float(result[2025].mean()) == pytest.approx(0.20, abs=1e-6)
 
-
-def test_scenario_flag_defaults_on_and_is_plumbed():
-    """UIGF is the correct input for a new build, so it is the default, not a
-    variant. SCADA remains selectable for the existing-plant-offtake case."""
-    assert Scenario().use_unconstrained_cf is True
-    assert not dataclasses.replace(Scenario(), use_unconstrained_cf=False).use_unconstrained_cf
+def test_scenario_has_no_generation_source_toggle():
+    assert not hasattr(Scenario(), "use_unconstrained_cf")
 
 
 def test_get_timeseries_dicts_tolerates_scenario_without_the_field(fake_cache, monkeypatch):
@@ -131,23 +117,18 @@ def test_period_ts_uses_the_same_source_as_the_sizing_path(fake_cache, monkeypat
             self.use_unconstrained_cf = unconstrained
 
     window = ("2025-01-01", "2025-01-03")
-    con = nem_data.period_ts(_Scn(False), *window, resolution_minutes=60, cache_dir=fake_cache)
     unc = nem_data.period_ts(_Scn(True), *window, resolution_minutes=60, cache_dir=fake_cache)
 
     # Fixture: SCADA 20 MW, availability 50 MW, capacity 100 MW.
-    assert float(con["ts_WindGen"].mean()) == pytest.approx(0.20, abs=1e-6)
     assert float(unc["ts_WindGen"].mean()) == pytest.approx(0.50, abs=1e-6)
 
 
-def test_generation_series_falls_back_per_duid(fake_cache):
-    """The shared chooser degrades to SCADA when a DUID has no availability."""
-    got = nem_data._generation_series("TESTWF1", 2025, fake_cache, unconstrained=True)
+def test_generation_series_requires_uigf_per_duid(fake_cache):
+    got = nem_data._generation_series("TESTWF1", 2025, fake_cache)
     assert float(got.mean()) == pytest.approx(50.0)
-
-    # SCADA-only DUID: write one with no availability sibling.
     _write_5min(fake_cache / "scada" / "SCADAONLY_2025.parquet", "scadavalue", 33.0)
-    got = nem_data._generation_series("SCADAONLY", 2025, fake_cache, unconstrained=True)
-    assert float(got.mean()) == pytest.approx(33.0)
+    with pytest.raises(FileNotFoundError, match="fetch_nem_availability"):
+        nem_data._generation_series("SCADAONLY", 2025, fake_cache)
 
 
 # ── Compact values-only cache format ─────────────────────────────────────────

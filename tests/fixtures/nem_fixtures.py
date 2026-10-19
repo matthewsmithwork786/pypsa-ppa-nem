@@ -219,6 +219,12 @@ def build_nem_fixture_cache(root_dir) -> Path:
     manifest = _build_plant_years_manifest(registry)
     manifest.to_parquet(registry_dir / "plant_years.parquet")
 
+    for source in scada_dir.glob("*.parquet"):
+        frame = pd.read_parquet(source).rename(columns={"scadavalue": "availability"})
+        target = cache_dir / "availability" / source.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_parquet(target)
+
     return cache_dir
 
 

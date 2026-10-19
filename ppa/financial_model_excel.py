@@ -1037,7 +1037,7 @@ def _write_outputs(
     dscr = ranges["dscr"]
 
     kpi("Project IRR (FCFF)", "0.0%", f"=IFERROR(IRR({ranges['fcff']}),\"n/a\")")
-    kpi("Equity IRR (FCFE)", "0.0%", f"=IFERROR(IRR({ranges['fcfe']}),\"n/a\")")
+    kpi("Levered equity IRR (FCFE)", "0.0%", f"=IFERROR(IRR({ranges['fcfe']}),\"n/a\")")
     kpi("NPV @ WACC (project)", "#,##0.0 \"A$M\"",
         f"=NPV({rate},{ranges['fcff']})*(1+{rate})")
     kpi("Gearing", "0.0%", f"={ranges['gearing']}")

@@ -171,7 +171,7 @@ def project_finance_inputs_from_scenario(scenario) -> "ProjectFinanceInputs":
         bess_build_cost=s.bess_capex_per_kwh / 1000.0,
         operating_life=s.project_life_yrs,
         ppa_tariff=s.ppa_price,
-        penalty_multiple=s.pen_mult,
+        penalty_multiple=s.pen_mult if s.enable_penalty else 0.0,
         cost_inflation=s.price_escalation_rate,
         ppa_indexation=s.price_escalation_rate,
         nonsolar_price_inflation=s.price_escalation_rate,

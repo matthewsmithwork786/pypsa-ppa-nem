@@ -90,7 +90,7 @@ _MODEL_LABELS = {
 
 _OUTPUT_LABELS = {
     "Project IRR (FCFF)": "project_irr",
-    "Equity IRR (FCFE)": "equity_irr",
+    "Levered equity IRR (FCFE)": "equity_irr",
     "NPV @ WACC (project)": "npv_project",
     "Gearing": "gearing",
     "Total debt": "total_debt",

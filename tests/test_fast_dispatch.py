@@ -125,7 +125,7 @@ restore_from_query_params()
 from ui.tabs.results_deep_dive import render
 render()
 ''', default_timeout=30)
-        deep_dive.session_state["scenario"] = scenario
+        deep_dive.session_state["scenario"] = dataclasses.replace(scenario, enable_counterfactual=True)
         deep_dive.session_state["multi_year_results"] = results
         deep_dive.session_state["multi_year_financial"] = fin
         return deep_dive.run()
