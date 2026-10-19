@@ -24,7 +24,7 @@ from ui.charts import (
     make_soc_chart,
     make_supply_mix_24h_chart,
 )
-from ui.config_summary import render_config_summary
+from ui.config_summary import render_scenario_summary
 from ui.exports import csv_download_button
 from ui.result_display import aggregate_units, chart_help, number_table, result_chart
 
@@ -240,7 +240,9 @@ def _render_gen_stats(result, s) -> None:
         columns=["Metric", "Value", "Detail"],
     )
     cols = st.columns(2)
-    cols[0].dataframe(stats_df, hide_index=True, width="stretch")
+    with cols[0]:
+        st.markdown("**Generation & storage**")
+        st.dataframe(stats_df, hide_index=True, width="stretch")
 
     lu = getattr(result, "link_utilisation", None)
     if lu is not None and not lu.empty:
@@ -280,6 +282,12 @@ def _render_multi_year_counterfactuals(results, fin, s) -> None:
         "(a load-following proxy, rather than a fixed-MW baseload swap). "
         "The base-futures price is escalated year-on-year at the same rate as market prices. "
         "Counterfactuals use solved dispatch years only, which may be a subset of the financial projection."
+    )
+    st.info(
+        "Price-year comparison: the bundled base-futures benchmark is for 2026, "
+        "while the spot benchmark uses 2025 historical prices. These cover different "
+        "periods and are not fully comparable. Changing the futures input or spot "
+        "data changes the comparison basis."
     )
     if s.cal_forward_source == "aer_indicative":
         st.caption(s.cal_forward_note)
@@ -470,7 +478,7 @@ def _render_multi_year_deep_dive() -> None:
     # Use the sized capacities that produced these results.
     s = state.get_effective_scenario()
 
-    render_config_summary(s)
+    render_scenario_summary(state.get_scenario(), s)
 
     year_options = [result.dispatch.wind_gen.index[0].year for result in results]
     cols = st.columns(4)
@@ -492,7 +500,7 @@ def _render_multi_year_deep_dive() -> None:
             chosen_day = cols[0].selectbox("Day to inspect", available_days, index=0, key="dd_chosen_day1")
             _render_dispatch_section(result, result.scenario, chosen_day)
         with tab_chart2:
-            st.caption(f"High-level generation statistics for {selected_year}")
+            st.markdown(f"**High-level generation statistics for {selected_year}**")
             _render_gen_stats(result, result.scenario)
         with tab_chart3:
             _render_multi_year_counterfactuals(results, fin, s)

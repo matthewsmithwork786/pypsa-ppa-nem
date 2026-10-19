@@ -13,7 +13,7 @@ from ppa.scenario import BASE_SCENARIO
 from ui import state
 from ui.result_display import chart_help, number_table, result_chart
 from ui.charts import year_axis
-from ui.config_summary import render_config_summary
+from ui.config_summary import render_scenario_summary as _render_scenario_summary
 from ui.exports import csv_download_button
 
 
@@ -133,84 +133,6 @@ def _render_sizing_diagnostics() -> None:
             "A single cached weather year (2025) means the sized fleet is tuned to 2025 "
             "weather; multi-year data is a TODO (see README)."
         )
-
-def _render_scenario_summary(s) -> None:
-    with st.expander("Scenario summary", expanded=False):
-        cols = st.columns(4)
-        with cols[0]:
-            st.markdown("**Portfolio**")
-            if s.optimise_capacity:
-                st.markdown("- Mode: **co-optimised sizing** ⚡")
-                st.markdown(
-                    f"- Max build: wind **{s.max_build_wind_mw:.0f}** / "
-                    f"solar **{s.max_build_pv_mw:.0f}** / "
-                    f"BESS **{s.max_build_bess_mw:.0f} MW**"
-                )
-                st.markdown(f"- Sizing LP representation: **{_sizing_method_caption(s)}**")
-                if s.include_bess:
-                    st.markdown(f"- BESS duration: **{s.bess_max_hours:.1f} h** (fixed)")
-                else:
-                    st.markdown("- BESS: *disabled*")
-            else:
-                st.markdown(f"- Wind: **{s.onsw_mw:.0f} MW**")
-                st.markdown(f"- Solar: **{s.pv_mw:.0f} MWac**")
-                if s.include_bess:
-                    st.markdown(f"- BESS: **{s.effective_bess_mw:.0f} MW / {s.effective_bess_mwh:.0f} MWh**")
-                else:
-                    st.markdown("- BESS: *disabled*")
-
-        with cols[1]:
-            st.markdown("**PPA contract**")
-            st.markdown(f"- Offtake: **{s.ppaload_mw:.0f} MW** flat")
-            st.markdown(f"- Tariff: **A${s.ppa_price:.0f}/MWh**")
-            st.markdown(f"- Delivery target: **{s.required_delivery_share:.0%}**")
-            if s.sla_monthly_enabled:
-                st.markdown(f"- Monthly minimum: **{s.sla_monthly_share:.0%}**")
-            if s.sla_daily_enabled:
-                st.markdown(f"- Daily minimum: **{s.sla_daily_share:.0%}**")
-            if not (s.sla_monthly_enabled or s.sla_daily_enabled):
-                st.markdown("- Tiered SLA: *none*")
-            if s.enable_penalty:
-                st.markdown(f"- Penalty: **{s.pen_mult:.1f}×** = A${s.penalty_price:.0f}/MWh")
-            else:
-                st.markdown("- Penalty: *disabled*")
-
-        with cols[2]:
-            st.markdown("**Market interaction**")
-            if s.enable_market_buy:
-                st.markdown(f"- Buy cap: **{s.market_buy_share:.0%}** of delivery")
-            else:
-                st.markdown("- Market buy: *disabled*")
-            if s.enable_market_sell:
-                st.markdown(f"- Sell: enabled (max {s.maxsell_mw:.0f} MW)")
-            else:
-                st.markdown("- Market sell: *disabled*")
-            if s.enable_shortfall:
-                st.markdown(f"- Shortfall: **{s.allowed_shortfall_share:.0%}** of load")
-            else:
-                st.markdown("- Shortfall: *disabled*")
-
-        with cols[3]:
-            st.markdown("**Simulation**")
-            if s.transmission_cost_aud_mwh > 0:
-                st.markdown(f"- Transmission: **A${s.transmission_cost_aud_mwh:.1f}/MWh** delivered")
-            if s.dispatch_mode == "representative_year":
-                st.markdown(f"- Mode: **1 solved year → {s.simulation_years}-year financial projection**")
-                st.caption("Fixed energy volumes; no later-year degradation or dispatch re-solve.")
-            elif s.simulation_years == 1:
-                st.markdown(f"- Mode: **1-year** ({s.first_sim_year})")
-            else:
-                st.markdown(
-                    f"- Mode: **{s.simulation_years}-year** "
-                    f"({s.first_sim_year}–{s.first_sim_year + s.simulation_years - 1})"
-                )
-            st.markdown(f"- Price escalation: **{s.price_escalation_rate:.1%}/yr**")
-            if s.dispatch_mode == "full_multi_year":
-                st.markdown(
-                    f"- Degradation: PV {s.pv_degradation_rate:.1%} | "
-                    f"Wind {s.wind_degradation_rate:.1%} | "
-                    f"BESS {s.bess_degradation_rate:.1%}"
-                )
 
 
 def _render_nem_data_status(s) -> tuple[bool, bool]:
@@ -444,7 +366,6 @@ def _run_simulation(scenario, max_workers: int, run_id: str) -> None:
 
 def _render_results(fin, n_years: int) -> None:
     s = state.get_effective_scenario()
-    render_config_summary(s)
     if s.dispatch_mode == "representative_year":
         st.caption(f"Financial projection: {n_years} operating years based on one solved dispatch year.")
     with st.expander("Optimisation results", expanded=True):
@@ -672,7 +593,7 @@ def render() -> None:
         state.set_scenario(BASE_SCENARIO)
     s = state.get_scenario()
 
-    _render_scenario_summary(s)
+    _render_scenario_summary(s, state.get_effective_scenario() if state.has_multi_year_results() else None)
     with st.expander("Optimisation", expanded=True):
         prices_ok, cf_ok = _render_data_status(s)
         data_ready = prices_ok and cf_ok

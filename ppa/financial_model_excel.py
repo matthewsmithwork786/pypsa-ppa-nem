@@ -542,7 +542,9 @@ def _write_model(
     if result.annual_energy:
         yearly = wb.create_sheet("Annual Energy")
         yearly.column_dimensions["A"].width = 32
-        yearly.cell(1, 1, "Operating year").font = _HEADER
+        yearly.cell(1, 1, "Metric").font = _HEADER
+        yearly.cell(1, 1).fill = _HEADER_FILL
+        yearly.freeze_panes = "B2"
         keys = (
             "ppa_gwh", "excess_solar_gwh", "excess_nonsolar_gwh", "penalty_gwh",
             "total_solar_gwh", "total_nonsolar_gwh", "sell_solar_price",
@@ -551,7 +553,9 @@ def _write_model(
         )
         for annual_idx, energy in enumerate(result.annual_energy):
             column = get_column_letter(annual_idx + 2)
-            yearly.cell(1, annual_idx + 2, annual_idx + 1).font = _HEADER
+            yearly.cell(1, annual_idx + 2, f"Operating year {annual_idx + 1}").font = _HEADER
+            yearly.cell(1, annual_idx + 2).fill = _HEADER_FILL
+            yearly.column_dimensions[column].width = 22
             for row_idx, key in enumerate(keys, start=2):
                 yearly.cell(row_idx, 1, key)
                 yearly.cell(row_idx, annual_idx + 2, getattr(energy, key)).fill = _PREFILL

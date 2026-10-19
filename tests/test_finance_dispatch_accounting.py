@@ -183,6 +183,9 @@ def test_excel_preserves_actual_year_volumes_and_purchase_prices():
     result = run_project_finance(p, e, annual_energy=[e, second])
     wb = openpyxl.load_workbook(BytesIO(export_financial_model(p,e,result)))
     annual = wb["Annual Energy"]
+    assert [cell.value for cell in annual[1]] == ["Metric", "Operating year 1", "Operating year 2"]
+    assert all(cell.fill.fgColor.rgb == "001F4E78" for cell in annual[1])
+    assert annual.freeze_panes == "B2"
     rows = {annual.cell(i,1).value:i for i in range(2,annual.max_row+1)}
     assert annual.cell(rows["purchase_price"],2).value == 100
     assert annual.cell(rows["purchase_price"],3).value == 120
