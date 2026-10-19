@@ -185,6 +185,19 @@ def _selectable_duids(plants_df: "pd.DataFrame", fuel_tech: str) -> list:
     return list(df["duid"])
 
 
+def _filter_capacity_factors(
+    plants: pd.DataFrame, min_wind_pct: float, min_pv_pct: float,
+) -> pd.DataFrame:
+    """Apply each technology's inclusive floor using the tooltip's CF sources."""
+    factors = pd.Series(float("nan"), index=plants.index)
+    for column in ("mean_cuf_selected_years", "cuf", "mean_cf"):
+        if column in plants:
+            values = pd.to_numeric(plants[column], errors="coerce")
+            factors = factors.fillna(values.where(values.between(0, 1)))
+    minimum = plants["fuel_tech"].map({"Wind": min_wind_pct, "Solar": min_pv_pct}).fillna(0)
+    return plants.loc[(minimum == 0) | (factors * 100 >= minimum)]
+
+
 # ── Streamlit render ─────────────────────────────────────────────────────────
 
 @st.cache_data
@@ -427,7 +440,25 @@ def render() -> None:
         "Region filter", options=regions_present, default=regions_present, key="nm_region_filter",
     )
 
+    cols = st.columns(2)
+    help_text = (
+        "Filters the map and plant dropdowns using the capacity factor shown in each tooltip: "
+        "the mean over selected years where available, otherwise the cached annual value. "
+        "0% shows all plants; a positive minimum hides plants without capacity-factor data. "
+        "This uses UIGF available generation, before network curtailment."
+    )
+    min_wind = cols[0].slider(
+        "Minimum wind capacity factor (%)", min_value=0, max_value=100, value=0,
+        step=1, format="%d%%", key="nm_cuf_min_wind", help=help_text,
+    )
+    min_pv = cols[1].slider(
+        "Minimum PV capacity factor (%)", min_value=0, max_value=100, value=0,
+        step=1, format="%d%%", key="nm_cuf_min_solar", help=help_text,
+    )
     filtered = plants_df[plants_df["region"].isin(region_filter)] if region_filter else plants_df
+    filtered = _filter_capacity_factors(filtered, min_wind, min_pv)
+    counts = filtered["fuel_tech"].value_counts()
+    st.caption(f"Matching plants: {counts.get('Wind', 0)} wind · {counts.get('Solar', 0)} solar.")
 
     # ── Apply pending map click BEFORE rendering the selectboxes ───────────────
     click_state = st.session_state.get("nm_map", {}) or {}
@@ -483,49 +514,52 @@ def render() -> None:
         )
 
     # ── Map ──────────────────────────────────────────────────────────────────
-    try:
-        import folium
-        from streamlit_folium import st_folium
-    except ImportError:
-        st.map(
-            filtered.rename(columns={"lat": "lat", "lon": "lon"})[["lat", "lon"]],
-            zoom=4, height=400,
-        )
-        st.caption(
-            "Install `streamlit-folium` to see colored/sized markers and click-to-select."
-        )
+    if filtered.empty:
+        st.info("No plants match these filters. Lower the capacity-factor minimums or change the regions.")
     else:
-        center_lat = float(filtered["lat"].mean())
-        center_lon = float(filtered["lon"].mean())
-        fmap = folium.Map(location=(center_lat, center_lon), zoom_start=4, tiles="OpenStreetMap")
-        for _, row in filtered.iterrows():
-            style = _marker_style(row)
-            folium.CircleMarker(
-                (float(row["lat"]), float(row["lon"])),
-                radius=_marker_radius(float(row["capacity_registered_mw"])),
-                color=style["color"],
-                weight=style["weight"],
-                dash_array=style["dash_array"],
-                fill=style["fill"],
-                fill_color=style["fill_color"],
-                fill_opacity=style["fill_opacity"],
-                tooltip=_tooltip(row),
-            ).add_to(fmap)
-        st_folium(
-            fmap, height=420, use_container_width=True,
-            key="nm_map", returned_objects=["last_object_clicked_tooltip"],
-        )
-        st.caption(
-            "🟢 Wind · 🟡 Solar · solid = operational in all selected years · "
-            "grey dashed = not fully operational in every selected year (not selectable). "
-            "Click a marker or use the selectboxes above (selectboxes are authoritative)."
-        )
-        st.caption(
-            "Marker tooltip: CUF = energy ÷ (nameplate × hours-in-year, UIGF, AC); "
-            "with a multi-year range the mean across the selected years is shown. "
-            "“1st power” = registry commissioning date, “first 2025 output” = first "
-            "sustained UIGF availability, “—” = not available."
-        )
+        try:
+            import folium
+            from streamlit_folium import st_folium
+        except ImportError:
+            st.map(
+                filtered.rename(columns={"lat": "lat", "lon": "lon"})[["lat", "lon"]],
+                zoom=4, height=400,
+            )
+            st.caption(
+                "Install `streamlit-folium` to see colored/sized markers and click-to-select."
+            )
+        else:
+            center_lat = float(filtered["lat"].mean())
+            center_lon = float(filtered["lon"].mean())
+            fmap = folium.Map(location=(center_lat, center_lon), zoom_start=4, tiles="OpenStreetMap")
+            for _, row in filtered.iterrows():
+                style = _marker_style(row)
+                folium.CircleMarker(
+                    (float(row["lat"]), float(row["lon"])),
+                    radius=_marker_radius(float(row["capacity_registered_mw"])),
+                    color=style["color"],
+                    weight=style["weight"],
+                    dash_array=style["dash_array"],
+                    fill=style["fill"],
+                    fill_color=style["fill_color"],
+                    fill_opacity=style["fill_opacity"],
+                    tooltip=_tooltip(row),
+                ).add_to(fmap)
+            st_folium(
+                fmap, height=420, use_container_width=True,
+                key="nm_map", returned_objects=["last_object_clicked_tooltip"],
+            )
+            st.caption(
+                "🟢 Wind · 🟡 Solar · solid = operational in all selected years · "
+                "grey dashed = not fully operational in every selected year (not selectable). "
+                "Click a marker or use the selectboxes above (selectboxes are authoritative)."
+            )
+            st.caption(
+                "Marker tooltip: CUF = energy ÷ (nameplate × hours-in-year, UIGF, AC); "
+                "with a multi-year range the mean across the selected years is shown. "
+                "“1st power” = registry commissioning date, “first 2025 output” = first "
+                "sustained UIGF availability, “—” = not available."
+            )
 
     # ── Native 5-min CF inspection for the selected plants ──────────────────────
     for label, duid in (("Wind", wind_duid), ("Solar", pv_duid)):
