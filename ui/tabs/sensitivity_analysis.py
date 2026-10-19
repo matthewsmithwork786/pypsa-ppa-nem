@@ -20,6 +20,7 @@ from ppa.sensitivity import (
     tornado_to_dataframe,
 )
 from ui import state
+from ui.result_display import chart_help, number_table, result_chart
 
 # ── Base inputs ────────────────────────────────────────────────────────────────
 
@@ -275,11 +276,12 @@ def _tornado_panel(
             paper_bgcolor="white",
         )
         with cols[0]:
-            st.plotly_chart(fig, width='stretch')
+            chart_help("Sensitivity tornado", "Each row changes one assumption down and up while holding the others fixed. The bar ends show the resulting financial metric; the vertical line is the base case. Wider bars indicate greater sensitivity, not a probability or a forecast range. IRR and gearing are percentages; NPV and CAPEX are A$ million; DSCR is a ratio.")
+            result_chart(fig, width='stretch')
 
     with tab_chart2:
         df = tornado_to_dataframe(rows, base_val, metric_key)
-        st.dataframe(df.set_index("Parameter"), width='stretch', height="content")
+        st.dataframe(number_table(df.set_index("Parameter")), width='stretch', height="content")
 
 
 # ── Tab entry point ────────────────────────────────────────────────────────────

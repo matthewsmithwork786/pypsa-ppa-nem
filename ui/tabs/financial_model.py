@@ -17,6 +17,7 @@ from ppa.financial_model import (
 )
 from ppa.financial_model_excel import export_financial_model, export_hourly_timeseries
 from ui import state
+from ui.result_display import chart_help, number_table, result_chart
 
 
 # ── Energy interface ──────────────────────────────────────────────────────────
@@ -239,17 +240,18 @@ def _render_results(r) -> None:
         cols[0].metric("Project IRR", irr(r.project_irr), help="Unlevered FCFF return")
         cols[1].metric("Levered equity IRR", irr(r.equity_irr), help="Calculated from equity contributions and after-tax distributions after interest and debt repayments; independent of the target IRR.")
         cols[2].metric("Gearing", f"{r.gearing:.1%}")
-        cols[3].metric("NPV @ WACC", f"A${r.npv_project:,.0f}m")
+        cols[3].metric("NPV @ WACC", f"A${r.npv_project:,.2f}M")
 
         cols = st.columns(4)
-        cols[0].metric("Total funding (incl. IDC)", f"A${r.total_capex:,.0f}m")
+        cols[0].metric("Total funding (incl. IDC)", f"A${r.total_capex:,.2f}M")
         # st.metric parses its value as markdown; two "$" in one string forms a
         # LaTeX math span that swallows everything between them, so only one
         # "$" per value -- both amounts are already the same currency.
-        cols[1].metric("Debt / Equity", f"A${r.total_debt:,.0f}m / {r.total_equity:,.0f}m")
+        cols[1].metric("Debt / Equity", f"A${r.total_debt:,.2f}M / {r.total_equity:,.2f}M")
         cols[2].metric("Min / Avg DSCR", f"{r.min_dscr:.2f} / {r.avg_dscr:.2f}")
         pb = f"{r.payback_years:.1f} yrs" if r.payback_years < 1e8 else "n/a"
         cols[3].metric("Equity payback / LCOE", f"{pb} · A${r.lcoe:,.0f}/MWh")
+        st.metric("Lifetime penalty cost", f"A${r.schedule['penalty_cost'].sum():,.2f}M", help="Total nominal generator penalty charges across operating years. Already deducted from net contracted revenue, cash flow, NPV and IRR; this display does not deduct them again.")
 
     sc = r.schedule
     periods = r.periods
@@ -275,8 +277,9 @@ def _render_results(r) -> None:
                                     fillcolor="rgba(46,125,50,0.08)"))
             fig.add_hline(y=0, line_dash="dash", line_color="gray")
             fig.update_layout(height=400, margin=dict(t=10, b=30), xaxis_title="Period",
-                            yaxis_title="A$m")
-            st.plotly_chart(fig, width="stretch")
+                            yaxis_title="A$ million")
+            chart_help('Cumulative equity cash flow', 'Adds the equity cash flows from construction through operations, in A$ million. Negative values represent equity invested; a crossing above zero indicates undiscounted equity payback. This is after financing and tax, not the offtaker electricity bill.')
+            result_chart(fig, width="stretch")
 
         with tab_chart2:
             # Revenue split
@@ -287,9 +290,10 @@ def _render_results(r) -> None:
             fig.add_trace(go.Bar(x=periods[ops], y=sc["net_uncontracted_rev"][ops],
                                 name="Uncontracted (merchant + LGC)", marker_color="#90CAF9"))
             fig.update_layout(barmode="stack", height=400, margin=dict(t=10, b=30),
-                            xaxis_title="Period", yaxis_title="A$m",
+                            xaxis_title="Period", yaxis_title="A$ million",
                             legend=dict(orientation="h", y=1.15))
-            st.plotly_chart(fig, width="stretch")
+            chart_help('Contracted and merchant revenue', 'Operating revenue in A$ million. Contracted revenue is already net of penalties, market purchases and transmission charges. Uncontracted revenue includes merchant sales and certificates. This chart is revenue before operating costs, financing and tax; penalty cost is also shown separately in the schedule.')
+            result_chart(fig, width="stretch")
 
         with tab_chart3:
             # Debt balance & DSCR
@@ -301,15 +305,17 @@ def _render_results(r) -> None:
             fig.add_trace(go.Scatter(x=periods[ops], y=dscr[ops], name="DSCR", yaxis="y2",
                                     mode="lines+markers", line=dict(color="#1B5E20", width=2)))
             fig.update_layout(barmode="stack", height=400, margin=dict(t=10, b=30),
-                            xaxis_title="Period", yaxis_title="A$m",
+                            xaxis_title="Period", yaxis_title="A$ million",
                             yaxis2=dict(title="DSCR", overlaying="y", side="right", showgrid=False),
                             legend=dict(orientation="h", y=1.15))
-            st.plotly_chart(fig, width="stretch")
+            chart_help('Debt service and coverage', 'Bars show interest and principal repayments in A$ million on the left axis. The line is DSCR on the right axis: cash available for debt service divided by debt service. A DSCR below 1 means available cash does not cover that period’s debt service.')
+            result_chart(fig, width="stretch")
 
         with tab_chart4:
             # Annual schedule table
             df = pd.DataFrame({
                 "Period": periods.astype(int),
+                "Penalty cost": -sc["penalty_cost"],
                 "Net contracted rev": sc["net_contracted_rev"],
                 "Net uncontracted rev": sc["net_uncontracted_rev"],
                 "Opex": -sc["opex"],
@@ -324,7 +330,9 @@ def _render_results(r) -> None:
                 "DSCR": sc["dscr"],
             })
             df = df[(df["Period"] >= 1)].round(2)
-            st.dataframe(df.set_index("Period"), width="stretch", height="content")
+            df.rename(columns={column: f"{column} (A$ million)" for column in df.columns if column not in {"Period", "DSCR"}}, inplace=True)
+            st.caption("Amounts are A$ million; costs are negative. Penalties are shown separately for visibility and are already deducted in net contracted revenue. DSCR is a ratio.")
+            st.dataframe(number_table(df.set_index("Period")), width="stretch", height="content")
 
 
 # ── Tab entry point ────────────────────────────────────────────────────────────
