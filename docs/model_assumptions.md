@@ -21,3 +21,25 @@ Custom energy constraints must use the relevant snapshot weights. Without them, 
 PPA delivery is energy sent through the offtake link. Allowed shortfall and penalty generation meet the bus balance but bypass the delivery link. A penalty price is an economic signal; it does not enforce a minimum delivery share. The hard minimum is conditional on the scenario's `enforce_min_delivery` setting.
 
 Fast financial mode repeats one solved dispatch year's energy volumes over the requested projection horizon. It does not model future weather, dispatch responses, degradation, or battery augmentation. Projected delivery and cash flow are conditional scenario outputs, not independently solved future-year results. The detailed financial model may use different assumptions; consult [financial assumptions](financial_assumptions.md).
+
+
+## Offtaker run-of-plant comparison
+
+Detailed Results includes a selected-year settlement view for wind and solar
+run-of-plant offtakes. All solved wind and solar production is paid at separate
+user-entered prices (defaulting to that year's delivered PPA price). For each
+interval, generation is matched to actual load; the remaining shortfall is bought
+at the modelled spot price and surplus is sold at that price. Net procurement
+cost is wind payments + solar payments + shortfall purchases - surplus sales.
+Negative spot prices are retained, so surplus sales can increase cost. Energy
+and costs use the dispatch interval duration, including sub-hourly runs.
+
+This calculation reuses solved sent-out generation, including existing
+curtailment. It is a settlement comparison, not a new dispatch optimisation for
+a different contract. Battery dispatch and charges are excluded; generation is
+allocated directly to load before spot settlement. No payment is assumed for
+available-but-curtailed energy. One common spot price is used for generation and
+load. Regional basis, losses, network charges, retailer/sleeving fees,
+certificates, tax, and contract-specific curtailment and negative-price clauses
+are excluded. The result covers the selected solved year, not a lifetime
+projection. Annual generation / load and interval matching are distinct metrics.

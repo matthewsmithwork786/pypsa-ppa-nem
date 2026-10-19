@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from ppa.counterfactuals import compute_counterfactuals
+from ppa.offtaker import run_of_plant_costs
 from ppa.results import (
     build_24h_avg,
     build_24h_band,
@@ -322,6 +323,112 @@ def _render_multi_year_counterfactuals(results, fin, s) -> None:
     st.dataframe(tbl, hide_index=True, width="stretch")
 
 
+def _render_offtaker(result) -> None:
+    prices = getattr(result, "market_prices", None)
+    if prices is None:
+        st.info("Re-run the optimisation to include market prices for offtaker analysis.")
+        return
+    st.subheader("Offtaker: run-of-plant wind and solar")
+    st.caption(
+        "Selected dispatch year only. The offtaker pays for all solved wind and solar generation, "
+        "uses what coincides with load, buys shortfalls at spot and sells surplus at spot. "
+        "Prices below apply to this year and default to its modelled PPA price. "
+        "Changing them recalculates settlement costs without another optimisation."
+    )
+    st.info(
+        "This is a settlement comparison using existing solved generation, including its curtailment. "
+        "It does not re-optimise generation for a run-of-plant contract or treat available-but-curtailed "
+        "energy as produced. Battery services are excluded: all wind and solar output is allocated "
+        "directly against load before spot settlement. A battery-managed portfolio requires separate dispatch."
+    )
+    cols = st.columns(2)
+    year = result.dispatch.wind_gen.index[0].year
+    wind_price = cols[0].number_input(
+        "Wind run-of-plant price (A$/MWh)", value=float(result.scenario.ppa_price),
+        step=1.0, key=f"offtaker_wind_price_{year}",
+    )
+    solar_price = cols[1].number_input(
+        "Solar run-of-plant price (A$/MWh)", value=float(result.scenario.ppa_price),
+        step=1.0, key=f"offtaker_solar_price_{year}",
+    )
+    d = result.dispatch
+    load = d.ppa_delivery + d.allowed_shortfall + d.penalty_gen
+    dt = result.n_period_hours / len(load)
+    hourly = run_of_plant_costs(load, d.wind_gen, d.pv_gen, prices, wind_price, solar_price, dt)
+    hourly["Delivered PPA cost (A$)"] = (
+        d.ppa_delivery * result.scenario.ppa_price
+        + (load - d.ppa_delivery).clip(lower=0) * prices
+    ) * dt
+    totals = hourly.sum()
+    energy = totals["Load (MWh)"]
+    generation = totals["Wind (MWh)"] + totals["Solar (MWh)"]
+
+    def display_ratio(numerator, denominator, *, percent=False):
+        if denominator <= 0:
+            return "n/a"
+        value = numerator / denominator
+        return f"{value:.1%}" if percent else f"A${value:,.2f}/MWh"
+
+    net = totals["Net procurement cost (A$)"]
+    spot_cost = totals["Spot-only cost (A$)"]
+    cols = st.columns(4)
+    cols[0].metric("Net procurement cost", _fmt_m(net))
+    cols[1].metric("Cost per MWh of load", display_ratio(net, energy))
+    cols[2].metric("Savings vs spot-only", _fmt_m(spot_cost - net))
+    cols[3].metric("Load matched at each interval", display_ratio(totals["Matched (MWh)"], energy, percent=True))
+
+    costs = pd.DataFrame([
+        ("Wind PPA payments", totals["Wind PPA cost (A$)"]),
+        ("Solar PPA payments", totals["Solar PPA cost (A$)"]),
+        ("Shortfall spot purchases", totals["Shortfall cost (A$)"]),
+        ("Surplus spot sales (deducted)", -totals["Surplus revenue (A$)"]),
+        ("Net procurement cost", net),
+        ("Spot-only benchmark", spot_cost),
+        ("Existing delivered PPA + spot top-up", totals["Delivered PPA cost (A$)"]),
+    ], columns=["Cost component", "A$"])
+    cols = st.columns(2)
+    cols[0].dataframe(costs, hide_index=True, width="stretch")
+    volumes = pd.DataFrame([
+        ("Load", energy), ("Contracted wind", totals["Wind (MWh)"]),
+        ("Contracted solar", totals["Solar (MWh)"]),
+        ("Generation matched to load", totals["Matched (MWh)"]),
+        ("Shortfall purchased", totals["Shortfall (MWh)"]),
+        ("Surplus sold", totals["Surplus (MWh)"]),
+    ], columns=["Energy flow", "MWh"])
+    cols[1].dataframe(volumes, hide_index=True, width="stretch")
+    exposure = pd.DataFrame([
+        ("Generation / load", display_ratio(generation, energy, percent=True)),
+        ("Surplus / generation", display_ratio(totals["Surplus (MWh)"], generation, percent=True)),
+        ("Wind capture price", display_ratio(totals["Wind spot value (A$)"], totals["Wind (MWh)"])),
+        ("Solar capture price", display_ratio(totals["Solar spot value (A$)"], totals["Solar (MWh)"])),
+        ("Shortfall purchase price", display_ratio(totals["Shortfall cost (A$)"], totals["Shortfall (MWh)"])),
+        ("Surplus sale price", display_ratio(totals["Surplus revenue (A$)"], totals["Surplus (MWh)"])),
+        ("Negative-price surplus cost (included above)", _fmt_m(totals["Negative-price surplus cost (A$)"])),
+    ], columns=["Exposure metric", "Value"])
+    st.dataframe(exposure, hide_index=True, width="stretch")
+    st.caption(
+        "Matching is calculated interval by interval, before storage; annual generation / load can "
+        "exceed 100% while shortfalls remain. Capture prices are generation-weighted spot prices. "
+        "Negative surplus revenue increases procurement cost. Undefined ratios display as n/a. "
+        "Uses one common modelled spot price; excludes regional basis, losses, network charges, "
+        "retailer/sleeving fees, certificates, taxes and contractual curtailment or negative-price clauses."
+    )
+    monthly = hourly.resample("MS").sum()
+    fig = go.Figure()
+    for label in ["Matched (MWh)", "Shortfall (MWh)", "Surplus (MWh)"]:
+        fig.add_bar(x=monthly.index, y=monthly[label], name=label)
+    fig.update_layout(title="Monthly load matching and surplus", barmode="group", yaxis_title="MWh")
+    st.plotly_chart(fig, width="stretch")
+    fig = go.Figure()
+    for label in ["Net procurement cost (A$)", "Delivered PPA cost (A$)", "Spot-only cost (A$)"]:
+        series = _downsample_series(hourly[label].cumsum())
+        fig.add_scatter(x=series.index, y=series / 1e6, name=label, mode="lines")
+    fig.update_layout(title="Cumulative procurement cost", yaxis_title="A$ million")
+    st.plotly_chart(fig, width="stretch")
+    csv_download_button(hourly, "offtaker_run_of_plant_intervals.csv", key="dl_offtaker_intervals")
+    csv_download_button(monthly, "offtaker_run_of_plant_monthly.csv", key="dl_offtaker_monthly")
+
+
 def _render_multi_year_deep_dive() -> None:
     results = state.get_multi_year_results()
     fin = state.get_multi_year_financial()
@@ -339,10 +446,11 @@ def _render_multi_year_deep_dive() -> None:
     available_days = sorted(result.dispatch.wind_gen.index.normalize().unique().strftime("%Y-%m-%d"))
 
     with st.expander("Detailed results", expanded=True):
-        tab_chart1, tab_chart2, tab_chart3 = st.tabs([
+        tab_chart1, tab_chart2, tab_chart3, tab_offtaker = st.tabs([
             "| Hourly dispatch",
             "| Generation statistics",
             "| Counterfactual procurement comparison",
+            "| Offtaker run-of-plant",
         ])
         with tab_chart1:
             cols = st.columns(4)
@@ -353,6 +461,8 @@ def _render_multi_year_deep_dive() -> None:
             _render_gen_stats(result, result.scenario)
         with tab_chart3:
             _render_multi_year_counterfactuals(results, fin, s)
+        with tab_offtaker:
+            _render_offtaker(result)
 
     _render_sla_compliance(result, result.scenario)
 
