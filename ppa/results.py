@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pandas as pd
@@ -82,6 +82,9 @@ class OptimisationResult:
     monthly_delivery_share: pd.Series = None  # type: ignore[assignment]
     daily_delivery_share: pd.Series = None  # type: ignore[assignment]
     warnings: list[str] = field(default_factory=list)
+    raw_dispatch: DispatchSeries | None = None
+    raw_summary: SummaryVolumes | None = None
+    raw_revenue: RevenueBreakdown | None = None
 
 
 def merchant_sales_frame(result: OptimisationResult) -> pd.DataFrame:
@@ -185,6 +188,58 @@ def extract_results(
         soc=soc,
         ppa_delivery=ppa_delivery,
     )
+
+    raw = _summarise_dispatch(dispatch, s, ts, solver_status, solver_condition, resolution_h)
+    raw.link_utilisation = _extract_link_utilisation(n)
+    if not s.customer_first_allocation:
+        return raw
+    allocated = customer_first_dispatch(dispatch, ts["ppaload_mw"], s)
+    result = _summarise_dispatch(allocated, s, ts, solver_status, solver_condition, resolution_h)
+    return replace(result, link_utilisation=raw.link_utilisation,
+                   raw_dispatch=dispatch, raw_summary=raw.summary, raw_revenue=raw.revenue)
+
+
+def customer_first_dispatch(d: DispatchSeries, load: pd.Series, s: Scenario) -> DispatchSeries:
+    """Reallocate existing exports without changing physical plant operation.
+
+    The remaining free-shortfall allowance is shared proportionally across gaps.
+    Daily, monthly and annual budgets are nested, matching the solver's caps.
+    Uniform interval duration cancels in these allocation ratios.
+    """
+    gap = (load - d.ppa_delivery).clip(lower=0)
+    transfer = pd.concat([d.market_sell.clip(lower=0), gap], axis=1).min(axis=1)
+    delivery = d.ppa_delivery + transfer
+    gap = (load - delivery).clip(lower=0)
+    day = gap.index.normalize()
+    daily_gap = gap.groupby(day).sum()
+    daily_load = load.groupby(day).sum()
+    allowance = daily_gap.copy()
+    if s.sla_daily_enabled:
+        allowance = np.minimum(allowance, daily_load * (1 - s.sla_daily_share))
+    if s.sla_monthly_enabled:
+        month = daily_gap.index.to_period("M")
+        totals = allowance.groupby(month).transform("sum")
+        caps = daily_load.groupby(month).transform("sum") * (1 - s.sla_monthly_share)
+        allowance *= (caps / totals.replace(0, np.nan)).clip(upper=1).fillna(0)
+    year = daily_gap.index.year
+    totals = allowance.groupby(year).transform("sum")
+    caps = daily_load.groupby(year).transform("sum") * s.allowed_shortfall_share
+    allowance *= (caps / totals.replace(0, np.nan)).clip(upper=1).fillna(0)
+    fraction = (allowance / daily_gap.replace(0, np.nan)).fillna(0)
+    allowed = gap * fraction.reindex(day).to_numpy()
+    return replace(d, ppa_delivery=delivery, market_sell=(d.market_sell - transfer).clip(lower=0),
+                   allowed_shortfall=allowed, penalty_gen=(gap - allowed).clip(lower=0))
+
+
+def _summarise_dispatch(
+    dispatch: DispatchSeries, s: Scenario, ts: pd.DataFrame,
+    solver_status: str, solver_condition: str, resolution_h: float,
+) -> OptimisationResult:
+    wind_gen, pv_gen = dispatch.wind_gen, dispatch.pv_gen
+    market_buy, market_sell = dispatch.market_buy, dispatch.market_sell
+    allowed_shortfall, penalty_gen = dispatch.allowed_shortfall, dispatch.penalty_gen
+    bess_dispatch, bess_store = dispatch.bess_dispatch, dispatch.bess_store
+    ppa_delivery = dispatch.ppa_delivery
 
     # ── Volumes ───────────────────────────────────────────────────────────────
     total_load_mwh = float(ts["ppaload_mw"].sum()) * resolution_h
@@ -312,7 +367,7 @@ def extract_results(
     )
 
     return OptimisationResult(
-        scenario=scenario,
+        scenario=s,
         dispatch=dispatch,
         summary=summary,
         revenue=revenue,
@@ -320,7 +375,6 @@ def extract_results(
         solver_condition=solver_condition,
         n_period_hours=len(ts) * resolution_h,
         market_prices=ts["ts_MktPrice"],
-        link_utilisation=_extract_link_utilisation(n),
         monthly_delivery_share=monthly_delivery_share,
         daily_delivery_share=daily_delivery_share,
         warnings=warnings,

@@ -64,6 +64,8 @@ def render_scenario_summary(s, portfolio=None) -> None:
 
         with cols[2]:
             st.markdown("**Market interaction**")
+            allocation = "customer first" if s.customer_first_allocation else "as solved"
+            st.markdown(f"- Reporting allocation: **{allocation}**")
             if s.enable_market_buy:
                 st.markdown(f"- Buy cap: **{s.market_buy_share:.0%}** of delivery")
             else:

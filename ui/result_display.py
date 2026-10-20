@@ -59,3 +59,32 @@ def result_styles() -> None:
 def summary_table(frame: pd.DataFrame, **kwargs) -> None:
     """Small summaries wrap their text instead of truncating it in a grid."""
     st.table(number_table(frame).hide(axis="index"))
+
+
+def allocation_details(result, key: str) -> None:
+    raw = getattr(result, "raw_dispatch", None)
+    if raw is None:
+        return
+    st.info(
+        "Customer-first reporting allocation is ON. Existing exports are allocated to "
+        "unmet PPA load in the same interval before calculating excess sales, delivery "
+        "and penalties. Financial results use this settlement. Generation, battery "
+        "operation and capacity sizing retain the original economic optimisation."
+    )
+    with st.expander("Compare allocated results with original dispatch"):
+        from ui.exports import csv_download_button
+
+        data = {}
+        for name in ("ppa_delivery", "market_sell", "allowed_shortfall", "penalty_gen"):
+            data[f"Original {name} (MW)"] = getattr(raw, name)
+            data[f"Allocated {name} (MW)"] = getattr(result.dispatch, name)
+        csv_download_button(pd.DataFrame(data), "customer_allocation_comparison.csv",
+                            key=key, label="Download original and allocated interval volumes")
+        before, after = result.raw_revenue, result.revenue
+        summary_table(pd.DataFrame({
+            "Settlement": ["Original solved", "Customer allocation"],
+            "PPA revenue (A$ million)": [before.ppa_revenue / 1e6, after.ppa_revenue / 1e6],
+            "Excess revenue (A$ million)": [before.excess_revenue / 1e6, after.excess_revenue / 1e6],
+            "Penalty cost (A$ million)": [before.penalty_cost / 1e6, after.penalty_cost / 1e6],
+            "Net revenue (A$ million)": [before.net_revenue / 1e6, after.net_revenue / 1e6],
+        }))

@@ -104,6 +104,15 @@ def render_scenario_form(initial: Scenario) -> Scenario:
     enable_penalty = cols[0].toggle("Enable penalty regime", value=initial.enable_penalty, key="sf_enable_penalty")
     run_financial_analysis = cols[1].toggle("Run financial analysis", value=initial.run_financial_analysis, key="sf_run_financial_analysis")
 
+    customer_first_allocation = st.toggle(
+        "Allocate generation to PPA load first in reporting",
+        value=initial.customer_first_allocation, key="sf_customer_first_allocation",
+        help="After solving, allocate exports to unmet PPA load in the same interval. "
+             "Recalculate excess sales, delivery, shortfall and financial settlement. "
+             "Generation, battery dispatch and optimised capacities are unchanged. "
+             "Reported returns use this allocation, not the optimiser's original settlement.",
+    )
+
     with st.expander("Portfolio assets", expanded=True):
         if optimise_capacity:
             st.caption(
@@ -639,6 +648,7 @@ Both comparisons exclude retailer/network charges and penalty compensation. In m
         include_bess=include_bess,
         enable_market_buy=enable_market_buy,
         enable_market_sell=enable_market_sell,
+        customer_first_allocation=customer_first_allocation,
         enable_shortfall=enable_shortfall,
         enable_penalty=enable_penalty,
         run_financial_analysis=run_financial_analysis,

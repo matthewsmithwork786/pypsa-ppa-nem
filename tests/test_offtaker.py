@@ -84,7 +84,7 @@ _render_offtaker(r)
 '''
     app = AppTest.from_string(script).run()
     assert not app.exception
-    assert app.metric[1].value == 'A$80.00/MWh'
+    assert app.metric[1].value == 'A$80/MWh'
     assert app.dataframe[0].value['A$ million'].iloc[4] == pytest.approx(.0024)
     assert app.dataframe[1].value['GWh'].iloc[0] == pytest.approx(.03)
     labels = [p.proto.popover.label for p in app.get('popover')]
@@ -93,5 +93,5 @@ _render_offtaker(r)
     assert '? Cumulative procurement cost' in labels
     app.number_input[1].set_value(30).run()
     assert not app.exception
-    assert app.metric[1].value == 'A$70.00/MWh'
+    assert app.metric[1].value == 'A$70/MWh'
     assert len(app.get('plotly_chart')) == 2

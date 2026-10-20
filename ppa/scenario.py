@@ -21,6 +21,7 @@ class Scenario:
     # Market purchases are opt-in.
     enable_market_buy: bool = False
     enable_market_sell: bool = True
+    customer_first_allocation: bool = False
     enable_shortfall: bool = True
     enable_penalty: bool = True
     run_financial_analysis: bool = True

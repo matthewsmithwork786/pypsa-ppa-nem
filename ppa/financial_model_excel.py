@@ -277,6 +277,9 @@ def _write_hourly_sheet(wb: Workbook, year_results: list) -> dict[str, list[str]
           "aggregates above filter by year (SUMIFS) and scale by 8760/hours.").font = (
         Font(italic=True, color="808080"))
 
+    if any(getattr(r.scenario, "customer_first_allocation", False) for r in year_results):
+        _text(ws["A3"], "Customer-first allocation: PPA delivery, excess sales and penalties use adjusted settlement; physical dispatch is unchanged.")
+
     # ── Aggregate block header: one column per year ──────────────────────────
     _text(ws.cell(_AGG_HEADER_ROW, 1), "Metric").font = _HEADER
     ws.cell(_AGG_HEADER_ROW, 1).fill = _HEADER_FILL
@@ -470,6 +473,8 @@ def _write_energy(
              "the separate hourly-timeseries workbook sums to, and everything "
              "on Model and Outputs is driven from them."))
     ws["B2"].font = Font(italic=True, color="808080")
+    if e.customer_first_allocation:
+        _text(ws["B3"], "Customer-first allocation: settlement volumes are adjusted after solving; dispatch and sizing are unchanged.")
 
     cells: dict[str, str] = {}
     row = 4

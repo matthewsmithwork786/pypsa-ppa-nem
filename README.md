@@ -34,6 +34,15 @@ Bundled data covers 2025. The app reads committed NEM cache files and runs witho
 
 Sizing defaults to `tsam` typical-week clustering to reduce LP size. Clustering is an approximation and can change the selected fleet, particularly storage. Monthly SLA constraints are not supported with clustered sizing; use full-hourly sizing where calendar-month constraints are required. See [model assumptions](docs/model_assumptions.md) for the load-bearing modelling conventions and [financial assumptions](docs/financial_assumptions.md) for the cost inputs and sources.
 
+In **Set Terms**, the optional **Allocate generation to PPA load first in reporting**
+setting defaults to off. When enabled, existing exports first cover unmet PPA load
+in the same interval after the solve. Delivery, excess sales, shortfall allowances,
+penalties and financial settlement are recalculated consistently. Physical dispatch
+and optimised capacities are unchanged, so reported settlement returns can differ
+from the original objective. Apply the setting and run the scenario to use it.
+Results include an original-versus-allocated interval CSV for comparison. The
+separate run-of-plant alternative continues to settle all wind and solar output.
+
 ## Project map
 
 - `streamlit_app.py`, `ui/` — Streamlit application and user interface.

@@ -26,7 +26,7 @@ from ui.charts import (
 )
 from ui.config_summary import render_scenario_summary
 from ui.exports import csv_download_button
-from ui.result_display import aggregate_units, chart_help, number_table, result_chart, summary_table
+from ui.result_display import aggregate_units, chart_help, number_table, result_chart, summary_table, allocation_details
 
 
 def _fmt_m(v: float) -> str:
@@ -485,6 +485,7 @@ def _render_multi_year_deep_dive() -> None:
     selected_year = cols[0].selectbox("**Dispatch year to analyse:**", year_options, key="dd_year")
     year_idx = year_options.index(selected_year)
     result = results[year_idx]
+    allocation_details(result, "dl_allocation_detail")
 
     available_days = sorted(result.dispatch.wind_gen.index.normalize().unique().strftime("%Y-%m-%d"))
 

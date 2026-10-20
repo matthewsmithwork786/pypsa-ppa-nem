@@ -45,6 +45,7 @@ def get_scenario() -> "Scenario | None":
 
 _SCENARIO_FORM_KEYS = [
     "sf_include_bess", "sf_enable_market_buy", "sf_enable_market_sell",
+    "sf_customer_first_allocation",
     "sf_enable_shortfall", "sf_enable_penalty", "sf_run_financial_analysis",
     "sf_enable_counterfactual", "sf_onsw_mw", "sf_pv_mw", "sf_bess_mw",
     "sf_bess_mwh", "sf_ppaload_mw", "sf_ppa_price", "sf_required_delivery_share",

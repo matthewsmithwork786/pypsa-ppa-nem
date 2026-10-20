@@ -356,6 +356,10 @@ def render() -> None:
         )
         return
 
+    if energy.customer_first_allocation:
+        st.info("Financial inputs use customer-first reporting allocation. Dispatch and "
+                "capacity sizing were optimised using the original settlement.")
+
     # Real per-year data (degradation, weather-year cycling, actual escalation)
     # rather than replaying the single averaged `energy` for every operating
     # year -- see ppa.financial_model.run_project_finance's `annual_energy`.
@@ -440,7 +444,7 @@ def render() -> None:
             "Two separate downloads. The **financial model** is the live workbook — "
             "revenue→tax→cash-flow chain and IRRs as formulas — with the annual energy "
             "figures as hard values on its Energy tab. The **hourly timeseries** is the "
-            f"raw dispatch for all {n_years} simulated years, stacked under a Year column. "
+            f"dispatch and selected settlement for all {n_years} simulated years, stacked under a Year column. "
             f"The hours are a separate file because {n_years} × 8 760 rows is slow to "
             "build and heavy to move, and the finance workbook does not need them."
         )
@@ -466,7 +470,7 @@ def render() -> None:
                 if st.button(
                     f"🕒 Prepare hourly timeseries ({n_years} yr)",
                     width="stretch",
-                    help="Builds the raw hourly dispatch workbook — takes a moment for "
+                    help="Builds the hourly dispatch and settlement workbook — takes a moment for "
                          "a long horizon.",
                 ):
                     with st.spinner(f"Building {n_years} × 8 760 hourly rows..."):

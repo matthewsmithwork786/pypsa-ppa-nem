@@ -11,7 +11,7 @@ import streamlit as st
 from ppa.results import merchant_sales_frame, bess_utilisation
 from ppa.scenario import BASE_SCENARIO
 from ui import state
-from ui.result_display import chart_help, number_table, result_chart
+from ui.result_display import chart_help, number_table, result_chart, allocation_details
 from ui.charts import year_axis
 from ui.config_summary import render_scenario_summary as _render_scenario_summary
 from ui.exports import csv_download_button
@@ -428,6 +428,7 @@ def _render_first_year_energy_tables(result, s) -> None:
     volumes split by solar vs non-solar hours, and penalty volumes. Deliberately
     no financial metrics -- those are computed once the financial modelling
     options are set."""
+    allocation_details(result, "dl_allocation_run")
     summ = result.summary
     merchant = merchant_sales_frame(result)
     solar, nonsolar = merchant.iloc[0], merchant.iloc[1]

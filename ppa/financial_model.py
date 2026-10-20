@@ -74,6 +74,7 @@ class EnergyInputs:
     wind_plant_name: str = ""
     pv_plant_name: str = ""
     transmission_cost_aud: float = 0.0  # annual delivery charge, A$
+    customer_first_allocation: bool = False
 
 
 @dataclass
@@ -292,6 +293,7 @@ def energy_inputs_from_result(
         purchase_price=buy_price,
         marketbuy_gwh=buy_vol * interval_hours * to_gwh,
         name=s.name,
+        customer_first_allocation=getattr(s, "customer_first_allocation", False),
         wind_plant_name=wind_plant_name,
         pv_plant_name=pv_plant_name,
         transmission_cost_aud=(
@@ -336,6 +338,7 @@ def energy_inputs_from_results(results: list) -> EnergyInputs:
         purchase_price=avg("purchase_price"),
         marketbuy_gwh=avg("marketbuy_gwh"),
         name=first.name,
+        customer_first_allocation=first.customer_first_allocation,
         wind_plant_name=first.wind_plant_name,
         pv_plant_name=first.pv_plant_name,
         transmission_cost_aud=avg("transmission_cost_aud"),
