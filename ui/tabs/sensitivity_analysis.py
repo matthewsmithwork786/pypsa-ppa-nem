@@ -147,9 +147,9 @@ def _what_if_panel(
         for col, (label, attr, is_pct) in zip(cols, kpis):
             wv = getattr(wi_result,   attr)
             if is_pct:
-                col.metric(label, f"{wv:.2%}")
+                col.metric(label, f"{wv:.0%}")
             else:
-                col.metric(label, f"{wv:,.2f}")
+                col.metric(label, f"{wv:,.0f}")
 
 
 # ── Tornado chart ──────────────────────────────────────────────────────────────

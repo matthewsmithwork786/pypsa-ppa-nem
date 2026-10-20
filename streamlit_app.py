@@ -19,6 +19,9 @@ from ui.tabs import (
     financial_model,
 )
 
+from ui.result_display import result_styles
+
+result_styles()
 optimisation.restore_from_query_params()
 
 st.markdown(

@@ -18,8 +18,8 @@ def test_comma_separators_preserve_numeric_table_values():
     raw = pd.DataFrame({'Value': [1234567.89, -12345.6]})
     styled = number_table(raw)
     html = styled.to_html()
-    assert '1,234,567.89' in html
-    assert '-12,345.60' in html
+    assert '1,234,568' in html
+    assert '-12,346' in html
     pd.testing.assert_frame_equal(styled.data, raw)
 
 
@@ -33,9 +33,9 @@ _render_financial_summary(SimpleNamespace(ppa_revenue=100e6, merch_revenue=10e6,
 ''').run()
     assert not app.exception
     metrics = {m.label: m.value for m in app.metric}
-    assert metrics['Penalty cost'] == 'A$2.50M'
-    assert metrics['Net cash flow'] == 'A$80.00M'
-    assert metrics['Wind + solar generation'] == '1,100.00 GWh'
+    assert metrics['Penalty cost'] == 'A$2M'
+    assert metrics['Net cash flow'] == 'A$80M'
+    assert metrics['Wind + solar generation'] == '1,100 GWh'
 
 
 def test_project_finance_view_uses_existing_penalty_schedule_in_millions():

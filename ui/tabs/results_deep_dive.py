@@ -26,11 +26,11 @@ from ui.charts import (
 )
 from ui.config_summary import render_scenario_summary
 from ui.exports import csv_download_button
-from ui.result_display import aggregate_units, chart_help, number_table, result_chart
+from ui.result_display import aggregate_units, chart_help, number_table, result_chart, summary_table
 
 
 def _fmt_m(v: float) -> str:
-    return f"A${v / 1e6:,.2f}M"
+    return f"A${v / 1e6:,.0f}M"
 
 
 _MAX_DISPLAY_POINTS = 5000
@@ -216,7 +216,7 @@ def _render_sla_compliance(result, s) -> None:
         result_chart(fig, width="stretch", height=320)
         st.caption(
             f"{below} of {len(series)} {period_label} below the {target:.0%} target — "
-            f"minimum achieved {minimum:.1%}."
+            f"minimum achieved {minimum:.0%}."
         )
 
 
@@ -230,19 +230,19 @@ def _render_gen_stats(result, s) -> None:
 
     stats_df = pd.DataFrame(
         [
-            ("Wind capacity factor", f"{wind_cf:.1%}", f"{summary.wind_generation_mwh / 1e3:,.2f} GWh"),
-            ("PV capacity factor", f"{pv_cf:.1%}", f"{summary.pv_generation_mwh / 1e3:,.2f} GWh"),
-            ("BESS equivalent cycles", f"{bess_cycles:.1f}", f"over {n_hours:,.0f} h"),
-            ("BESS average SoC", f"{avg_soc:,.1f} MWh",
-             f"{avg_soc / s.effective_bess_mwh:.1%} of capacity" if s.effective_bess_mwh > 0 else ""),
-            ("Sold to spot market", f"{summary.sold_to_market_mwh / 1e3:,.2f} GWh", ""),
+            ("Wind capacity factor", f"{wind_cf:.0%}", f"{summary.wind_generation_mwh / 1e3:,.0f} GWh"),
+            ("PV capacity factor", f"{pv_cf:.0%}", f"{summary.pv_generation_mwh / 1e3:,.0f} GWh"),
+            ("BESS equivalent cycles", f"{bess_cycles:.0f}", f"over {n_hours:,.0f} h"),
+            ("BESS average SoC", f"{avg_soc:,.0f} MWh",
+             f"{avg_soc / s.effective_bess_mwh:.0%} of capacity" if s.effective_bess_mwh > 0 else ""),
+            ("Sold to spot market", f"{summary.sold_to_market_mwh / 1e3:,.0f} GWh", ""),
         ],
         columns=["Metric", "Value", "Detail"],
     )
     cols = st.columns(2)
     with cols[0]:
         st.markdown("**Generation & storage**")
-        st.dataframe(stats_df, hide_index=True, width="stretch")
+        summary_table(stats_df)
 
     lu = getattr(result, "link_utilisation", None)
     if lu is not None and not lu.empty:
@@ -333,18 +333,18 @@ def _render_multi_year_counterfactuals(results, fin, s) -> None:
     total_ppa = sum(cf.ppa_offtaker_cost for _, cf, _ in yearly_cfs)
 
     def _eff(cost): return cost / total_load if total_load > 0 else 0.0
-    def _em(cost): return f"A${cost / 1e6:,.2f}M"
+    def _em(cost): return f"A${cost / 1e6:,.0f}M"
 
     tbl = pd.DataFrame([
-        ("PPA (offtaker)", f"A${_eff(total_ppa):,.2f}/MWh", _em(total_ppa), "—"),
-        ("Spot-only", f"A${_eff(total_spot):,.2f}/MWh", _em(total_spot),
-         f"A${(total_spot - total_ppa) / 1e6:+,.2f}M vs PPA"),
-        ("Base futures (escalated)", f"A${_eff(total_cal):,.2f}/MWh", _em(total_cal),
-         f"A${(total_cal - total_ppa) / 1e6:+,.2f}M vs PPA"),
-        ("Blended", f"A${_eff(total_blended):,.2f}/MWh", _em(total_blended),
-         f"A${(total_blended - total_ppa) / 1e6:+,.2f}M vs PPA"),
+        ("PPA (offtaker)", f"A${_eff(total_ppa):,.0f}/MWh", _em(total_ppa), "—"),
+        ("Spot-only", f"A${_eff(total_spot):,.0f}/MWh", _em(total_spot),
+         f"A${(total_spot - total_ppa) / 1e6:+,.0f}M vs PPA"),
+        ("Base futures (escalated)", f"A${_eff(total_cal):,.0f}/MWh", _em(total_cal),
+         f"A${(total_cal - total_ppa) / 1e6:+,.0f}M vs PPA"),
+        ("Blended", f"A${_eff(total_blended):,.0f}/MWh", _em(total_blended),
+         f"A${(total_blended - total_ppa) / 1e6:+,.0f}M vs PPA"),
     ], columns=["Strategy", "Solved-year effective price", "Total cost over solved years", "vs PPA"])
-    st.dataframe(tbl, hide_index=True, width="stretch")
+    summary_table(tbl)
     csv_download_button(tbl, "counterfactual_costs.csv", key="dl_counterfactuals")
 
 
@@ -392,7 +392,7 @@ This is an alternative settlement of the existing solved generation, including i
         if denominator <= 0:
             return "n/a"
         value = numerator / denominator
-        return f"{value:.1%}" if percent else f"A${value:,.2f}/MWh"
+        return f"{value:.0%}" if percent else f"A${value:,.0f}/MWh"
 
     net = totals["Net procurement cost (A$)"]
     spot_cost = totals["Spot-only cost (A$)"]
@@ -434,7 +434,7 @@ This is an alternative settlement of the existing solved generation, including i
         ("Negative-price surplus cost (included above)", _fmt_m(totals["Negative-price surplus cost (A$)"])),
     ], columns=["Exposure metric", "Value"])
     chart_help("Capture prices and exposure", "Generation / load compares annual output bought with annual consumption; surplus / generation shows how much output is sold. Capture prices weight the spot price by wind or solar generation, so they describe the market value of that output, not the PPA price you pay. Shortfall and surplus prices are weighted by the energy bought and sold in those intervals. Negative-price surplus cost is already included in net procurement cost and must not be added again. A missing ratio is shown as n/a when there is no relevant energy.")
-    st.dataframe(exposure, hide_index=True, width="stretch")
+    summary_table(exposure)
     st.caption(
         "Matching is calculated interval by interval, before storage; annual generation / load can "
         "exceed 100% while shortfalls remain. Capture prices are generation-weighted spot prices. "
@@ -445,15 +445,15 @@ This is an alternative settlement of the existing solved generation, including i
     monthly = hourly.resample("MS").sum()
     fig = go.Figure()
     for label in ["Matched (MWh)", "Shortfall (MWh)", "Surplus (MWh)"]:
-        fig.add_bar(x=monthly.index, y=monthly[label] / 1e3, name=label.replace("MWh", "GWh"), hovertemplate="%{x|%b %Y}: %{y:,.2f} GWh<extra>%{fullData.name}</extra>")
-    fig.update_layout(title="Monthly load matching and surplus", barmode="group", yaxis_title="GWh", yaxis_tickformat=",.1f")
+        fig.add_bar(x=monthly.index, y=monthly[label] / 1e3, name=label.replace("MWh", "GWh"), hovertemplate="%{x|%b %Y}: %{y:,.0f} GWh<extra>%{fullData.name}</extra>")
+    fig.update_layout(title="Monthly load matching and surplus", barmode="group", yaxis_title="GWh", yaxis_tickformat=",.0f")
     chart_help("Monthly load matching and surplus", "Each month has three energy bars in GWh (1 GWh = 1,000 MWh). Matched is generation used against load in the same intervals; shortfall is the remaining load bought at spot; surplus is generation sold at spot. Matched + shortfall = load. Matched + surplus = total generation. The three bars must not all be added together as supply to load. Matching is calculated before monthly aggregation and excludes battery shifting.")
     result_chart(fig, width="stretch")
     fig = go.Figure()
     for label in ["Net procurement cost (A$)", "Delivered PPA cost (A$)", "Spot-only cost (A$)"]:
         series = _downsample_series(hourly[label].cumsum())
-        fig.add_scatter(x=series.index, y=series / 1e6, name=label.replace("(A$)", ""), mode="lines", hovertemplate="%{x|%d %b}: A$%{y:,.2f} million<extra>%{fullData.name}</extra>")
-    fig.update_layout(title="Cumulative procurement cost", yaxis_title="A$ million", yaxis_tickformat=",.1f")
+        fig.add_scatter(x=series.index, y=series / 1e6, name=label.replace("(A$)", ""), mode="lines", hovertemplate="%{x|%d %b}: A$%{y:,.0f} million<extra>%{fullData.name}</extra>")
+    fig.update_layout(title="Cumulative procurement cost", yaxis_title="A$ million", yaxis_tickformat=",.0f")
     chart_help("Cumulative procurement cost", "Each line adds costs from the start of the selected year, in A$ million. Run-of-plant includes all wind/solar PPA payments plus shortfall purchases minus surplus sales. Delivered PPA pays only for contracted delivery plus spot top-ups; its generation and battery management remain with the seller. Spot-only buys the entire load at spot. Lower is cheaper; the final point is the full-period cost. These are alternative strategies, so do not add the lines together. Penalty compensation is excluded from the buyer comparison.")
     result_chart(fig, width="stretch")
     csv_download_button(hourly, "offtaker_run_of_plant_intervals.csv", key="dl_offtaker_intervals", label="Download interval data (MWh, A$)")
@@ -468,8 +468,8 @@ def _render_financial_summary(yf, selected_year) -> None:
         cols[2].metric("Penalty cost", _fmt_m(yf.penalty_cost), help="Generator cost for uncovered load beyond the allowance. Already deducted in net cash flow; shown separately here, not deducted twice.")
         cols = st.columns(3)
         cols[0].metric("Net cash flow", _fmt_m(yf.net_cashflow))
-        cols[1].metric(f"Delivery rate ({selected_year})", f"{yf.fulfilled_share:.1%}")
-        cols[2].metric("Wind + solar generation", f"{(yf.wind_gen_mwh + yf.pv_gen_mwh) / 1e3:,.2f} GWh")
+        cols[1].metric(f"Delivery rate ({selected_year})", f"{yf.fulfilled_share:.0%}")
+        cols[2].metric("Wind + solar generation", f"{(yf.wind_gen_mwh + yf.pv_gen_mwh) / 1e3:,.0f} GWh")
 
 
 def _render_multi_year_deep_dive() -> None:
@@ -527,12 +527,12 @@ def _render_multi_year_deep_dive() -> None:
                 ],
                 columns=["Component", "Value", "Basis"],
             )
-            st.dataframe(capex_df, hide_index=True, width="stretch")
+            summary_table(capex_df)
         with cols[1]:
             st.markdown("**Project economics**")
-            irr_str = f"{fin.irr:.1%}" if fin.irr == fin.irr else "n/a"
-            lcoe_str = f"A${fin.lcoe:.2f}/MWh" if fin.lcoe == fin.lcoe else "n/a"
-            payback_str = f"{fin.simple_payback:.1f} yrs" if fin.simple_payback < 1e8 else "n/a"
+            irr_str = f"{fin.irr:.0%}" if fin.irr == fin.irr else "n/a"
+            lcoe_str = f"A${fin.lcoe:.0f}/MWh" if fin.lcoe == fin.lcoe else "n/a"
+            payback_str = f"{fin.simple_payback:.0f} yrs" if fin.simple_payback < 1e8 else "n/a"
             avg_delivery = fin.delivery_share
             econ_df = pd.DataFrame(
                 [
@@ -541,18 +541,18 @@ def _render_multi_year_deep_dive() -> None:
                     ("LCOE", lcoe_str, f"at {s.discount_rate:.0%} WACC"),
                     ("Simple payback", payback_str, ""),
                     ("Total lifetime revenue", _fmt_m(fin.total_lifetime_revenue), ""),
-                    ("Total lifetime generation", f"{fin.total_lifetime_generation_mwh / 1e3:,.2f} GWh", ""),
-                    ("PPA delivery (projection, load-weighted)", f"{avg_delivery:.1%}",
+                    ("Total lifetime generation", f"{fin.total_lifetime_generation_mwh / 1e3:,.0f} GWh", ""),
+                    ("PPA delivery (projection, load-weighted)", f"{avg_delivery:.0%}",
                      f"Target {s.required_delivery_share:.0%}; "
                      + ("hard floor in sizing" if s.enforce_min_delivery else "shortfall allowance; delivery not guaranteed")
                      + ("; penalty regime on" if s.enable_penalty else "; no penalty charge")),
                     ("Breakeven PPA for target IRR",
-                     f"A${fin.breakeven_ppa_price:.2f}/MWh" if fin.breakeven_ppa_price == fin.breakeven_ppa_price else "n/a",
+                     f"A${fin.breakeven_ppa_price:.0f}/MWh" if fin.breakeven_ppa_price == fin.breakeven_ppa_price else "n/a",
                      f"at {s.target_irr:.0%} vs A${s.ppa_price:.0f}/MWh contracted"),
                 ],
                 columns=["Metric", "Value", "Note"],
             )
-            st.dataframe(econ_df, hide_index=True, width="stretch")
+            summary_table(econ_df)
 
 
 def render() -> None:

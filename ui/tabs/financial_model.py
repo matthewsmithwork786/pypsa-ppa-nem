@@ -236,22 +236,23 @@ def _collect_inputs(seed: ProjectFinanceInputs, multi_year: bool) -> ProjectFina
 def _render_results(r) -> None:
     with st.expander("**Key results**", expanded=True):
         cols = st.columns(4)
-        irr = lambda v: f"{v:.2%}" if v == v else "n/a"
+        irr = lambda v: f"{v:.0%}" if v == v else "n/a"
         cols[0].metric("Project IRR", irr(r.project_irr), help="Unlevered FCFF return")
         cols[1].metric("Levered equity IRR", irr(r.equity_irr), help="Calculated from equity contributions and after-tax distributions after interest and debt repayments; independent of the target IRR.")
-        cols[2].metric("Gearing", f"{r.gearing:.1%}")
-        cols[3].metric("NPV @ WACC", f"A${r.npv_project:,.2f}M")
+        cols[2].metric("Gearing", f"{r.gearing:.0%}")
+        cols[3].metric("NPV @ WACC", f"A${r.npv_project:,.0f}M")
+
+        cols = st.columns(3)
+        cols[0].metric("Total funding (incl. IDC)", f"A${r.total_capex:,.0f}M")
+        cols[1].metric("Debt", f"A${r.total_debt:,.0f}M")
+        cols[2].metric("Equity", f"A${r.total_equity:,.0f}M")
 
         cols = st.columns(4)
-        cols[0].metric("Total funding (incl. IDC)", f"A${r.total_capex:,.2f}M")
-        # st.metric parses its value as markdown; two "$" in one string forms a
-        # LaTeX math span that swallows everything between them, so only one
-        # "$" per value -- both amounts are already the same currency.
-        cols[1].metric("Debt / Equity", f"A${r.total_debt:,.2f}M / {r.total_equity:,.2f}M")
-        cols[2].metric("Min / Avg DSCR", f"{r.min_dscr:.2f} / {r.avg_dscr:.2f}")
-        pb = f"{r.payback_years:.1f} yrs" if r.payback_years < 1e8 else "n/a"
-        cols[3].metric("Equity payback / LCOE", f"{pb} · A${r.lcoe:,.0f}/MWh")
-        st.metric("Lifetime penalty cost", f"A${r.schedule['penalty_cost'].sum():,.2f}M", help="Total nominal generator penalty charges across operating years. Already deducted from net contracted revenue, cash flow, NPV and IRR; this display does not deduct them again.")
+        cols[0].metric("Min / Avg DSCR", f"{r.min_dscr:.2f} / {r.avg_dscr:.2f}")
+        pb = f"{r.payback_years:.0f} yrs" if r.payback_years < 1e8 else "n/a"
+        cols[1].metric("Equity payback", pb)
+        cols[2].metric("LCOE", f"A${r.lcoe:,.0f}/MWh")
+        cols[3].metric("Lifetime penalty cost", f"A${r.schedule['penalty_cost'].sum():,.0f}M", help="Total nominal generator penalty charges across operating years. Already deducted from net contracted revenue, cash flow, NPV and IRR; this display does not deduct them again.")
 
     sc = r.schedule
     periods = r.periods
