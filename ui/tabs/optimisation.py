@@ -370,7 +370,7 @@ def _render_results(fin, n_years: int) -> None:
         st.caption(f"Financial projection: {n_years} operating years based on one solved dispatch year.")
     with st.expander("Optimisation results", expanded=True):
         avg_delivery = fin.delivery_share
-        cols = st.columns(6)
+        cols = st.columns(5)
         cols[0].metric("Peak demand", f"{s.ppaload_mw:,.0f} MW")
         cols[1].metric(
             "PPA delivery (projection, load-weighted)", f"{avg_delivery:.1%}",
@@ -381,19 +381,15 @@ def _render_results(fin, n_years: int) -> None:
             "PPA price", f"A${s.ppa_price:,.0f}/MWh",
             help=f"Delivery target: {s.required_delivery_share:.0%}; penalties and hard delivery floors are separate settings.",
         )
-        cols[3].metric(
-            "Merchant sell share", f"{s.sizing_merchant_value_share:.0%}",
-            help="Share of merchant revenue credited to the sizing LP.",
-        )
-        cols[4].metric("BESS", f"{s.bess_mw:,.0f} MW / {s.bess_mwh:,.0f} MWh")
+        cols[3].metric("BESS", f"{s.bess_mw:,.0f} MW / {s.bess_mwh:,.0f} MWh")
         if fin.yearly:
             y0 = fin.yearly[0]
-            cols[5].metric(
+            cols[4].metric(
                 "First-year PPA revenue", f"A${y0.ppa_revenue/1e6:.1f}M",
                 help=f"Year {y0.year}: PPA revenue from delivered volumes at the contracted price.",
             )
         else:
-            cols[5].metric("First-year PPA revenue", "—")
+            cols[4].metric("First-year PPA revenue", "—")
 
         results = state.get_multi_year_results() or []
         if results:
@@ -424,10 +420,7 @@ def _render_results(fin, n_years: int) -> None:
 
 
 def _render_first_year_energy_tables(result, s) -> None:
-    """Energy-first view of the first simulated year: PPA volumes, merchant
-    volumes split by solar vs non-solar hours, and penalty volumes. Deliberately
-    no financial metrics -- those are computed once the financial modelling
-    options are set."""
+    """First-year energy volumes and their associated settlement revenue and costs."""
     allocation_details(result, "dl_allocation_run")
     summ = result.summary
     merchant = merchant_sales_frame(result)
@@ -445,7 +438,8 @@ def _render_first_year_energy_tables(result, s) -> None:
                 "  · from renewables & storage": f"{summ.renewable_and_storage_to_ppa_mwh/1e3:,.1f} GWh",
                 "  · via market purchase": f"{summ.market_buy_to_ppa_mwh/1e3:,.1f} GWh",
                 "Allowed shortfall": f"{summ.allowed_shortfall_mwh/1e3:,.1f} GWh",
-            }, index=["Volume"]).T,
+                "PPA revenue": f"A${result.revenue.ppa_revenue/1e6:,.2f}M",
+            }, index=["Value"]).T,
             width="stretch", height="content",
         )
     with c2:
@@ -460,7 +454,7 @@ def _render_first_year_energy_tables(result, s) -> None:
                 "Solar-hour net capture incl. LGC": price(solar["Net capture incl. LGC (A$/MWh)"]),
                 "Non-solar-hour net capture incl. LGC": price(nonsolar["Net capture incl. LGC (A$/MWh)"]),
                 "Merchant revenue": f"A${merchant['Merchant revenue (A$)'].sum()/1e6:,.2f}M",
-            }, index=["Volume"]).T,
+            }, index=["Value"]).T,
             width="stretch", height="content",
         )
     with c3:
@@ -471,7 +465,8 @@ def _render_first_year_energy_tables(result, s) -> None:
                 "Share of PPA load": f"{summ.penalty_share_of_load:.1%}",
                 "Shortfall (allowed)": f"{summ.allowed_shortfall_mwh/1e3:,.1f} GWh",
                 "Penalty price (zero when disabled)": f"A${s.penalty_price:,.0f}/MWh",
-            }, index=["Volume"]).T,
+                "Total penalty cost": f"A${result.revenue.penalty_cost/1e6:,.2f}M",
+            }, index=["Value"]).T,
             width="stretch", height="content",
         )
 
