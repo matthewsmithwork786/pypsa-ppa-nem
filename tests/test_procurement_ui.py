@@ -27,3 +27,16 @@ def test_five_page_workflow_runs_and_invalidates_edited_results():
     assert (result["compliance"].Achieved >= result["compliance"].Target - 1e-5).all()
     dispatch = result["dispatch"]
     assert not ((dispatch["Battery charge"] > 1e-5) & (dispatch["Battery discharge"] > 1e-5)).any()
+    app.radio(key="simple_mode").set_value("Choose capacity").run()
+    app.number_input(key="simple_fixed_pv").set_value(120.0)
+    app.number_input(key="simple_fixed_wind").set_value(80.0)
+    app.number_input(key="simple_fixed_bess").set_value(10.0)
+    app.number_input(key="simple_fixed_bess_energy").set_value(60.0).run()
+    app.button[0].click().run()
+    assert not app.exception
+    assert not app.error
+    result = app.session_state["simple_result"][1]
+    assert result["capacities"] == {"PV": 120, "Wind": 80, "BESS": 10}
+    assert result["assumptions"].storage_duration_h == 6
+    assert len(result["matching"]) == 8
+    assert result["compliance"].empty

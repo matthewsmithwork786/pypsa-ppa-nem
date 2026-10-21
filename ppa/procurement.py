@@ -24,13 +24,24 @@ class Procurement:
     pv_tariff: float = 80.0
     wind_tariff: float = 130.0
     storage_tariff: float = 2000.0  # A$/MWh of energy capacity/month
+    pv_mw: float = 200.0
+    wind_mw: float = 100.0
+    bess_mw: float = 25.0
+    bess_mwh: float = 100.0
+
+    @property
+    def storage_duration_h(self):
+        if self.mode == "Fixed":
+            return self.bess_mwh / self.bess_mw if self.bess_mw else 0.0
+        return self.duration_h
 
 
 def validate_inputs(ts: pd.DataFrame, s: Procurement) -> None:
-    if s.mode not in {"NSW", "AEMO"}:
-        raise ValueError("Choose NSW or AEMO requirements.")
+    if s.mode not in {"NSW", "AEMO", "Fixed"}:
+        raise ValueError("Choose NSW, AEMO or Choose capacity.")
     scalars = [s.peak_mw, s.utilisation, s.annual_match, s.wind_share,
-               s.storage_share, s.duration_h, s.pv_tariff, s.wind_tariff, s.storage_tariff]
+               s.storage_share, s.duration_h, s.pv_tariff, s.wind_tariff, s.storage_tariff,
+               s.pv_mw, s.wind_mw, s.bess_mw, s.bess_mwh]
     if not np.isfinite(scalars).all() or not np.isfinite(s.band_shares).all():
         raise ValueError("All assumptions must be finite numbers.")
     if s.peak_mw <= 0 or not 0 < s.utilisation <= 1 or s.duration_h <= 0:
@@ -40,6 +51,11 @@ def validate_inputs(ts: pd.DataFrame, s: Procurement) -> None:
         raise ValueError("Matching percentages must be non-negative; shares must be between 0% and 100%.")
     if min(s.pv_tariff, s.wind_tariff, s.storage_tariff) <= 0:
         raise ValueError("Procurement tariffs must be positive.")
+    if s.mode == "Fixed":
+        if min(s.pv_mw, s.wind_mw, s.bess_mw, s.bess_mwh) < 0:
+            raise ValueError("Chosen capacities must be non-negative.")
+        if (s.bess_mw == 0) != (s.bess_mwh == 0):
+            raise ValueError("Set both BESS MW and MWh to positive values, or both to zero.")
     required = ["ts_PVGen", "ts_WindGen", "ts_LoadMW", "ts_MktPrice"]
     if not set(required).issubset(ts.columns):
         raise ValueError("Timeseries must contain PV, wind, load and spot-price columns.")
@@ -58,6 +74,10 @@ def validate_inputs(ts: pd.DataFrame, s: Procurement) -> None:
         raise ValueError("Load must be non-negative and have positive annual consumption.")
     if ts.ts_LoadMW.max() > s.peak_mw + 1e-6:
         raise ValueError("Uploaded load exceeds the peak load on the Requirements page.")
+    if s.mode == "Fixed":
+        for label, column, capacity in [("PV", "ts_PVGen", s.pv_mw), ("Wind", "ts_WindGen", s.wind_mw)]:
+            if capacity > 0 and ts[column].sum() == 0:
+                raise ValueError(f"Select a {label} profile with generation for the chosen {label} capacity.")
 
 
 def _network(ts, s, capacities=None):
@@ -86,9 +106,9 @@ def _network(ts, s, capacities=None):
     n.add("StorageUnit", "BESS", bus="renewables", carrier="electricity",
           p_nom_extendable=sizing, p_nom=0 if sizing else capacities["BESS"],
           p_nom_min=s.peak_mw * s.storage_share if sizing and s.mode == "NSW" else 0,
-          max_hours=s.duration_h, efficiency_store=0.95, efficiency_dispatch=0.95,
+          max_hours=s.storage_duration_h or 1.0, efficiency_store=0.95, efficiency_dispatch=0.95,
           cyclic_state_of_charge=True, marginal_cost=0.01,
-          capital_cost=s.duration_h * 12 * s.storage_tariff if sizing else 0)
+          capital_cost=s.storage_duration_h * 12 * s.storage_tariff if sizing else 0)
     return n
 
 
@@ -99,12 +119,13 @@ def _solve(n, ts, s):
     weight = n.snapshot_weightings.generators
     # Net renewable production excludes curtailment and counts stored energy only once.
     renewable = g.sel(name="PV") + g.sel(name="Wind") - g.sel(name="Curtailment")
-    m.add_constraints((renewable * weight).sum() >= s.annual_match * float(ts.ts_LoadMW.sum()), name="Annual_matching")
+    if s.mode != "Fixed":
+        m.add_constraints((renewable * weight).sum() >= s.annual_match * float(ts.ts_LoadMW.sum()), name="Annual_matching")
     if s.mode == "NSW":
         wind = (g.sel(name="Wind") * weight).sum()
         total = ((g.sel(name="PV") + g.sel(name="Wind")) * weight).sum()
         m.add_constraints(wind == s.wind_share * total, name="Wind_energy_share")
-    else:
+    elif s.mode == "AEMO":
         for band, share in enumerate(s.band_shares):
             idx = n.snapshots[n.snapshots.hour // 6 == band]
             m.add_constraints((delivery.sel(snapshot=idx) * weight.loc[idx]).sum() >=
@@ -131,13 +152,16 @@ def optimise_procurement(ts: pd.DataFrame, s: Procurement) -> dict:
     # Cache profiles may be float32; settle all cash flows at double precision.
     ts = ts.astype({c: "float64" for c in ["ts_PVGen", "ts_WindGen", "ts_LoadMW", "ts_MktPrice"]})
     ts.index = ts.index.rename("snapshot")
-    # Size on contracted fees, so merchant revenue cannot induce speculative overbuilding.
-    n = _network(ts, s)
-    _solve(n, ts, s)
-    capacities = {name: float(n.components.generators.static.p_nom_opt[name]) for name in ["PV", "Wind"]}
-    capacities["BESS"] = float(n.components.storage_units.static.p_nom_opt["BESS"])
-    del n
-    gc.collect()
+    if s.mode == "Fixed":
+        capacities = {"PV": s.pv_mw, "Wind": s.wind_mw, "BESS": s.bess_mw}
+    else:
+        # Size on contracted fees, so export revenue cannot drive speculative builds.
+        n = _network(ts, s)
+        _solve(n, ts, s)
+        capacities = {name: float(n.components.generators.static.p_nom_opt[name]) for name in ["PV", "Wind"]}
+        capacities["BESS"] = float(n.components.storage_units.static.p_nom_opt["BESS"])
+        del n
+        gc.collect()
     n = _network(ts, s, capacities)
     _solve(n, ts, s)
     g = n.components.generators.dynamic.p
@@ -151,25 +175,36 @@ def optimise_procurement(ts: pd.DataFrame, s: Procurement) -> dict:
     })
     fees = {"PV PPA": capacities["PV"] * ts.ts_PVGen.sum() * s.pv_tariff,
             "Wind PPA": capacities["Wind"] * ts.ts_WindGen.sum() * s.wind_tariff,
-            "BESS fee": capacities["BESS"] * s.duration_h * 12 * s.storage_tariff,
+            "BESS fee": capacities["BESS"] * s.storage_duration_h * 12 * s.storage_tariff,
             "Spot shortfalls": float((dispatch["Spot purchases"] * ts.ts_MktPrice).sum()),
             "Excess revenue": float((dispatch["Excess sold"] * ts.ts_MktPrice).sum())}
     total = fees["PV PPA"] + fees["Wind PPA"] + fees["BESS fee"] + fees["Spot shortfalls"] - fees["Excess revenue"]
     counterfactual = float((ts.ts_LoadMW * ts.ts_MktPrice).sum())
     compliance = []
     generated = float((dispatch.PV + dispatch.Wind - dispatch.Curtailed).sum())
-    compliance.append(("Annual renewable matching", s.annual_match, generated / ts.ts_LoadMW.sum()))
+    annual_load = float(dispatch.Load.sum())
+    if s.mode != "Fixed":
+        compliance.append(("Annual renewable matching", s.annual_match, generated / annual_load))
     if s.mode == "AEMO":
         for band, share in enumerate(s.band_shares):
             part = dispatch.loc[dispatch.index.hour // 6 == band]
             compliance.append((BANDS[band], share, part["Renewable delivery"].sum() / part.Load.sum()
                                if part.Load.sum() else float("nan")))
-    else:
+    elif s.mode == "NSW":
         gross = float((dispatch.PV + dispatch.Wind).sum())
         compliance.extend([("Wind share of contracted energy", s.wind_share,
                             float(dispatch.Wind.sum()) / gross if gross else 0),
                            ("Storage / peak load", s.storage_share, capacities["BESS"] / s.peak_mw)])
+    matching = [("Annual renewable volume matching", generated / annual_load),
+                ("Wind generation / annual load", float(dispatch.Wind.sum()) / annual_load),
+                ("BESS power / peak load", capacities["BESS"] / s.peak_mw),
+                ("Time matching · whole year", float(dispatch["Renewable delivery"].sum()) / annual_load)]
+    for band, label in enumerate(BANDS):
+        part = dispatch.loc[dispatch.index.hour // 6 == band]
+        matching.append((f"Time matching · {label}", float(part["Renewable delivery"].sum()) / float(part.Load.sum())
+                         if part.Load.sum() else float("nan")))
     return {"capacities": capacities, "dispatch": dispatch, "fees": fees, "net_cost": total,
             "spot_cost": counterfactual, "savings": counterfactual - total,
             "compliance": pd.DataFrame(compliance, columns=["Requirement", "Target", "Achieved"]),
+            "matching": pd.DataFrame(matching, columns=["Metric", "Achieved"]),
             "assumptions": s}
