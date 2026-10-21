@@ -200,13 +200,14 @@ def render_scenario_form(initial: Scenario) -> Scenario:
                 ),
             )
             merchant_share = cols[2].slider(
-                "Merchant value share", 0.0, 1.0, float(initial.sizing_merchant_value_share),
+                "Merchant price credit (sizing)", 0.0, 1.0, float(initial.sizing_merchant_value_share),
                 0.05, key="sf_merchant_share",
                 help=(
                     "Merchant sales earn this fraction of positive historic spot "
                     "in the sizing LP (a haircut for capture-price cannibalisation, "
-                    "MLF and curtailment). Negative-price hours are never "
-                    "discounted, so the LP curtails rather than sells into them."
+                    "MLF and curtailment). Negative spot prices, LGC revenue and "
+                    "the market spread are unchanged. Dispatch and reported revenue "
+                    "use full spot prices. This is not a share of energy or total revenue."
                 ),
             )
         else:
