@@ -124,7 +124,7 @@ def _select_plants(s):
     with columns[2]:
         bess = st.number_input("BESS fee (A$/MWh capacity/month)", min_value=0.01, value=2000.0, step=100.0, key="simple_bess_price",
                                help="A fixed monthly fee per MWh of storage energy capacity, regardless of energy throughput.")
-    st.caption(f"At {s.duration_h:g} hours, the BESS fee is A${bess * s.duration_h * 12:,.0f} per MW per year. A$2,000 is a provisional input, not a market quote.")
+    st.caption(f"At {s.duration_h:g} hours, the BESS fee is AUD {bess * s.duration_h * 12:,.0f} per MW per year. AUD 2,000 is a provisional input, not a market quote.")
     st.caption("PPA fees cover the full contracted profile, including deemed generation if curtailed. BESS round-trip efficiency is 90.25%; charging is renewable-only. Prices are constant for this one-year comparison.")
     return replace(s, pv_tariff=pv, wind_tariff=wind, storage_tariff=bess), ts, description
 

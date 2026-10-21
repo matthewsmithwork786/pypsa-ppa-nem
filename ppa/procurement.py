@@ -128,7 +128,8 @@ def _solve(n, ts, s):
 
 def optimise_procurement(ts: pd.DataFrame, s: Procurement) -> dict:
     validate_inputs(ts, s)
-    ts = ts.copy()
+    # Cache profiles may be float32; settle all cash flows at double precision.
+    ts = ts.astype({c: "float64" for c in ["ts_PVGen", "ts_WindGen", "ts_LoadMW", "ts_MktPrice"]})
     ts.index = ts.index.rename("snapshot")
     # Size on contracted fees, so merchant revenue cannot induce speculative overbuilding.
     n = _network(ts, s)
