@@ -75,4 +75,4 @@ def test_app_title():
     """Keep the user-facing product title stable."""
     app = Path(__file__).resolve().parents[1] / "streamlit_app.py"
     source = app.read_text()
-    assert "PyPSA based PPA explorer - Australia" in source
+    assert "Data centre renewable procurement" in source
