@@ -3,12 +3,15 @@ from dataclasses import asdict, replace
 import hashlib
 
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
 from ppa.data import nem_data
 from ppa.data_loader import build_upload_template, load_custom_upload, prepare_custom_timeseries
 from ppa.procurement import BANDS, Procurement, optimise_procurement, validate_inputs
+from ppa.procurement_excel import export_procurement
+from ppa.procurement_reporting import SUBTOTALS, cost_breakdown, financial_summary
+from ui.procurement_charts import monthly_chart, hourly_chart, storage_chart
+from ui.procurement_plants import plant_map
 
 
 @st.cache_data
@@ -47,7 +50,7 @@ def _requirements():
         storage = _percent("Peak load to be covered by storage (%)", 25, "simple_storage")
         nsw_duration = st.number_input("Storage duration (hours)", min_value=0.5, max_value=24.0,
                                        value=4.0, step=0.5, key="simple_nsw_duration")
-        st.caption("Annual renewable generation, after curtailment, must meet the selected share of annual load. Wind share refers to energy, not installed MW. Storage is a minimum power reservation, with energy capacity = MW × hours.")
+        st.caption("Annual renewable generation, after curtailment, must meet the selected share of annual load. The selected wind share splits the annual volume target into minimum wind and PV volumes. Whole-MW sizing may slightly change the achieved mix; the results show the actual share. Storage is a minimum power reservation, with energy capacity = MW × hours.")
     with st.expander("Option 2 · AEMO proposed requirements", expanded=mode.startswith("AEMO")):
         cols = st.columns(4)
         shares = []
@@ -62,9 +65,10 @@ def _requirements():
         cols = st.columns(4)
         capacities = []
         for col, label, default, key in zip(cols, ["PV capacity (MW)", "Wind capacity (MW)", "BESS power (MW)", "BESS energy (MWh)"],
-                                           [200.0, 100.0, 25.0, 100.0], ["pv", "wind", "bess", "bess_energy"]):
+                                           [200, 100, 25, 100.0], ["pv", "wind", "bess", "bess_energy"]):
             with col:
-                capacities.append(st.number_input(label, min_value=0.0, value=default, step=5.0, key=f"simple_fixed_{key}"))
+                capacities.append(st.number_input(label, min_value=0.0 if key == "bess_energy" else 0, value=default,
+                                                  step=5.0 if key == "bess_energy" else 1, key=f"simple_fixed_{key}"))
         st.caption("The selected capacities stay fixed. The model optimises hourly dispatch and reports the matching achieved; NSW and AEMO minimum targets are not imposed. PV and wind use MW; BESS uses both MW and MWh.")
         if capacities[2] > 0:
             st.caption(f"Chosen storage duration: {capacities[3] / capacities[2]:g} hours.")
@@ -86,7 +90,7 @@ def _select_plants(s):
                 st.info("No cached price year is available. Upload a template to continue.")
             else:
                 year = st.selectbox("Historical model year", years, index=years.index(2025) if 2025 in years else len(years)-1, key="simple_year")
-                plants = _plants(year)
+                plants = plant_map(_plants(year), year)
                 selected = {}
                 for tech, label in [("Solar", "PV"), ("Wind", "Wind")]:
                     subset = plants[plants.fuel_tech == tech].sort_values(["region", "station_name"])
@@ -99,7 +103,10 @@ def _select_plants(s):
                             return "None"
                         row = names.loc[duid]
                         return f"{row.station_name} [{duid}] · {row.region}"
-                    selected[label] = st.selectbox(f"{label} generation profile", options, index=default,
+                    widget_key = f"simple_{label}_plant"
+                    if widget_key not in st.session_state or st.session_state[widget_key] not in options:
+                        st.session_state[widget_key] = options[default]
+                    selected[label] = st.selectbox(f"{label} generation profile", options, index=0,
                                                     format_func=display, key=f"simple_{label}_plant")
                 if any(selected.values()) or (s.mode == "Fixed" and s.pv_mw == 0 and s.wind_mw == 0):
                     ts = _timeseries(selected["PV"], selected["Wind"], year, s.peak_mw * s.utilisation)
@@ -133,9 +140,9 @@ def _select_plants(s):
     with columns[1]:
         wind = st.number_input("Wind PPA tariff (A$/MWh)", min_value=0.01, value=130.0, step=5.0, key="simple_wind_price")
     with columns[2]:
-        bess = st.number_input("BESS fee (A$/MWh capacity/month)", min_value=0.01, value=2000.0, step=100.0, key="simple_bess_price",
+        bess = st.number_input("BESS tolling (A$/MWh/month)", min_value=0.01, value=6000.0, step=100.0, key="simple_bess_price",
                                help="A fixed monthly fee per MWh of storage energy capacity, regardless of energy throughput.")
-    st.caption(f"At {s.storage_duration_h:g} hours, the BESS fee is AUD {bess * s.storage_duration_h * 12:,.0f} per MW per year. AUD 2,000 is a provisional input, not a market quote.")
+    st.caption(f"At {s.storage_duration_h:g} hours, the BESS fee is AUD {bess * s.storage_duration_h * 12:,.0f} per MW per year. AUD 6,000 is a provisional input, not a market quote.")
     st.caption("PPA fees cover the full contracted profile, including deemed generation if curtailed. BESS round-trip efficiency is 90.25%; charging is renewable-only. Prices are constant for this one-year comparison.")
     return replace(s, pv_tariff=pv, wind_tariff=wind, storage_tariff=bess), ts, description
 
@@ -156,8 +163,8 @@ def _summary(s, ts, description):
     elif s.mode == "AEMO":
         entries.update({f"Coverage {band}": f"{share:.0%}" for band, share in zip(BANDS, s.band_shares)})
     else:
-        entries.update({"PV capacity": f"{s.pv_mw:,.1f} MW", "Wind capacity": f"{s.wind_mw:,.1f} MW",
-                        "BESS capacity": f"{s.bess_mw:,.1f} MW / {s.bess_mwh:,.1f} MWh"})
+        entries.update({"PV capacity": f"{s.pv_mw:,.0f} MW", "Wind capacity": f"{s.wind_mw:,.0f} MW",
+                        "BESS capacity": f"{s.bess_mw:,.0f} MW / {s.bess_mwh:,.2f} MWh"})
     st.dataframe(pd.DataFrame(entries.items(), columns=["Assumption", "Value"]), hide_index=True, width="stretch")
 
 
@@ -172,16 +179,20 @@ def _results(result):
                                "Capacity": [caps["PV"], caps["Wind"], caps["BESS"], caps["BESS"] * s.storage_duration_h],
                                "Unit": ["MW", "MW", "MW", "MWh"]}), hide_index=True,
                  column_config={"Capacity": st.column_config.NumberColumn(format="localized")})
+    if s.mode == "NSW":
+        gross = float((d.PV + d.Wind).sum())
+        st.caption(f"Achieved wind share of contracted renewable energy: {d.Wind.sum() / gross if gross else 0:.2%}. Capacities are whole MW.")
     st.subheader("Generation & load")
-    monthly = d[["PV", "Wind", "Load", "Renewable delivery", "Spot purchases", "Excess sold"]].resample("MS").sum() / 1000
-    monthly.index = monthly.index.strftime("%b")
-    st.plotly_chart(px.bar(monthly[["PV", "Wind"]], barmode="stack", labels={"value": "Generation (GWh)", "index": "Month", "variable": "Source"}), width="stretch")
-    st.plotly_chart(px.bar(monthly[["Renewable delivery", "Spot purchases"]], barmode="stack", labels={"value": "Load served (GWh)", "index": "Month", "variable": "Source"}), width="stretch")
+    st.plotly_chart(monthly_chart(d), width="stretch")
     with st.expander("Hourly generation & storage", expanded=False):
-        day = st.date_input("Inspect a day", value=d.index[0].date(), min_value=d.index[0].date(), max_value=d.index[-1].date(), key=f"simple_result_day_{d.index[0].year}")
-        part = d.loc[str(day)]
-        st.plotly_chart(px.line(part[["Load", "PV", "Wind", "Battery charge", "Battery discharge", "Spot purchases", "Excess sold"]], labels={"value": "Power (MW)", "index": "AEST"}), width="stretch")
-        st.plotly_chart(px.line(part[["Stored energy"]], labels={"value": "Energy (MWh)", "index": "AEST"}), width="stretch")
+        first, last = d.index[0].date(), d.index[-1].date()
+        start, end = st.slider("Time series view — date range to inspect", min_value=first, max_value=last,
+                               value=(first, min(first + pd.Timedelta(days=7), last)), format="DD MMM",
+                               key=f"simple_result_range_{d.index[0].year}")
+        part = d.loc[str(start):str(end)]
+        st.plotly_chart(hourly_chart(part), width="stretch")
+        st.plotly_chart(storage_chart(part), width="stretch")
+        st.caption("Charging is shown below zero. Generation includes energy used for charging or sold as excess; load is the dotted line. Drag the range slider to zoom further.")
     with st.expander("Requirements achieved", expanded=True):
         st.dataframe(result["matching"].style.format({"Achieved": "{:.1%}"}, na_rep="—"), hide_index=True, width="stretch")
         if not result["compliance"].empty:
@@ -189,17 +200,27 @@ def _results(result):
             st.dataframe(result["compliance"].style.format({"Target": "{:.1%}", "Achieved": "{:.1%}"}), hide_index=True, width="stretch")
         st.caption("Annual volume matching is generation after curtailment divided by annual load; it includes exports and counts stored energy only once. Wind share here is contracted wind generation divided by annual load, rather than total renewable generation. Time matching is the energy-weighted share of load served by renewables in the same hour, including renewable-charged BESS, aggregated over each band or the whole year. BESS percentage uses power (MW) divided by the specified peak load. A dash means there is no load in that band.")
     with st.expander("Financial analysis · procurement versus spot", expanded=True):
-        fees = result["fees"]
-        rows = [(name, -value if name == "Excess revenue" else value) for name, value in fees.items()]
-        rows += [("Portfolio net cost", result["net_cost"]), ("Spot-only counterfactual", result["spot_cost"]), ("Savings versus spot", result["savings"])]
-        st.dataframe(pd.DataFrame([(name, value / 1e6) for name, value in rows], columns=["Annual cash flow", "A$ million"]).style.format({"A$ million": "{:,.3f}"}), hide_index=True, width="stretch")
-        st.markdown("**Net cost = PV PPA + wind PPA + BESS fee − excess sales revenue + spot purchases for shortfalls.**")
+        summary = financial_summary(result).rename(columns={"A$": "A$ million"})
+        summary["A$ million"] /= 1e6
+        def emphasise(row):
+            return ["font-weight: bold; border-top: 1px solid #A6B8C8" if row["Annual cash flow"] in SUBTOTALS else ""] * len(row)
+        st.dataframe(summary.style.format({"A$ million": "{:,.2f}"}).apply(emphasise, axis=1), hide_index=True, width="stretch")
+        st.markdown("**Net cost = PV PPA + wind PPA + BESS tolling + spot shortfalls − excess sales revenue.**")
         st.caption("Spot-only cost uses the same hourly load and spot prices. Negative-price purchases reduce cost. This compares wholesale energy costs for one historical year; network charges, retail margins, taxes, separate certificate purchases and financing are excluded.")
         st.metric("Effective procurement cost", f"A${result['net_cost'] / d.Load.sum():,.2f}/MWh")
-    with st.expander("Download results"):
-        st.download_button("Matching statistics CSV", result["matching"].to_csv(index=False).encode(), "procurement_matching.csv", "text/csv")
-        st.download_button("Hourly dispatch CSV", d.to_csv().encode(), "procurement_hourly.csv", "text/csv")
-        st.download_button("Annual financial analysis CSV", pd.DataFrame(rows, columns=["Annual cash flow", "A$"]).to_csv(index=False).encode(), "procurement_financials.csv", "text/csv")
+        st.markdown("**Procurement cost breakdown**")
+        bridge = cost_breakdown(result)
+        st.dataframe(bridge.style.format({"Quantity": "{:,.2f}", "Rate": "{:,.2f}", "Annual cost (A$)": "{:,.2f}"}),
+                     hide_index=True, width="stretch")
+        st.caption("Energy: GWh × 1,000 × tariff or volume-weighted spot price (A$/MWh). BESS: MWh capacity × monthly tolling × 12. Excess revenue is shown as a negative cost. Landed excess prices use the scenario's NSW spot prices without additional charges. PV/wind charging, curtailment and excess sales are allocated pro rata. BESS discharge is reserved for load, so BESS excess sales are zero.")
+    st.download_button("Download results workbook", _workbook(result), "procurement_results.xlsx",
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.caption("One workbook: expanded annual financials and matching statistics, plus hourly dispatch and source allocations.")
+
+
+@st.cache_data(show_spinner=False)
+def _workbook(result):
+    return export_procurement(result)
 
 
 def render():
@@ -215,7 +236,7 @@ def render():
         s = _requirements()
     with plants:
         s, ts, description = _select_plants(s)
-    fingerprint = hashlib.sha256(repr(asdict(s)).encode() + description.encode() +
+    fingerprint = hashlib.sha256(b"procurement-v3" + repr(asdict(s)).encode() + description.encode() +
                                   (pd.util.hash_pandas_object(ts).values.tobytes() if ts is not None else b"")).hexdigest()
     with run:
         st.header("Optimisation")

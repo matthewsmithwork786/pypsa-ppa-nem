@@ -8,9 +8,11 @@ def test_five_page_workflow_runs_and_invalidates_edited_results():
                             default_timeout=180).run()
     assert not app.exception
     assert len(app.tabs) == 5
+    assert app.multiselect(key="simple_map_regions").value
+    assert app.session_state["simple_PV_plant"] is not None
     assert app.number_input(key="simple_pv_price").value == 80
     assert app.number_input(key="simple_wind_price").value == 130
-    assert app.number_input(key="simple_bess_price").value == 2000
+    assert app.number_input(key="simple_bess_price").value == 6000
     app.button[0].click().run()
     assert not app.exception
     assert not app.error
@@ -28,9 +30,9 @@ def test_five_page_workflow_runs_and_invalidates_edited_results():
     dispatch = result["dispatch"]
     assert not ((dispatch["Battery charge"] > 1e-5) & (dispatch["Battery discharge"] > 1e-5)).any()
     app.radio(key="simple_mode").set_value("Choose capacity").run()
-    app.number_input(key="simple_fixed_pv").set_value(120.0)
-    app.number_input(key="simple_fixed_wind").set_value(80.0)
-    app.number_input(key="simple_fixed_bess").set_value(10.0)
+    app.number_input(key="simple_fixed_pv").set_value(120)
+    app.number_input(key="simple_fixed_wind").set_value(80)
+    app.number_input(key="simple_fixed_bess").set_value(10)
     app.number_input(key="simple_fixed_bess_energy").set_value(60.0).run()
     app.button[0].click().run()
     assert not app.exception
