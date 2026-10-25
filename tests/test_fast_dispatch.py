@@ -142,7 +142,7 @@ render()
     assert any(
         "Solved-year effective price" in frame.value.columns
         and "Total cost over solved years" in frame.value.columns
-        for frame in representative.dataframe
+        for frame in representative.table
     )
     for year in representative.selectbox[0].options:
         representative.selectbox[0].select(year).run()
