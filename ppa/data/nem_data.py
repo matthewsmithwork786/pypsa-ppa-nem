@@ -823,20 +823,25 @@ def list_cached_price_years(cache_dir: Path = NEM_CACHE_DIR) -> list:
 
 
 def cache_fingerprint(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> tuple:
-    """(n_scada_files, n_price_files, max_mtime_ns) -- hashable cache-invalidation token."""
+    """Generation/price counts and latest mtime for cache invalidation."""
     cache_dir = Path(cache_dir)
     scada_dir = cache_dir / "scada"
+    availability_dir = cache_dir / "availability"
     price_dir = cache_dir / "price"
     registry_file = registry_path(cache_dir)
 
     scada_files = list(scada_dir.glob(f"*_{year}.parquet")) if scada_dir.exists() else []
     price_files = list(price_dir.glob(f"*_{year}.parquet")) if price_dir.exists() else []
-    files = scada_files + price_files
+    availability_files = list(availability_dir.glob(f"*_{year}.parquet")) if availability_dir.exists() else []
+    files = scada_files + availability_files + price_files
+    for summary in (eligibility_cache_path(year, cache_dir), plant_years_path(cache_dir)):
+        if summary.exists():
+            files.append(summary)
     if registry_file.exists():
         files.append(registry_file)
 
     max_mtime_ns = max((f.stat().st_mtime_ns for f in files), default=0)
-    return (len(scada_files), len(price_files), max_mtime_ns)
+    return (len(scada_files) + len(availability_files), len(price_files), max_mtime_ns)
 
 
 def cache_status(year: int = DEFAULT_YEAR, cache_dir: Path = NEM_CACHE_DIR) -> dict:

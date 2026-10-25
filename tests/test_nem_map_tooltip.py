@@ -58,6 +58,13 @@ def test_tooltip_labels_scada_derived_date_as_first_2025_output():
     assert "1st power" not in tip
 
 
+def test_historical_tooltip_labels_the_selected_data_year():
+    row = _plants_df().iloc[0].copy()
+    row["first_power_date"] = None
+    row["first_output_date"] = "2020-01-01"
+    assert "first 2020 output 2020-01-01" in nem_map._tooltip(row)
+
+
 def test_tooltip_unique_per_duid_and_deterministic():
     df = _plants_df()
     tips = [nem_map._tooltip(row) for _, row in df.iterrows()]

@@ -15,8 +15,9 @@ An open-source tool for exploring how wind, solar and battery portfolios operate
 Three steps, left to right. Each one needs the step before it.
 
 ### ① 📡 Pick Plants
-Choose Australian NEM wind and/or solar plants on the map, or upload your own
-timeseries.
+Choose a historical model year and Australian NEM wind and/or solar plants on
+the map, or upload your own timeseries. Plant choices reflect the selected year's
+full operating history.
 
 ### ② 🔬 Set Terms
 Set portfolio capacity, PPA terms, market assumptions and financial inputs.

@@ -130,8 +130,8 @@ def _render_sizing_diagnostics() -> None:
         st.caption(
             "“Max-build cap binding / Connection limit binding = Yes” means that cap is what "
             "stopped the LP building more — the binding constraint is the real sizing decision. "
-            "A single cached weather year (2025) means the sized fleet is tuned to 2025 "
-            "weather; multi-year data is a TODO (see README)."
+            "Sizing uses the selected capacity-sizing year. Other historical years "
+            "can be selected on Pick Plants for dispatch comparisons."
         )
 
 

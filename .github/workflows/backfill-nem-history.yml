@@ -1,0 +1,118 @@
+name: Backfill historical NEM profiles
+
+on:
+  push:
+    branches: [data/historical-uigf-acquisition]
+    paths: [.github/workflows/backfill-nem-history.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: historical-nem-backfill
+  cancel-in-progress: false
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        year: [2020, 2021, 2022, 2023, 2024]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r scripts/requirements-acquisition.txt
+      - name: Download and validate one operating year
+        run: >-
+          PYTHONPATH=. python scripts/backfill_nem_history.py
+          --years ${{ matrix.year }} --work-dir nemosis_cache/history
+          --raw-cache-dir nemosis_cache/raw --clear-raw-between-years
+      - name: Prepare validated data artefact
+        run: |
+          mkdir -p nemosis_cache/publish/{availability,price,source}
+          cp data/cache/nem/availability/*_${{ matrix.year }}.parquet nemosis_cache/publish/availability/
+          cp data/cache/nem/price/*_${{ matrix.year }}.parquet nemosis_cache/publish/price/
+          cp data/cache/nem/source/*_${{ matrix.year }}.* nemosis_cache/publish/source/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nem-history-${{ matrix.year }}
+          if-no-files-found: error
+          retention-days: 7
+          path: nemosis_cache/publish
+
+  integrate:
+    needs: acquire
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: data/historical-uigf-acquisition
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nem-history-*
+          merge-multiple: true
+          path: data/cache/nem
+      - name: Build and verify the complete cache
+        run: |
+          for year in 2020 2021 2022 2023 2024; do
+            PYTHONPATH=. python scripts/build_nem_eligibility_cache.py --year "$year"
+          done
+          PYTHONPATH=. python scripts/build_plant_year_manifest.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+          root = Path('data/cache/nem')
+          manifest = pd.read_parquet(root / 'registry/plant_years.parquet')
+          assert sorted(manifest.year.unique()) == list(range(2020, 2026))
+          for year in range(2020, 2025):
+              metadata = json.loads((root / 'source' / f'uigf_{year}.json').read_text())
+              accepted = manifest[(manifest.year == year) & manifest.fully_operational]
+              assert len(accepted) == metadata['accepted_profiles'] > 0
+          print(manifest.groupby(['year', 'fully_operational']).size())
+          PY
+      - name: Test main application
+        env:
+          MPLCONFIGDIR: /tmp/mplcache
+        run: >-
+          python -m pytest -q -p no:cacheprovider
+          tests/test_bundled_historical_profiles.py tests/test_nem_history_acquisition.py
+          tests/test_nem_data.py tests/test_nem_data_multiyear.py tests/test_plant_year_manifest.py
+          tests/test_pick_plants_years.py tests/test_nem_map_tab.py tests/test_nem_map_tooltip.py
+          tests/test_historical_year_picker.py tests/test_spelling_en_au.py
+      - name: Commit validated main cache
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/cache/nem
+          git diff --cached --quiet || git commit -m "Add validated 2020–2024 UIGF profiles and matching NEM prices"
+          git push origin HEAD:data/historical-uigf-acquisition
+      - name: Apply the same data to the DC staging branch
+        run: |
+          git checkout -b historical-dc origin/data/historical-uigf-dc
+          git checkout data/historical-uigf-acquisition -- data/cache/nem
+      - name: Test DC application
+        env:
+          MPLCONFIGDIR: /tmp/mplcache
+        run: >-
+          python -m pytest -q -p no:cacheprovider
+          tests/test_bundled_historical_profiles.py tests/test_nem_history_acquisition.py
+          tests/test_historical_year_picker.py tests/test_pick_plants_years.py
+          tests/test_procurement_ui.py tests/test_procurement.py tests/test_spelling_en_au.py
+      - name: Commit validated DC cache
+        run: |
+          git add data/cache/nem
+          git diff --cached --quiet || git commit -m "Add validated 2020–2024 UIGF profiles and matching NEM prices"
+          git push origin HEAD:data/historical-uigf-dc
