@@ -44,7 +44,7 @@ def test_aemo_nighttime_targets_require_storage_without_wind(aemo_result):
     d = r["dispatch"]
     # Charging cannot originate from the grid, and the year is energy-neutral in SOC.
     assert (d["Battery charge"] <= d.PV + d.Wind + 1e-4).all()
-    assert d["Battery discharge"].sum() == pytest.approx(d["Battery charge"].sum() * 0.95**2)
+    assert d["Battery discharge"].sum() == pytest.approx(d["Battery charge"].sum() * 0.90**2)
 
 
 @pytest.mark.parametrize("fixture", ["nsw_result", "aemo_result"])

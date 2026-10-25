@@ -7,7 +7,10 @@ import streamlit as st
 
 from ppa.data import nem_data
 from ppa.data_loader import build_upload_template, load_custom_upload, prepare_custom_timeseries
-from ppa.procurement import BANDS, Procurement, optimise_procurement, validate_inputs
+from ppa.procurement import (
+    BANDS, BESS_EFFICIENCY_STORE, BESS_EFFICIENCY_DISPATCH,
+    Procurement, optimise_procurement, validate_inputs,
+)
 from ppa.procurement_excel import export_procurement
 from ppa.procurement_reporting import SUBTOTALS, cost_breakdown, financial_summary
 from ui.procurement_charts import monthly_chart, hourly_chart, storage_chart
@@ -35,48 +38,55 @@ def _percent(label, default, key, maximum=100.0):
 
 def _requirements():
     st.header("Procurement requirements")
-    st.caption("Editable scenario definitions supplied for this model; the labels do not certify compliance with a regulation or proposal.")
     left, right = st.columns(2)
     with left:
         peak = st.number_input("Peak load (MW)", min_value=0.1, value=100.0, step=10.0, key="simple_peak")
     with right:
         utilisation = st.number_input("Load utilisation (%)", min_value=0.1, max_value=100.0,
-                                      value=90.0, step=5.0, key="simple_util") / 100
-    st.caption(f"Default load is flat at {peak * utilisation:,.1f} MW. A custom upload replaces this with its hourly load profile.")
-    mode = st.radio("Construct the portfolio using", ["New South Wales regulatory requirement", "AEMO proposed requirements", "Choose capacity"], key="simple_mode")
-    with st.expander("Option 1 · New South Wales regulatory requirement", expanded=mode.startswith("New")):
-        annual_nsw = _percent("Annual renewables volume matching requirement (%)", 100, "simple_nsw_annual", 300)
-        wind = _percent("Wind share of contracted renewable energy (%)", 40, "simple_wind")
-        storage = _percent("Peak load to be covered by storage (%)", 25, "simple_storage")
-        nsw_duration = st.number_input("Storage duration (hours)", min_value=0.5, max_value=24.0,
+                                      value=75.0, step=5.0, key="simple_util") / 100
+    st.caption("Option to set custom load profile via CSV upload in next page")
+    s = Procurement(peak_mw=peak, utilisation=utilisation)
+    capacity_mode = st.radio("Capacity selection", ["Find optimal capacity", "Manually choose capacity"],
+                             horizontal=True, key="simple_capacity_mode")
+    if capacity_mode == "Manually choose capacity":
+        with st.container(border=True):
+            st.subheader("Manually choose capacity")
+            cols = st.columns(4)
+            capacities = []
+            for col, label, default, key in zip(cols, ["PV capacity (MW)", "Wind capacity (MW)", "BESS power (MW)", "BESS energy (MWh)"],
+                                               [200, 100, 25, 100.0], ["pv", "wind", "bess", "bess_energy"]):
+                with col:
+                    capacities.append(st.number_input(label, min_value=0.0 if key == "bess_energy" else 0, value=default,
+                                                      step=5.0 if key == "bess_energy" else 1, key=f"simple_fixed_{key}"))
+            st.caption("The selected capacities stay fixed. The model optimises hourly dispatch and reports the matching achieved; NSW and AEMO minimum targets are not imposed. PV and wind use MW; BESS uses both MW and MWh.")
+            if capacities[2] > 0:
+                st.caption(f"Chosen storage duration: {capacities[3] / capacities[2]:g} hours.")
+        return replace(s, mode="Fixed", pv_mw=capacities[0], wind_mw=capacities[1],
+                       bess_mw=capacities[2], bess_mwh=capacities[3])
+    requirement_mode = st.radio("Procurement requirements", ["NSW", "AEMO"], horizontal=True,
+                                key="simple_requirement_mode")
+    if requirement_mode == "NSW":
+        with st.container(border=True):
+            st.subheader("New South Wales regulatory requirement")
+            annual = _percent("Annual renewables volume matching requirement (%)", 100, "simple_nsw_annual", 300)
+            wind = _percent("Wind share of contracted renewable energy (%)", 40, "simple_wind")
+            storage = _percent("Peak load to be covered by storage (%)", 25, "simple_storage")
+            duration = st.number_input("Storage duration (hours)", min_value=0.5, max_value=24.0,
                                        value=4.0, step=0.5, key="simple_nsw_duration")
-        st.caption("Annual renewable generation, after curtailment, must meet the selected share of annual load. The selected wind share splits the annual volume target into minimum wind and PV volumes. Whole-MW sizing may slightly change the achieved mix; the results show the actual share. Storage is a minimum power reservation, with energy capacity = MW × hours.")
-    with st.expander("Option 2 · AEMO proposed requirements", expanded=mode.startswith("AEMO")):
+            st.caption("Annual renewable generation, after curtailment, must meet the selected share of annual load. The selected wind share splits the annual volume target into minimum wind and PV volumes. Whole-MW sizing may slightly change the achieved mix; the results show the actual share. Storage is a minimum power reservation, with energy capacity = MW × hours.")
+        return replace(s, mode="NSW", annual_match=annual, wind_share=wind, storage_share=storage, duration_h=duration)
+    with st.container(border=True):
+        st.subheader("AEMO proposed requirements")
         cols = st.columns(4)
         shares = []
         for i, (label, default) in enumerate(zip(BANDS, [20, 40, 40, 20])):
             with cols[i]:
                 shares.append(_percent(f"{label} renewable coverage (%)", default, f"simple_band_{i}"))
-        annual_aemo = _percent("Annual renewables volume matching requirement (%)", 100, "simple_aemo_annual", 300)
-        aemo_duration = st.number_input("Storage duration (hours)", min_value=0.5, max_value=24.0,
-                                        value=4.0, step=0.5, key="simple_aemo_duration")
+        annual = _percent("Annual renewables volume matching requirement (%)", 100, "simple_aemo_annual", 300)
+        duration = st.number_input("Storage duration (hours)", min_value=0.5, max_value=24.0,
+                                   value=4.0, step=0.5, key="simple_aemo_duration")
         st.caption("Each target is the share of load served by renewables, including renewable-charged storage, within that time band aggregated over the year. Targets do not need to sum to 100%. Times use AEST, the NEM data clock. Storage is optional and sized when needed; no wind split is imposed.")
-    with st.expander("Option 3 · Choose capacity", expanded=mode == "Choose capacity"):
-        cols = st.columns(4)
-        capacities = []
-        for col, label, default, key in zip(cols, ["PV capacity (MW)", "Wind capacity (MW)", "BESS power (MW)", "BESS energy (MWh)"],
-                                           [200, 100, 25, 100.0], ["pv", "wind", "bess", "bess_energy"]):
-            with col:
-                capacities.append(st.number_input(label, min_value=0.0 if key == "bess_energy" else 0, value=default,
-                                                  step=5.0 if key == "bess_energy" else 1, key=f"simple_fixed_{key}"))
-        st.caption("The selected capacities stay fixed. The model optimises hourly dispatch and reports the matching achieved; NSW and AEMO minimum targets are not imposed. PV and wind use MW; BESS uses both MW and MWh.")
-        if capacities[2] > 0:
-            st.caption(f"Chosen storage duration: {capacities[3] / capacities[2]:g} hours.")
-    return Procurement(mode="NSW" if mode.startswith("New") else "AEMO" if mode.startswith("AEMO") else "Fixed", peak_mw=peak,
-                       utilisation=utilisation, annual_match=annual_nsw if mode.startswith("New") else annual_aemo,
-                       wind_share=wind, storage_share=storage, band_shares=tuple(shares),
-                       duration_h=nsw_duration if mode.startswith("New") else aemo_duration,
-                       pv_mw=capacities[0], wind_mw=capacities[1], bess_mw=capacities[2], bess_mwh=capacities[3])
+    return replace(s, mode="AEMO", annual_match=annual, band_shares=tuple(shares), duration_h=duration)
 
 
 def _select_plants(s):
@@ -142,14 +152,14 @@ def _select_plants(s):
     with columns[2]:
         bess = st.number_input("BESS tolling (A$/MWh/month)", min_value=0.01, value=6000.0, step=100.0, key="simple_bess_price",
                                help="A fixed monthly fee per MWh of storage energy capacity, regardless of energy throughput.")
-    st.caption(f"At {s.storage_duration_h:g} hours, the BESS fee is AUD {bess * s.storage_duration_h * 12:,.0f} per MW per year. AUD 6,000 is a provisional input, not a market quote.")
-    st.caption("PPA fees cover the full contracted profile, including deemed generation if curtailed. BESS round-trip efficiency is 90.25%; charging is renewable-only. Prices are constant for this one-year comparison.")
+    st.caption(f"At {s.storage_duration_h:g} hours, the BESS fee is AUD {bess * s.storage_duration_h * 12:,.0f} per MW per year.")
+    st.caption(f"PPA fees cover the full contracted profile, including deemed generation if curtailed. BESS round-trip efficiency is {BESS_EFFICIENCY_STORE * BESS_EFFICIENCY_DISPATCH:.0%} ({BESS_EFFICIENCY_STORE:.0%} charging × {BESS_EFFICIENCY_DISPATCH:.0%} discharging); charging is renewable-only. Prices are constant for this one-year comparison.")
     return replace(s, pv_tariff=pv, wind_tariff=wind, storage_tariff=bess), ts, description
 
 
 def _summary(s, ts, description):
     load = float(ts.ts_LoadMW.sum()) if ts is not None else None
-    entries = {"Portfolio construction": {"NSW": "New South Wales", "AEMO": "AEMO proposed", "Fixed": "Choose capacity"}[s.mode],
+    entries = {"Portfolio construction": {"NSW": "New South Wales", "AEMO": "AEMO proposed", "Fixed": "Manually choose capacity"}[s.mode],
                "Data": description or "Select plants or upload data", "Peak load": f"{s.peak_mw:,.1f} MW",
                "Load utilisation": f"{(ts.ts_LoadMW.mean() / s.peak_mw if ts is not None else s.utilisation):.1%}",
                "Annual load": f"{load / 1000:,.1f} GWh" if load is not None else "—",
@@ -170,11 +180,13 @@ def _summary(s, ts, description):
 
 def _results(result):
     st.header("Results · data centre perspective")
-    cols = st.columns(3)
-    for col, label, value in zip(cols, ["Spot-only cost", "Portfolio net cost", "Savings versus spot"],
+    cols = st.columns(4)
+    for col, label, value in zip(cols[:3], ["Spot-only cost", "Portfolio net cost", "Savings versus spot"],
                                   [result["spot_cost"], result["net_cost"], result["savings"]]):
         col.metric(label, f"A${value / 1e6:,.2f}m")
     caps, d, s = result["capacities"], result["dispatch"], result["assumptions"]
+    cols[3].metric("Effective procurement cost", f"A${result['net_cost'] / d.Load.sum():,.2f}/MWh",
+                   help="Net annual procurement cost divided by annual customer load served, including spot purchases for shortfalls. Exports and battery charging are excluded from the MWh denominator.")
     st.dataframe(pd.DataFrame({"Portfolio": ["PV", "Wind", "BESS power", "BESS energy"],
                                "Capacity": [caps["PV"], caps["Wind"], caps["BESS"], caps["BESS"] * s.storage_duration_h],
                                "Unit": ["MW", "MW", "MW", "MWh"]}), hide_index=True,
@@ -207,7 +219,6 @@ def _results(result):
         st.dataframe(summary.style.format({"A$ million": "{:,.2f}"}).apply(emphasise, axis=1), hide_index=True, width="stretch")
         st.markdown("**Net cost = PV PPA + wind PPA + BESS tolling + spot shortfalls − excess sales revenue.**")
         st.caption("Spot-only cost uses the same hourly load and spot prices. Negative-price purchases reduce cost. This compares wholesale energy costs for one historical year; network charges, retail margins, taxes, separate certificate purchases and financing are excluded.")
-        st.metric("Effective procurement cost", f"A${result['net_cost'] / d.Load.sum():,.2f}/MWh")
         st.markdown("**Procurement cost breakdown**")
         bridge = cost_breakdown(result)
         st.dataframe(bridge.style.format({"Quantity": "{:,.2f}", "Rate": "{:,.2f}", "Annual cost (A$)": "{:,.2f}"}),
@@ -227,16 +238,12 @@ def render():
     st.title("Data centre renewable procurement")
     intro, requirements, plants, run, results = st.tabs(["① Introduction", "② Requirements", "③ Plants & tariffs", "④ Optimisation", "⑤ Results"])
     with intro:
-        st.header("Build a renewable procurement portfolio")
-        st.write("Set the data centre's load and renewable requirements, choose wind and solar profiles, and enter procurement tariffs. The model sizes the contracted portfolio and compares its annual cost with buying all load from the spot market.")
-        st.markdown("1. Choose the NSW or AEMO scenario, or choose capacities yourself.\n2. Select cached plants or upload your hourly template; set tariffs.\n3. Review the scenario and run optimisation.\n4. Explore generation, storage, matching and customer costs.")
-        st.info("The model first minimises annual contracted PPA and storage fees while satisfying your requirements. It then fixes those capacities and dispatches storage to minimise net spot-market costs. This makes procurement requirements, rather than speculative export revenue, drive portfolio size.")
-        st.caption("Choose capacity skips portfolio sizing and optimises dispatch using the PV, wind and BESS capacities you enter.")
+        st.write("Model the wind, solar and storage procurement needed to meet proposed government procurement requirements, optimised using the energy modelling software PyPSA and real operating plant generation profiles from 2025.")
     with requirements:
         s = _requirements()
     with plants:
         s, ts, description = _select_plants(s)
-    fingerprint = hashlib.sha256(b"procurement-v3" + repr(asdict(s)).encode() + description.encode() +
+    fingerprint = hashlib.sha256(b"procurement-v4" + repr(asdict(s)).encode() + description.encode() +
                                   (pd.util.hash_pandas_object(ts).values.tobytes() if ts is not None else b"")).hexdigest()
     with run:
         st.header("Optimisation")

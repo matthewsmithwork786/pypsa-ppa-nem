@@ -8,6 +8,9 @@ import pypsa
 
 pypsa.options.general.allow_network_requests = False
 
+BESS_EFFICIENCY_STORE = 0.90
+BESS_EFFICIENCY_DISPATCH = 0.90
+
 BANDS = ("00:00–06:00", "06:00–12:00", "12:00–18:00", "18:00–24:00")
 
 
@@ -15,7 +18,7 @@ BANDS = ("00:00–06:00", "06:00–12:00", "12:00–18:00", "18:00–24:00")
 class Procurement:
     mode: str = "NSW"
     peak_mw: float = 100.0
-    utilisation: float = 0.9
+    utilisation: float = 0.75
     annual_match: float = 1.0
     wind_share: float = 0.4
     storage_share: float = 0.25
@@ -110,7 +113,7 @@ def _network(ts, s, capacities=None):
           p_nom_extendable=sizing, p_nom=0 if sizing else capacities["BESS"],
           p_nom_mod=1.0 if sizing else 0.0,
           p_nom_min=s.peak_mw * s.storage_share if sizing and s.mode == "NSW" else 0,
-          max_hours=s.storage_duration_h or 1.0, efficiency_store=0.95, efficiency_dispatch=0.95,
+          max_hours=s.storage_duration_h or 1.0, efficiency_store=BESS_EFFICIENCY_STORE, efficiency_dispatch=BESS_EFFICIENCY_DISPATCH,
           cyclic_state_of_charge=True, marginal_cost=0.01,
           capital_cost=s.storage_duration_h * 12 * s.storage_tariff if sizing else 0)
     return n

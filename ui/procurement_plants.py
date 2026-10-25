@@ -4,7 +4,7 @@ import streamlit as st
 from streamlit_folium import st_folium
 
 from ui.procurement_charts import COLOURS
-from ui.tabs.nem_map import _duid_from_tooltip, _marker_radius, _tooltip
+from ui.tabs.nem_map import _duid_from_tooltip, _filter_capacity_factors, _marker_radius, _tooltip
 
 
 def apply_map_selection(state, tooltip, plants, year):
@@ -22,7 +22,17 @@ def apply_map_selection(state, tooltip, plants, year):
 def plant_map(plants, year):
     regions = sorted(plants.region.unique())
     selected = st.multiselect("Plant regions", regions, default=regions, key="simple_map_regions")
-    subset = plants[plants.region.isin(selected)]
+    cols = st.columns(2)
+    help_text = ("Filters the map and plant dropdowns using the capacity factor shown in each tooltip. "
+                 "0% shows all plants; a positive minimum hides plants without capacity-factor data. "
+                 "This uses UIGF available generation, before network curtailment.")
+    wind = cols[0].slider("Minimum wind capacity factor (%)", min_value=0, max_value=100, value=0,
+                           step=1, format="%d%%", key="simple_cf_min_wind", help=help_text)
+    pv = cols[1].slider("Minimum PV capacity factor (%)", min_value=0, max_value=100, value=0,
+                         step=1, format="%d%%", key="simple_cf_min_pv", help=help_text)
+    subset = _filter_capacity_factors(plants[plants.region.isin(selected)], wind, pv)
+    counts = subset.fuel_tech.value_counts()
+    st.caption(f"Matching plants: {counts.get('Wind', 0)} wind · {counts.get('Solar', 0)} solar.")
     st.caption("Click a yellow PV or green wind marker to select its generation profile. You can also use the dropdowns below. Only cached, simulation-ready plants are shown.")
     fmap = folium.Map(location=[-29, 140], zoom_start=4, tiles="OpenStreetMap")
     for _, row in subset.dropna(subset=["lat", "lon"]).iterrows():
