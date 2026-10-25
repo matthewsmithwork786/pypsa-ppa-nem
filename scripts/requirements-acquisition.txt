@@ -1,5 +1,5 @@
 # Install only in a separate, network-enabled data-acquisition environment.
-nemosis
+nemosis==3.8.1
 pandas
 pyarrow
 requests

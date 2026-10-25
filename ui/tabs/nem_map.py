@@ -86,8 +86,8 @@ def _tooltip(row) -> str:
     falling back to the strict `cuf` field (energy ÷ nameplate × hours-in-year,
     from `nem_data.scada_summary`), then `mean_cf` (mean of the clipped 5-min CF
     series). First power prefers the registry's `first_power_date` (labelled
-    "1st power"); a generation-derived date (2025-only cache) is labelled
-    "first 2025 output" per the plan. Either shows '—' when unknown.
+    "1st power"); a generation-derived date names its historical year.
+    Either shows '—' when unknown.
     """
     station = html.escape(str(row["station_name"]))
     duid = html.escape(str(row["duid"]))
@@ -124,9 +124,8 @@ def _finite_value(value) -> bool:
 def _first_power_parts(row) -> "tuple[str, str]":
     """Return (label, formatted-date) for the first-power portion of the tooltip.
 
-    The registry's `first_power_date` is true first power ("1st power"); the
-    The generation-derived `first_output_date` is 2025-only and therefore labelled
-    "first 2025 output". Falls back to ('1st power', '—') when neither exists.
+    Registry commissioning dates are distinct from the first sustained output
+    observed within a particular historical year.
     """
     registry_date = row.get("first_power_date")
     if _finite_value(registry_date) or (
@@ -137,7 +136,8 @@ def _first_power_parts(row) -> "tuple[str, str]":
     if _finite_value(output_date) or (
         output_date is not None and str(output_date).lower() not in {"nan", "nat", "none", "na", ""}
     ):
-        return "first 2025 output", _format_first_power(output_date)
+        date = _format_first_power(output_date)
+        return f"first {pd.Timestamp(output_date).year} output", date
     return "1st power", CUF_FALLBACK
 
 
@@ -221,7 +221,8 @@ def _operational_fingerprint(years: tuple, cache_dir: Path = nem_data.NEM_CACHE_
     return (tuple(sorted(int(y) for y in years)), mtimes)
 
 
-def _plants_for_map(eligible: "pd.DataFrame", operational: "pd.DataFrame") -> "pd.DataFrame":
+def _plants_for_map(eligible: "pd.DataFrame", operational: "pd.DataFrame", *,
+                    manifest_available: bool = False) -> "pd.DataFrame":
     """Combine the fleet frame with the multi-year operational subset.
 
     Every row in `operational` is, by construction, fully operational in ALL
@@ -231,12 +232,16 @@ def _plants_for_map(eligible: "pd.DataFrame", operational: "pd.DataFrame") -> "p
     stay exactly as the single-year whole-year check reported them (grey dashed
     markers, not selectable).
 
-    When `operational` is empty (manifest not yet published, or an empty year
-    selection), the frame is returned unchanged so the single-year eligibility
-    cache still drives the picker -- do not leave the map with zero plants.
+    Without a manifest the single-year eligibility cache drives the picker.
+    A published manifest with no common operational plants must disable them all.
     """
     if operational is None or operational.empty:
-        return eligible
+        if not manifest_available:
+            return eligible
+        df = eligible.copy()
+        df["simulation_ready"] = False
+        df["data_status"] = "unchecked"
+        return df
     df = eligible.copy()
     op_duids = set(operational["duid"])
     mask = df["duid"].isin(op_duids)
@@ -282,6 +287,37 @@ def _year_range_default(years_available: list[int], current_years) -> tuple[int,
     return latest[0], latest[-1]
 
 
+def _select_historical_years(years_available, current):
+    default_range = _year_range_default(years_available, current.nem_years)
+    if len(years_available) == 1:
+        lo = hi = years_available[0]
+        st.caption(f"Historical year available: **{lo}**.")
+    elif not st.checkbox("Use a range of historical years", value=len(current.nem_years) > 1, key="nm_use_year_range"):
+        default_year = current.nem_year if current.nem_year in years_available else years_available[-1]
+        if st.session_state.get("nm_model_year", default_year) not in years_available:
+            st.session_state.pop("nm_model_year", None)
+        lo = hi = st.selectbox(
+            "Historical model year", years_available,
+            index=years_available.index(default_year), key="nm_model_year",
+            help="Show plants with a full operating year of UIGF data in this year. "
+                 "The simulation uses this year's generation and spot prices.",
+        )
+    else:
+        # Offer only published years, including manifests with gaps.
+        stored_range = st.session_state.get("nm_year_range")
+        if stored_range is not None and any(y not in years_available for y in stored_range):
+            st.session_state.pop("nm_year_range", None)
+        lo, hi = st.select_slider(
+            "Historical years to use", options=years_available,
+            value=default_range, key="nm_year_range",
+            help="Full multi-year dispatch cycles through the selected years in "
+                 "chronological order. Representative-year mode uses the first "
+                 "selected year for dispatch and projects its financial results.",
+        )
+    return tuple(y for y in years_available if lo <= y <= hi)
+
+
+
 def _has_cached_generation(year: int, status: dict,
                            cache_dir: Path = nem_data.NEM_CACHE_DIR) -> bool:
     """Shipped UIGF is sufficient; sent-out generation is an optional source."""
@@ -323,23 +359,7 @@ def render() -> None:
             f"showing the default year ({nem_data.DEFAULT_YEAR})."
         )
     years_available = sorted(set(years_available))
-    default_range = _year_range_default(years_available, current.nem_years)
-    if len(years_available) == 1:
-        lo = hi = years_available[0]
-        st.caption(f"Historical year available: **{lo}**.")
-    else:
-        # Offer only published years, including manifests with gaps.
-        stored_range = st.session_state.get("nm_year_range")
-        if stored_range is not None and any(y not in years_available for y in stored_range):
-            st.session_state.pop("nm_year_range", None)
-        lo, hi = st.select_slider(
-            "Historical years to use", options=years_available,
-            value=default_range, key="nm_year_range",
-            help="Full multi-year dispatch cycles through the selected years in "
-                 "chronological order. Representative-year mode uses the first "
-                 "selected year for dispatch and projects its financial results.",
-        )
-    selected_years = tuple(y for y in years_available if lo <= y <= hi)
+    selected_years = _select_historical_years(years_available, current)
 
     # ── Snapshot resolution ────────────────────────────────────────────────────
     resolution_labels = list(NEM_RESOLUTION_MINUTES)
@@ -404,7 +424,9 @@ def render() -> None:
         )
         return
 
-    plants_df = _plants_for_map(eligible, operational_plants)
+    plants_df = _plants_for_map(
+        eligible, operational_plants, manifest_available=not nem_data.load_plant_years().empty
+    )
 
     status = cached_cache_status(fallback_year)
 
@@ -557,8 +579,8 @@ def render() -> None:
             st.caption(
                 "Marker tooltip: CUF = energy ÷ (nameplate × hours-in-year, UIGF, AC); "
                 "with a multi-year range the mean across the selected years is shown. "
-                "“1st power” = registry commissioning date, “first 2025 output” = first "
-                "sustained UIGF availability, “—” = not available."
+                "“1st power” = registry commissioning date; “first [year] output” = first "
+                "sustained UIGF availability observed that year; “—” = not available."
             )
 
     # ── Native 5-min CF inspection for the selected plants ──────────────────────

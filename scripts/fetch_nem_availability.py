@@ -60,7 +60,8 @@ def _read_duid_list(path: Path) -> list[str]:
 
 
 def pull_availability(
-    year: int, raw_cache_dir: Path, start: str | None = None, end: str | None = None
+    year: int, raw_cache_dir: Path, start: str | None = None, end: str | None = None,
+    duids: list[str] | None = None,
 ) -> pd.DataFrame:
     """Pull DISPATCHLOAD availability for the whole year (or a sub-window)."""
     raw_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -78,6 +79,9 @@ def pull_availability(
         raw_data_location=str(raw_cache_dir),
         select_columns=SELECT_COLUMNS,
         fformat="parquet",
+        keep_csv=False,
+        filter_cols=["DUID", "INTERVENTION"] if duids is not None else None,
+        filter_values=(duids, [0]) if duids is not None else None,
     )
     if df is None or len(df) == 0:
         raise RuntimeError(f"nemosis returned no rows for {TABLE} {start_time}..{end_time}")

@@ -20,6 +20,9 @@ from ui.procurement_plants import plant_map
 @st.cache_data
 def _plants(year):
     plants = nem_data.list_eligible_plants(year=year, require_simulation_ready=True)
+    if not nem_data.load_plant_years().empty:
+        operational = nem_data.plants_operational_for_years((year,))
+        plants = plants[plants.duid.isin(operational.duid)]
     return plants[plants.duid.map(lambda d: nem_data.has_availability(d, year))]
 
 
@@ -95,11 +98,16 @@ def _select_plants(s):
     ts, description = None, ""
     try:
         if source == "Cached NEM plants":
-            years = nem_data.list_cached_price_years()
+            years = [year for year in nem_data.available_years()
+                     if nem_data.price_path("NSW1", year).exists()]
+            if not years and nem_data.load_plant_years().empty:
+                years = nem_data.list_cached_price_years()
             if not years:
                 st.info("No cached price year is available. Upload a template to continue.")
             else:
-                year = st.selectbox("Historical model year", years, index=years.index(2025) if 2025 in years else len(years)-1, key="simple_year")
+                year = st.selectbox("Historical model year", years, index=years.index(2025) if 2025 in years else len(years)-1, key="simple_year",
+                                    help="Choose the year for both plant UIGF profiles and NSW spot prices. Only plants with a full operating year are selectable.")
+                st.caption(f"Showing plants with a full operating year of UIGF data in {year}. Changing year refreshes the plant choices and capacity factors.")
                 plants = plant_map(_plants(year), year)
                 selected = {}
                 for tech, label in [("Solar", "PV"), ("Wind", "Wind")]:
@@ -238,7 +246,7 @@ def render():
     st.title("Data centre renewable procurement")
     intro, requirements, plants, run, results = st.tabs(["① Introduction", "② Requirements", "③ Plants & tariffs", "④ Optimisation", "⑤ Results"])
     with intro:
-        st.write("Model the wind, solar and storage procurement needed to meet proposed government procurement requirements, optimised using the energy modelling software PyPSA and real operating plant generation profiles from 2025.")
+        st.write("Model the wind, solar and storage procurement needed to meet proposed government procurement requirements, optimised using the energy modelling software PyPSA and real operating plant generation profiles from the selected historical year.")
     with requirements:
         s = _requirements()
     with plants:

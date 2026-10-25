@@ -1,10 +1,12 @@
 # NEM data and acquisition
 
-The Streamlit app reads local files from `data/cache/nem/` and does not make network requests. The committed pilot data is for 2025:
+The Streamlit app reads local files from `data/cache/nem/` and does not make network requests. Generation profiles and regional spot prices cover 2020–2025; plant coverage varies by year:
 
 - `availability/` — AEMO 5-minute UIGF availability by DUID, used as the renewable generation upper bound.
 - `price/` — 5-minute spot prices for NSW1, QLD1, SA1, TAS1, and VIC1.
 - `registry/` — plant metadata and a precomputed eligibility summary for the plant picker.
+- `registry/plant_years.parquet` — per-plant/year coverage and operational checks driving the historical-year picker.
+- `source/` — historical acquisition metadata, accepted/rejected DUIDs and published-profile SHA-256 checksums.
 - `hedge/` — AER quarterly base-futures prices.
 
 These cache files are part of the runnable application. Do not remove or replace them without ensuring the app still has the data it needs. The eligibility summary should be rebuilt after changing registry, availability, or SCADA files.
@@ -28,6 +30,41 @@ Use the relevant script's `--help` before a run. Main entry points:
 - `scripts/build_nem_eligibility_cache.py` — local summary generated from cached data; no network required.
 
 Keep `nemosis_cache/` outside tracked source. A full-year MMS acquisition can consume substantial disk space. Review coverage, timestamps, DUID selection, and output files before adding data to the repository. Preserve existing verified registry files unless a deliberate refresh is intended.
+
+## Historical UIGF backfill
+
+From the repository root, with the acquisition dependencies installed:
+
+```bash
+PYTHONPATH=. python3 scripts/backfill_nem_history.py --years 2020 2021 2022 2023 2024 \
+  --work-dir nemosis_cache/history --raw-cache-dir nemosis_cache/raw \
+  --clear-raw-between-years
+for year in 2020 2021 2022 2023 2024; do
+  PYTHONPATH=. python3 scripts/build_nem_eligibility_cache.py --year "$year"
+done
+```
+
+The backfill reuses the existing NEMOSIS availability and price acquisition code.
+It checkpoints each month after restricting to registry DUIDs, publishes only
+plant-years that pass the operational gate, validates complete regional price
+coverage, and builds the combined plant/year manifest. Re-running it reuses
+completed monthly and price checkpoints. Raw MMS files are intermediate and are
+not committed. The verified 2025 profiles and plant registry are preserved.
+
+The gate requires at least 98% valid five-minute intervals, data spanning early
+January through late December, each month's peak at least 60% of the plant's own
+annual peak, and no missing-data or zero-output run of 14 days or longer. A known
+first-power date must precede 1 January by at least 60 days. Without that date,
+operational history is inferred from the profile checks, rather than certified
+from a commissioning record. Missing and commissioning years are excluded; no
+earlier-year profiles are invented for newer plants.
+
+Source timestamps use NEM market time (AEST, UTC+10, without daylight saving).
+Availability is stored on the canonical interval-ending five-minute grid and
+read as interval beginnings. Leap years 2020 and 2024 contain 105,408 five-minute
+intervals / 8,784 hours; other years contain 105,120 / 8,760. Matching spot prices
+use the same year. Historical capacity factors use the existing registry's
+registered MW; historical changes to plant nameplate capacity are not rebuilt.
 
 ## Interpretation
 

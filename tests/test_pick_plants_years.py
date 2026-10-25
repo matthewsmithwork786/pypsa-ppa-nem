@@ -92,6 +92,14 @@ def test_empty_year_selection_disables_use_button():
     assert nem_map._use_disabled((2025,), not_ready, "WINDA", "") is True
 
 
+def test_published_manifest_without_common_operational_plants_disables_all():
+    combined = nem_map._plants_for_map(
+        _eligible_frame(), pd.DataFrame(), manifest_available=True
+    )
+    assert not combined.simulation_ready.any()
+    assert nem_map._selectable_duids(combined, "Wind") == []
+
+
 def test_empty_operational_manifest_falls_back_to_single_year(monkeypatch):
     """When the multi-year manifest is absent (or returns an empty frame), the
     picker must fall back to the single-year eligibility cache unchanged rather

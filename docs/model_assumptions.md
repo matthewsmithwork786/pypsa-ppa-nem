@@ -6,7 +6,7 @@ This note records the conventions that materially affect results. The model code
 
 The dispatch model uses an hourly representation of NEM data. AEMO UIGF availability is the preferred generation upper bound: it estimates what a semi-scheduled plant could produce before network constraints. SCADA records sent-out generation and may already reflect network or economic curtailment. Using SCADA as availability can therefore count curtailment twice. Availability is bounded by registered capacity; solar AC clipping around 0.80 of nameplate is expected.
 
-The bundled dataset covers 2025. Plant selection and historical-year claims must reflect the files actually present in `data/cache/nem/`, not future-year capabilities described in old plans. Acquisition and cache-generation procedures are in [DATA_ACQUISITION.md](DATA_ACQUISITION.md).
+The bundled generation and spot-price dataset covers 2020–2025. Plant selection is year-specific: historical profiles are included only for complete operating years that pass the published coverage and operational checks. Capacity factors use the existing registry's registered MW, without reconstructing historical capacity changes. Acquisition, eligibility and cache-generation procedures are in [DATA_ACQUISITION.md](DATA_ACQUISITION.md).
 
 ## Representative periods and constraints
 

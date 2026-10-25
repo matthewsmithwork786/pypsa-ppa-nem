@@ -48,7 +48,7 @@ Every results page reports annual renewable volume matching, wind generation / a
 
 ## Data and uploads
 
-Runtime data access remains offline, using the bundled NEM caches and UIGF availability. Historical input clocks use AEST. Only complete calendar years of consecutive hourly data are accepted; sub-hourly uploads are first averaged to hourly values. Gaps, duplicate timestamps, non-finite values and capacity factors outside 0–1 are rejected.
+Runtime data access remains offline, using the bundled 2020–2025 NEM caches and UIGF availability. Choose a **Historical model year** on **Plants & tariffs**; the map, plant dropdowns and capacity-factor filters use that year, and NSW spot prices match it. Only plant-years passing the full-year operational checks are selectable. [Data acquisition](docs/DATA_ACQUISITION.md) documents the reproducible backfill and audit files. Historical input clocks use AEST. Only complete calendar years of consecutive hourly data are accepted; sub-hourly uploads are first averaged to hourly values. Gaps, duplicate timestamps, non-finite values and capacity factors outside 0–1 are rejected.
 
 The downloadable CSV template contains `timestamp`, `ts_PVGen`, `ts_WindGen`, `ts_LoadMW`, and `ts_MktPrice`. PV/wind are capacity factors; load is MW; price is A$/MWh. Replace the illustrative template values with your own data.
 
