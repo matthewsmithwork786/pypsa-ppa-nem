@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pandas as pd
+import pytest
+
 from streamlit.testing.v1 import AppTest
 
 
@@ -82,6 +85,7 @@ def test_capacity_factor_filters_apply_to_dropdowns_and_allow_empty_results():
     assert not app.exception
     assert wind_count > len(app.selectbox(key="simple_Wind_plant").options) == 1
     assert len(app.selectbox(key="simple_PV_plant").options) == pv_count
+
     assert app.session_state["simple_Wind_plant"] is None
     app.slider(key="simple_cf_min_pv").set_value(100).run()
     assert not app.exception
@@ -92,3 +96,27 @@ def test_capacity_factor_filters_apply_to_dropdowns_and_allow_empty_results():
     assert not app.exception
     assert len(app.selectbox(key="simple_Wind_plant").options) == wind_count
     assert len(app.selectbox(key="simple_PV_plant").options) == pv_count
+
+
+def test_historical_year_picker_refreshes_eligible_plants_and_model_inputs():
+    from ppa.data import nem_data
+    from ui.procurement import _timeseries
+
+    if not set(range(2020, 2026)).issubset(nem_data.available_years()):
+        pytest.skip("Complete historical cache not present in this checkout")
+    app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "streamlit_app.py"),
+                            default_timeout=60).run()
+    assert not app.exception
+    for year in range(2020, 2025):
+        app.selectbox(key="simple_year").select(year).run()
+        assert not app.exception
+        assert not app.error
+        pv = app.session_state["simple_PV_plant"]
+        wind = app.session_state["simple_Wind_plant"]
+        allowed = set(nem_data.plants_operational_for_years((year,)).duid)
+        assert pv in allowed and wind in allowed
+        ts = _timeseries(pv, wind, year, 75.0)
+        assert len(ts) == nem_data.expected_hours(year)
+        assert set(ts.index.year) == {year}
+        prices = nem_data.get_price_dict("NSW1", years=(year,))[year]
+        pd.testing.assert_series_equal(ts.ts_MktPrice, prices, check_names=False)
