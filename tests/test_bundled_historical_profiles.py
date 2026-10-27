@@ -28,11 +28,11 @@ def test_bundled_history_has_only_audited_operating_profiles_and_matching_prices
         path = CACHE / "availability" / f"{row.duid}_{year}.parquet"
         assert hashlib.sha256(path.read_bytes()).hexdigest() == row.sha256
         series = nem_data.load_availability(row.duid, year, CACHE)
-        pd.testing.assert_index_equal(series.index, expected, check_names=False)
+        pd.testing.assert_index_equal(series.index.as_unit("ns"), expected, check_names=False)
         assert series.notna().mean() >= 0.98
         assert np.isfinite(series.dropna()).all()
         assert (series.dropna() >= 0).all()
     for region in nem_data.NEM_REGIONS:
         prices = nem_data.load_regional_price(region, year, CACHE)
-        pd.testing.assert_index_equal(prices.index, expected, check_names=False)
+        pd.testing.assert_index_equal(prices.index.as_unit("ns"), expected, check_names=False)
         assert np.isfinite(prices).all()
