@@ -1,0 +1,188 @@
+duid,year,eligible,coverage,reject_reasons,sha256
+ALDGASF1,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+ARWF1,2024,True,1.0,,38ac4ee294b4364e10e17124bb0727d58ee31203af243f0b7d12d4171c229f84
+AVLSF1,2024,True,1.0,,a2e98d428a8fb5f5e76d2baf08fc5d1fbd5f3be08aa8ff430f267d21d853cbcc
+BALDHWF1,2024,True,1.0,,c21a8de2f21451358c135dd1efa2a4955c3ebb6946da8b549e2821dbcc6a13f7
+BANGOWF1,2024,True,1.0,,b92101af7afd3e1438a9cc3d71a7a2d5122e9a4279a8a2b4a71067213f907ebc
+BANGOWF2,2024,True,1.0,,8935582b4d18c415020972710f7474146ad5844f8f2cc91362bd406c642ce409
+BANN1,2024,True,1.0,,f0f918897659cb41b8b0de46d66af63383f7519c39d0f94cc99e83ba1d1db341
+BRYB1WF1,2024,True,1.0,,f8aa8f2cbbcd316073ca58f4f938d3ba1f229fa328760dcb4872310b1f798645
+BRYB2WF2,2024,True,1.0,,43b2f4fde1fa4512eafc62c7d1d408a93afc7be4a7fcfa378cc93a3d47d7d576
+BERYLSF1,2024,True,1.0,,7edee02e7b69704e603db0777b3d6c7901a91e345e13c5104efa2f45bf6922b6
+GULLRWF2,2024,True,1.0,,089dfbbac4de59e810a743ee59d56bc575358c94d0c5931043553318ef748378
+BLUEGSF1,2024,True,1.0,,46be3f9cb42a54456c8e46a48d6fb1c2a34afbaf4ef662ff4a9bcf46cf92fc96
+BOCORWF1,2024,True,1.0,,d00ffd48b8a782bd07c3bfe9ca8bd11a03e33916e417041d7c81375083fc965f
+BODWF1,2024,True,1.0,,eb93dd300d7e415be47846de460a1cf731c9f64f88526dd70d3587e943faac8f
+BOMENSF1,2024,False,1.0,longest zero-output run 482 h (need < 336 h),
+BROKENH1,2024,False,1.0,longest zero-output run 372 h (need < 336 h),
+BULGANA1,2024,True,1.0,,5d14b3f699f658b08e8cec3d6bef19e8827e26cff9a5515e0ecf82138aa1c6b9
+BUSF1,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+BNGSF1,2024,True,1.0,,10d9f49b4350cf05c94ddf1d10b58304538b7aee78f334d1aee619d51457aa90
+BNGSF2,2024,True,1.0,,9727b459aae44c335d7956a17608cb11ac5b7ebaac94e7f1b3980632b9cb2c62
+CNUNDAWF,2024,True,1.0,,85e15060098efc3130e539b6b89dc167c33f2bedd58700f11c3d2a0f04b8b0b2
+CAPTL_WF,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+CRWARP1,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+CATHROCK,2024,True,1.0,,7c97977c2dc0882b5bb5f7e3fde6e43782eee5373a1431a72c19ea46222928e7
+CTHLWF1,2024,True,1.0,,a759f4be93ee1e46d2751ff7b67e32d2269c6a0589d1493623e1214c112ca56a
+CHALLHWF,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+CHYTWF1,2024,True,1.0,,35acfe8105e5ce028c004a90d1d2194d250f732cc4f790c21bd61c5e1d782c20
+CHILDSF1,2024,True,1.0,,4b5fe95cad7db61fda7d6448b3ba4c1576bd5a30231a96a21e90ae2f80e73752
+CLARESF1,2024,True,1.0,,9bbdbf143b7d95365541b60e684ce21071b851df3402f7479dba43e3e3673f36
+CLRKCWF1,2024,False,0.25136612021857924,"coverage 25.1% of 5-min intervals (need >= 98%); record starts 2024-10-01 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep; longest data gap 6576 h (need < 336 h)",
+CLRKCWF2,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+CLEMGPWF,2024,True,1.0,,cbf9042a77308b0dda4138bb40f27722e4c1ab7c1004be3efae93414ec53dbaf
+CLERMSF1,2024,True,1.0,,feb894e30217a06cfb86c686f33eccb7906658af250fb77e4d22c9fa72ae2af9
+COHUNSF1,2024,False,1.0,"min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest zero-output run 6661 h (need < 336 h)",
+COLEASF1,2024,True,1.0,,2137d6b2ae8192b9da5c2371c183d9cd2addbd0ea82150bd6f78c724f801c7c8
+COLWF01,2024,True,1.0,,d85c9b9a022256cd8c606e679dfcc1c66c65f4306ab70116336dce83c4166dd5
+CSPVPS1,2024,True,1.0,,6049aa51551b1b2922b398c7c784e4eb608c111a2ac5e540eb293532cc357254
+COLUMSF1,2024,False,1.0,"min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Mar, Apr, May; longest zero-output run 1093 h (need < 336 h)",
+COOPGWF1,2024,True,1.0,,f89b5a1f065a54c88ba955aba9629a87b3c95a77f07b2a80b8a0e3d727431b5f
+CRWASF1,2024,True,1.0,,7477fd20cb07f2f09c20499e62ab1ad3b3d185ce88a3977757abefaab34b2481
+CROOKWF2,2024,False,1.0,"min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: May, Jun, Jul, Aug, Sep; longest zero-output run 2762 h (need < 336 h)",
+CROOKWF3,2024,False,0.6147540983606558,"coverage 61.5% of 5-min intervals (need >= 98%); record starts 2024-05-21 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct; longest data gap 3384 h (need < 336 h); longest zero-output run 1835 h (need < 336 h)",
+CROWLWF1,2024,True,1.0,,63174686237642f8ff4c9827be31edbf8aff578192aaa655d9f9fef4b1b9096a
+CRURWF1,2024,False,1.0,longest zero-output run 485 h (need < 336 h),
+CUSF1,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+DDSF1,2024,True,1.0,,5c06908092eb794159e689d8d27459b86010878715de4ff481bb9a77d514e6e2
+DARLSF1,2024,True,1.0,,daa26bd05f8d9dca32a311b38b559cc15dcbd76783ce6eaef64bdb303c4b2b47
+DAYDSF1,2024,True,1.0,,0d8e1cfb973dce1bbd0b01960112e35335935c6580381bac4665e11daf7d016b
+DULAWF1,2024,True,1.0,,cf49087f74bb705cadc957aa17e9a7395859c12de8915592a12107f520d73413
+DUNDWF1,2024,True,1.0,,6639ad9b4a6614126de394d46f047706a18e8dfa4aa491a229e7b25dc8c94051
+DUNDWF2,2024,True,1.0,,a27df5ac1fccad22e6e81fae6db32d8d1c5f6c68c010bd0f6d0c74c755df1190
+DUNDWF3,2024,True,1.0,,b447556b0c975648daad24b2bcd36e926f9286532010cd8197b3ccf837f4a6e7
+EDENVSF1,2024,True,1.0,,6b7ea745e93b00abaea3d5efae76a948a96ba73490567d70b6ea687ccddf4956
+ELAINWF1,2024,False,1.0,min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Dec; longest zero-output run 925 h (need < 336 h),
+EMERASF1,2024,True,1.0,,487ff900483aca673a2dc0e876e8bce871d4cef76309559798f8f6127a1a7f34
+FINLYSF1,2024,True,1.0,,60d7266c1c08827bd9bbf28b2a67d747ae05cac581fc2739d0e5ec45805ea063
+FLYCRKWF,2024,False,1.0,"min monthly peak ratio 0.18 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul",
+GANGARR1,2024,True,1.0,,32b8eef6a348fdb5b1478f7435074f7679c3b5e355c33fba5121768a3e3dedeb
+GANNSF1,2024,True,1.0,,9d9b255eb65cc5114c9becd6d8672249624708458d6255cbbe4471dc511b333e
+GIRGSF,2024,False,0.46174863387978143,"coverage 46.2% of 5-min intervals (need >= 98%); record starts 2024-07-16 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep; longest data gap 4728 h (need < 336 h)",
+GLENSF1,2024,True,1.0,,ad5569488882a858c17bd0a99be88d154ac0211ca4ae94d24b63457b5846b295
+GLRWNSF1,2024,True,1.0,,fb701dedbaa9681686ba8b569b7f67259f8702f34e45461c8c3d59c22fc562ff
+GPWFEST1,2024,False,0.40437158469945356,"coverage 40.4% of 5-min intervals (need >= 98%); record starts 2024-08-06 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov; longest data gap 5232 h (need < 336 h); longest zero-output run 3279 h (need < 336 h)",
+GPWFEST2,2024,False,0.40437158469945356,"coverage 40.4% of 5-min intervals (need >= 98%); record starts 2024-08-06 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct; longest data gap 5232 h (need < 336 h); longest zero-output run 1068 h (need < 336 h)",
+GPWFEST3,2024,False,0.40437158469945356,"coverage 40.4% of 5-min intervals (need >= 98%); record starts 2024-08-06 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 5232 h (need < 336 h); longest zero-output run 3552 h (need < 336 h)",
+GPWFWST1,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+GOONSF1,2024,True,1.0,,cdef768a1eddd3c2af21627a27f3b87730ebfa36a5f4ed85f38a815db8659baf
+GOESF1,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+GSWF1A,2024,False,1.0,"min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug; longest zero-output run 2272 h (need < 336 h)",
+GSWF1B1,2024,False,1.0,"min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct; longest zero-output run 7578 h (need < 336 h)",
+GRANWF1,2024,True,1.0,,196f3f349c0e0317ef41f7f1f6d6c42ca60269ce442d9689db7432c2eb0cc520
+GULLRWF1,2024,True,1.0,,f3651f68f16677e8476c49b8d0d25f75a872aba5da80b6863703e34073199f2c
+GNNDHSF1,2024,True,1.0,,aa66413b16403a70f312c0d0a956b32770839206ccaccb4b6e7a25f02105c4cf
+GUNNING1,2024,True,1.0,,6f49e879182a25c9211ef71cf0bb434f73968b3daaa0e5e1e1e79036ef4fea24
+GUSF1,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+HALLWF1,2024,True,1.0,,d551fa855466e54766d4b925c465209001c552cde7dc47da25a0e9f21ab9e45d
+HALLWF2,2024,True,1.0,,e151ffe9f18deab00d4bbab88740c09d85fdae63842e049f4e73a7e4e9c77c8a
+HAMISF1,2024,True,1.0,,079bf1b0756a77fdc6268d5b4e01eca4e6fb5f1fe7d3fa392b2384da623159ff
+HAUGHT11,2024,True,1.0,,700f2eb3b2b2d96d0336ff7e62e3326c204d677194ccd8c4d81c1a2ffd51b54b
+HD1WF1,2024,False,0.587431693989071,"coverage 58.7% of 5-min intervals (need >= 98%); record starts 2024-05-31 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul; longest data gap 3624 h (need < 336 h); longest zero-output run 417 h (need < 336 h)",
+HAYMSF1,2024,True,1.0,,042da57f1b1ae114e50adc786d9672188e6b93911d884cc44a30801ee82de727
+HILLSTN1,2024,True,1.0,,0bfc073fa99ba245754dd0bd7a3345a20ce11081b526b19dfd99fcfa52fabf9f
+HDWF1,2024,True,1.0,,cf31797c96b729062931ecae83fc493143e4931d9519eeac78681d464302efc5
+HDWF2,2024,True,1.0,,d0e10181d83a91f2d13cb70d58ab82d185d564bccbd15eff2210d40ae7767b25
+HDWF3,2024,True,1.0,,89da4a90d2b580a07f5eca2d47d21db6a433c2f23789c09dcb331625c20ab096
+JEMALNG1,2024,True,1.0,,d8607e0335eabc51051ec77ef1ccdbcc74165b9b71815da7e32b823a6114a191
+JUNEESF1,2024,True,1.0,,711267fb76f5940e2f4deb2cb9b4b4674a57b601de88f3cc30dbbc336287808a
+KABANWF1,2024,True,1.0,,4cd50a12956b7996eb79494cbac1b8f66448bdaa9714d977af84eabf95f55b54
+KARSF1,2024,False,1.0,longest zero-output run 1366 h (need < 336 h),
+KEPWF1,2024,True,1.0,,e267d260a01f457983142296a9127bf38dad6ef9e4a9032d179701c0e13499a2
+KERNGSP1,2024,False,0.060109289617486336,"coverage 6.0% of 5-min intervals (need >= 98%); record starts 2024-12-10 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8256 h (need < 336 h); longest zero-output run 528 h (need < 336 h)",
+KIAMSF1,2024,True,1.0,,f6304b4be643b59076e54237c7a5db028fba4eca331f86a2833eab89fb12f4e5
+KIATAWF1,2024,True,1.0,,7346a03de539629487074cba4816e319b94e888de699a433b620b6782f171755
+KSP1,2024,True,1.0,,6e53aabffb3641a117b57006b888fd66e823e316febb6fca107cdf39a1b00852
+KINGASF1,2024,False,0.32786885245901637,"coverage 32.8% of 5-min intervals (need >= 98%); record starts 2024-09-03 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct; longest data gap 5904 h (need < 336 h)",
+LKBONNY1,2024,True,1.0,,6c632d2d35d499188a6c3c2aeeac6b7a4bfb09579c49ee9a1674ee7ce4f17030
+LKBONNY2,2024,True,1.0,,165b56b3bbc689b2978275764ac50aae14392735a640aeaa73c2fb6c29c3797f
+LKBONNY3,2024,True,1.0,,10e7efa35fa37bac0c43a3f24ef26acb9e0bb942a6fbaca4fc7ddc8f5cc2f29f
+LILYSF1,2024,True,1.0,,5726203042247ad2d46d512cec4f361c73467dd2ee68017b5232fa39e3939b88
+LIMOSF11,2024,True,1.0,,eb73735c13a2df4dbd67bc1820667d28aeafc152cd9bb638a6ac04142d86a171
+LIMOSF21,2024,True,1.0,,20ce24314952a4a89c239e12b6fcd8cd20bcc82564e5c7056df55a2dbfa418de
+LGAPWF1,2024,True,1.0,,0c66be2da761d4ac0f5800d436e918e25ea465bf48b5617f1b834259f0cc09ee
+LGAPWF2,2024,True,1.0,,e59590deaaccb1a1b06a616d4b25a975bb9a902285bedcc019e0026805cdd4f3
+MCINTYR1,2024,False,0.38524590163934425,"coverage 38.5% of 5-min intervals (need >= 98%); record starts 2024-08-13 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov; longest data gap 5400 h (need < 336 h); longest zero-output run 1214 h (need < 336 h)",
+MACARTH1,2024,False,1.0,"min monthly peak ratio 0.47 of own annual peak (need >= 0.60); weakest months: Jun, Jul; longest zero-output run 1178 h (need < 336 h)",
+MANSLR1,2024,True,1.0,,675a69022245898cde1202ae9205eaeb91a740da7ad122390f6164e4df571a3a
+MANNSF2,2024,False,1.0,"min monthly peak ratio 0.17 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May",
+MARYRSF1,2024,True,1.0,,3da8e9254e437ca6651206e941da46177061e6512ed07766e40c4218124779d7
+METZSF1,2024,False,1.0,longest zero-output run 1218 h (need < 336 h),
+MOKOSF1,2024,False,0.09836065573770492,"coverage 9.8% of 5-min intervals (need >= 98%); record starts 2024-11-26 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov; longest data gap 7920 h (need < 336 h); longest zero-output run 491 h (need < 336 h)",
+MOLNGSF1,2024,True,1.0,,e33beeef4a24f025da3090c6c8f03174274c14f5a2cc3c625f42184282668639
+MOORAWF1,2024,True,1.0,,7b83f7fd857fbb3685b05509bdf0a522b85746d5b6712b796812437a7a18c22b
+MOREESF1,2024,True,1.0,,1838a65156085da69ec2ab2e6c14e909ea8477e2791b0a006342e886df86acc0
+MRTLSWF1,2024,True,1.0,,52094e303012ba2a4c491aeffa2f1657f83843f3b2e1d9a18c7b7bfa2d069dfc
+MOUSF1,2024,True,1.0,,a49af6b178b1dbe7e56cf5fa15fa3f4ff0408bf63e4561c051ebafbe5d2bb8b3
+MEWF1,2024,True,1.0,,39b7447a3c5e53b45ad60eac507e5adae737c8a75380a5730d453d55f0605300
+MTGELWF1,2024,True,1.0,,3065c3e19f8fd7d57afdcb0757f7feae27e4c0d6bf9a5215db13ea8411096755
+MERCER01,2024,True,1.0,,b8f79249d96957c0d485d173e1a19d3aefad6ca88c5afaa26757d5d2b3c7a3e3
+MTMILLAR,2024,True,1.0,,897c2899931ebadf57bec20c8ac92241f9a81655e25264772825063b8f1a3adf
+MUCRKSF1,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+MUWAWF1,2024,True,1.0,,f77b7ab447a7fc1eddfc6a733420dd9a75145ab996bba960ff6798af56026722
+MUWAWF2,2024,True,1.0,,ca977e8ffc41beee4182b31571b6775a55731c11ace0c1d0545be8ae2f4b5f3a
+MUSSELR1,2024,True,1.0,,c4be014980feab7ef58cdcd358e28704720f3bc250a8f66b42f6c9fd95a58971
+NEVERSF1,2024,True,1.0,,8fd8a6ab4e25905717e15ef6a26730a7cb56dadbd049eec1c6309a8ac88fbfb3
+NEWENSF1,2024,True,1.0,,4bdb4576c452ea99eea9261a2c77c0b02a1c86d835c310e0e04f8876c6e08734
+NEWENSF2,2024,True,1.0,,43b61b83bdfe7df1c3bc460f188a053b8fcfa3bdce7ffcbd07dfa78c9d1f5049
+NBHWF1,2024,True,1.0,,00326258bd46a169fe7541898548efef0692c210b3c5cbd59c98c4ab637be28d
+NUMURSF1,2024,True,1.0,,d78a461fbb897b7a3e0957512d8251b8bda7c470ed8e1b05512b834da3280b59
+NYNGAN1,2024,True,1.0,,27a40d14f873a6a3bc643ee64713e5243516bf33397e1c5e7c7f3c9886dffc03
+OAKEY2SF,2024,True,1.0,,7eb0f36d8eed92435d448ecc3b690c50e12b4d638fa35ef5bb7244e990e42ac0
+OAKLAND1,2024,True,1.0,,d4dc278016d5a57df05455997ecbe77e7ccbfd4f060eb07d7c0500dc7454913a
+PARSF1,2024,True,1.0,,cdfc528e7582e79f9686c01bf5e2a7b4d4b0dc00b4a7fef8d80a1493c313527b
+PAREPS1,2024,False,1.0,longest zero-output run 398 h (need < 336 h),
+PAREPW1,2024,True,1.0,,29f558e95aa21174f8e23e1064317b529065ad5c8843499759204a5f6fa3d487
+PORTWF,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+QPSFB1,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+RRSF1,2024,True,1.0,,0f70de39c3605b10560a8271d9f3e3e21c29faf898efe5ec1a056ce2c43b7bb7
+RUGBYR1,2024,True,1.0,,12615f5807b140cd97e4dab302bb681de2f9833e7534aa58002cd73281999540
+RYANCWF1,2024,False,0.42349726775956287,"coverage 42.3% of 5-min intervals (need >= 98%); record starts 2024-07-30 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug; longest data gap 5064 h (need < 336 h)",
+RYEPARK1,2024,False,1.0,min monthly peak ratio 0.56 of own annual peak (need >= 0.60); weakest months: Jan,
+SALTCRK1,2024,True,1.0,,f6f8d0c084c3a107c690e0dd7c1d761db64a12df0c51616c961d778b008c88d8
+SAPHWF1,2024,True,1.0,,55091b4ece41bed730b3725cd50f96de277e5c000fc17a774907350427c7483d
+SEBSF1,2024,True,1.0,,1de57876c0791d91783fcddc854ca917be79eaa3bbaa7156bb6e0e004b423f20
+STWF1,2024,False,1.0,longest zero-output run 370 h (need < 336 h),
+SNOWTWN1,2024,True,1.0,,e1c78e8463cca9989531046e7418fae30c4fa9d581607297066ad7dfef2a209f
+SNOWNTH1,2024,True,1.0,,cb708547dd05f0696d12b2abb91b327967139c472e09d1fca8e03e2b7ba643be
+SNOWSTH1,2024,True,1.0,,2f9f61304095b38d85f1386c624b1c7f58efc92cbe2f1cd82ff131be322b3187
+STARHLWF,2024,True,1.0,,af92b6291cdf64db3627d5ffb4053a249396c5d9dda814e51fab387ddd1de728
+STOCKYD1,2024,True,1.0,,516ba39edf3d8778555223c9189d2a9ec10c5ddc95aff666e7e754d6a06d82d1
+STUBSF1,2024,False,0.040983606557377046,"coverage 4.1% of 5-min intervals (need >= 98%); record starts 2024-12-17 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov; longest data gap 8424 h (need < 336 h)",
+STUBSF2,2024,False,0.040983606557377046,"coverage 4.1% of 5-min intervals (need >= 98%); record starts 2024-12-17 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov; longest data gap 8424 h (need < 336 h)",
+SMCSF1,2024,True,1.0,,1d95d07ae024d19557d0b9882b930f322769c6baa12c4f29a20d0de3149dd14b
+SUNRSF1,2024,True,1.0,,5e3f3bd2cb46ea3667bfa5bcc4b006869351feda0520f4fc335d7a8579a15991
+SUNTPSF1,2024,True,1.0,,510875c14f508e4f042857bbaf61c658184d73f4f378c2f5f818e961aec83ebe
+SRSF1,2024,True,1.0,,69bab53664c5700a0b5acc486d02573c52c8416dc6b534c704bd847cd5cb9271
+TBSF1,2024,True,1.0,,e139f6c2193d54cf4ac570191a904460a04d4227557ff523d82ed4443bced733
+TB2SF1,2024,True,1.0,,641f82eafa0fbc9f7a921e5b7be59e9615c87f6c189dfc4953e7eaf0d399e072
+TARALGA1,2024,True,1.0,,be338e30ae60d399340a1d37b13fe77e9972baa42b26ade6ec83c34fe4af1b2c
+BLUFF1,2024,True,1.0,,c17d16ee96336b7955c06fa0f4005a4bad8fdfc32ac1b6eee4713720fc6fb5a2
+WAGGNSF1,2024,True,1.0,,e20b536182bbbd6430ba800f92da82bf149916fc8544fd168c91eb744a4605c9
+WLWLSF1,2024,False,0.3087431693989071,"coverage 30.9% of 5-min intervals (need >= 98%); record starts 2024-09-10 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov; longest data gap 6072 h (need < 336 h); longest zero-output run 998 h (need < 336 h)",
+WLWLSF2,2024,False,0.3087431693989071,"coverage 30.9% of 5-min intervals (need >= 98%); record starts 2024-09-10 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov; longest data gap 6072 h (need < 336 h); longest zero-output run 1164 h (need < 336 h)",
+WAMBOWF1,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+WANDSF1,2024,True,1.0,,5a020957c4efa4c762455eca41ef43d7b66270684901c3f29b806b71954d643d
+WARWSF1,2024,True,1.0,,b7b86a0a54b8939cedd2f7e14ad5dd6de2da53a3a6a6055ca7a2993ef04bdaf0
+WARWSF2,2024,True,1.0,,6abdd2d490b9247ed47c301c75e0253d27ddd3194997f881f3357511beb815b8
+WATERLWF,2024,True,1.0,,cfc632f5d8f9f11ae40f8f9db06e2bf48db25bef5115f736c4e79ed6c05dd698
+WPWF,2024,True,1.0,,e86dbeb0c12caa8de90b39d2913aa108de6c0ff14c4ecc6fec21a6916f10e082
+WAUBRAWF,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+WELLSF1,2024,True,1.0,,09370e4303a6323f1178362122c73270af9718f40de7fe704b84bc3087744d5b
+WELNSF1,2024,False,0.6147540983606558,"coverage 61.5% of 5-min intervals (need >= 98%); record starts 2024-05-21 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul; longest data gap 3384 h (need < 336 h)",
+WEMENSF1,2024,True,1.0,,7be073b9164fa5d998b224cc82a1336f77c85c0f4b137b50098cc8eeff5e57a5
+WSTWYSF1,2024,True,1.0,,376b16c6d9c0b8cd804c7541aeda043249c13ec551397eff28443e61664ca7f5
+WDGPH1,2024,True,1.0,,66ea6706a9b39ca433168e06e1e225121abc633cc356d82de6b210b2b86a6ec7
+WRWF1,2024,True,1.0,,791db117b341e890835ee62be845c91ae59f3c6c9ef8fb9792961f365909c0d8
+WHITSF1,2024,False,1.0,longest zero-output run 382 h (need < 336 h),
+WGWF1,2024,True,1.0,,a7ffc71008f5616b541c225fee145c29e2dfe5fb9acab8874adaa0d632ac11e9
+WINTSF1,2024,False,1.0,min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Dec; longest zero-output run 1134 h (need < 336 h),
+WOLARSF1,2024,False,0.040983606557377046,"coverage 4.1% of 5-min intervals (need >= 98%); record starts 2024-12-17 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov; longest data gap 8424 h (need < 336 h)",
+WOODLWN1,2024,True,1.0,,02de5e51ed0fb4f4f95019aa27f6324df496dbf39e9e672d381946d65f85eaaa
+WOOLNTH1,2024,False,0.0,"coverage 0.0% of 5-min intervals (need >= 98%); no usable data present; min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec; longest data gap 8784 h (need < 336 h)",
+WOOLGSF1,2024,True,1.0,,3dbf5d78ab9556e34a810ddc71c03c0d08cb79fb1a8a2c06356154df47b88d48
+WUNUSF1,2024,False,0.11748633879781421,"coverage 11.7% of 5-min intervals (need >= 98%); record starts 2024-11-19 (need on/before 2024-01-03); min monthly peak ratio 0.00 of own annual peak (need >= 0.60); weakest months: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov; longest data gap 7752 h (need < 336 h)",
+WYASF1,2024,True,1.0,,0f68c76e195cccebd7bd67e438052ef46db07e14a88eea69d53abdcb59bcdf3d
+YARANSF1,2024,True,1.0,,e4c7985b4aa36db2201ab4e87944e3bbec16d68e836dd456dd7cbcd31b7d4fed
+YATSF1,2024,True,1.0,,e4267a9413d2dee5cf4349369fbebf5bfd5903e29ca0329e6b6056b4ba5f8164
+YENDWF1,2024,True,1.0,,acbe899aae06a5689137b6e8bc6b3315f935446fb34933c215c46c90a705669e

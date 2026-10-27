@@ -1,0 +1,14 @@
+{
+  "year": 2024,
+  "nemosis_version": "3.8.1",
+  "acquired_at_utc": "2026-10-25T11:34:48.842337+00:00",
+  "availability_table": "DISPATCHLOAD",
+  "value": "AVAILABILITY",
+  "intervention": 0,
+  "clock": "AEST (UTC+10), interval ending in source",
+  "price_table": "DISPATCHPRICE",
+  "source": "https://nemweb.com.au/",
+  "registry_sha256": "f5b88cef3cb20c8be90ea8b8f5c329628f397d0bc3b0234f4785e653e255a42d",
+  "accepted_profiles": 133,
+  "target_profiles": 187
+}
