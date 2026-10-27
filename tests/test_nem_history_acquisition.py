@@ -35,6 +35,7 @@ def acquisition(tmp_path, monkeypatch):
         return pd.concat([pd.DataFrame({"SETTLEMENTDATE": index, "REGIONID": region,
                                        "RRP": 80.0}) for region in history.NEM_REGIONS])
 
+    monkeypatch.setattr(history, "version", lambda name: "test-stub")
     monkeypatch.setattr(history, "pull_availability", availability)
     monkeypatch.setattr(history, "pull_price_all_regions", prices)
     return cache, tmp_path / "work", tmp_path / "raw"
