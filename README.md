@@ -3,16 +3,16 @@
 This branch provides a five-page Streamlit workflow for one-year procurement modelling:
 
 1. **Introduction** — purpose and calculation approach.
-2. **Requirements** — select **Find optimal capacity** and either NSW or AEMO requirements, or **Manually choose capacity** to enter PV MW, wind MW, BESS MW and BESS MWh yourself.
+2. **Requirements** — select **Find optimal capacity** and either NSW or AEMC-inspired requirements, or **Manually choose capacity** to enter PV MW, wind MW, BESS MW and BESS MWh yourself.
 3. **Plants & tariffs** — choose cached wind/PV profiles using a map or dropdowns with minimum wind/PV capacity-factor filters, or upload a CSV, then set PPA and storage fees.
 4. **Optimisation** — review assumptions and size the portfolio.
 5. **Results** — generation, load coverage, storage, requirements achieved and customer cash flows.
 
-The scenario names are user-defined modelling cases, not a certification of current NSW rules or an AEMO proposal.
+The scenario names are user-defined modelling cases, not a certification of current NSW rules or an AEMC proposal.
 
 ## Defaults
 
-| Assumption | NSW case | AEMO case |
+| Assumption | NSW case | AEMC-inspired case |
 |---|---:|---:|
 | Peak load | 100 MW | 100 MW |
 | Load utilisation | 75% | 75% |
@@ -39,7 +39,7 @@ Every results page reports annual renewable volume matching, wind generation / a
 - Annual matching is renewable generation after curtailment divided by annual load. Exports count; storage discharge is not counted again. This is distinct from hourly load coverage.
 - PV, wind and BESS power are sized in whole MW. BESS energy follows the selected duration, or the separately entered MWh in manual capacity mode.
 - NSW wind share splits the annual matching target into minimum wind and PV energy volumes. Whole-MW sizing can slightly change the achieved mix, which is reported separately. Storage power is at least the specified share of peak load.
-- AEMO time-band coverage is renewable delivery to load, including renewable-charged storage, summed within each six-hour band over the year. It is not a requirement for every individual day. Band percentages need not sum to 100%.
+- AEMC-inspired time-band coverage is renewable delivery to load, including renewable-charged storage, summed within each six-hour band over the year. It is not a requirement for every individual day. Band percentages need not sum to 100%.
 - Storage has 90% charging and discharging efficiency (81% round trip), a cyclic year-end state of charge, renewable-only charging and discharge reserved for customer load. Hourly dispatch prevents simultaneous charging and discharging, including at negative prices.
 - PPA fees cover the complete contracted availability profile, including deemed generation when curtailed. Actual curtailed energy does not count towards annual matching or export revenues.
 - Customer net cost = PV PPA fee + wind PPA fee + BESS fee + spot shortfall purchases − excess sales revenue.

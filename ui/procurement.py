@@ -61,12 +61,13 @@ def _requirements():
                 with col:
                     capacities.append(st.number_input(label, min_value=0.0 if key == "bess_energy" else 0, value=default,
                                                       step=5.0 if key == "bess_energy" else 1, key=f"simple_fixed_{key}"))
-            st.caption("The selected capacities stay fixed. The model optimises hourly dispatch and reports the matching achieved; NSW and AEMO minimum targets are not imposed. PV and wind use MW; BESS uses both MW and MWh.")
+            st.caption("The selected capacities stay fixed. The model optimises hourly dispatch and reports the matching achieved; NSW and AEMC-inspired minimum targets are not imposed. PV and wind use MW; BESS uses both MW and MWh.")
             if capacities[2] > 0:
                 st.caption(f"Chosen storage duration: {capacities[3] / capacities[2]:g} hours.")
         return replace(s, mode="Fixed", pv_mw=capacities[0], wind_mw=capacities[1],
                        bess_mw=capacities[2], bess_mwh=capacities[3])
     requirement_mode = st.radio("Procurement requirements", ["NSW", "AEMO"], horizontal=True,
+                                format_func=lambda mode: "AEMC-inspired" if mode == "AEMO" else mode,
                                 key="simple_requirement_mode")
     if requirement_mode == "NSW":
         with st.container(border=True):
@@ -79,7 +80,7 @@ def _requirements():
             st.caption("Annual renewable generation, after curtailment, must meet the selected share of annual load. The selected wind share splits the annual volume target into minimum wind and PV volumes. Whole-MW sizing may slightly change the achieved mix; the results show the actual share. Storage is a minimum power reservation, with energy capacity = MW × hours.")
         return replace(s, mode="NSW", annual_match=annual, wind_share=wind, storage_share=storage, duration_h=duration)
     with st.container(border=True):
-        st.subheader("AEMO proposed requirements")
+        st.subheader("AEMC-inspired time-of-day requirements")
         cols = st.columns(4)
         shares = []
         for i, (label, default) in enumerate(zip(BANDS, [20, 40, 40, 20])):
@@ -167,7 +168,7 @@ def _select_plants(s):
 
 def _summary(s, ts, description):
     load = float(ts.ts_LoadMW.sum()) if ts is not None else None
-    entries = {"Portfolio construction": {"NSW": "New South Wales", "AEMO": "AEMO proposed", "Fixed": "Manually choose capacity"}[s.mode],
+    entries = {"Portfolio construction": {"NSW": "New South Wales", "AEMO": "AEMC-inspired time-of-day", "Fixed": "Manually choose capacity"}[s.mode],
                "Data": description or "Select plants or upload data", "Peak load": f"{s.peak_mw:,.1f} MW",
                "Load utilisation": f"{(ts.ts_LoadMW.mean() / s.peak_mw if ts is not None else s.utilisation):.1%}",
                "Annual load": f"{load / 1000:,.1f} GWh" if load is not None else "—",
@@ -247,6 +248,31 @@ def render():
     intro, requirements, plants, run, results = st.tabs(["① Introduction", "② Requirements", "③ Plants & tariffs", "④ Optimisation", "⑤ Results"])
     with intro:
         st.write("Model the wind, solar and storage procurement needed to meet proposed government procurement requirements, optimised using the energy modelling software PyPSA and real operating plant generation profiles from the selected historical year.")
+        st.markdown("""
+**② Requirements**
+
+- Set the load you wish to supply using the peak load and utilisation inputs. This creates a flat, constant load. You can upload your own load profile on the next page.
+- Choose the renewables procurement criteria your project needs to achieve:
+    - **NSW Data Centre Planning Guidelines:** model annual renewable volume matching and minimum wind and storage procurement. In this app, minimum storage is entered as a proportion of your specified peak load.
+    - **AEMC-inspired time-of-day slots:** explore minimum renewable coverage of load across time-of-day bands, inspired by the AEMC's proposed approach to matching new data centre demand with renewable supply.
+- **Find optimal capacity** selects the lowest-cost contracted combination of wind, solar and storage that meets your chosen requirements.
+- Alternatively, **Manually choose capacity** lets you enter the wind, solar and BESS capacity in MW, plus BESS energy in MWh, and see how the procured portfolio performs against the matching measures.
+
+**③ Plants & tariffs**
+
+- Select a historical model year from **2020–2025**. Hourly spot prices are taken from the same year.
+- Choose the wind and solar plants you wish to model. The app uses each plant's historical **UIGF available generation before network constraints**, averaged to hourly values and scaled to the procured capacity.
+- You can upload your own generation profiles, load profile and spot prices instead.
+- Choose the **run-of-plant PPA tariffs** for wind and solar and the **BESS tolling tariff**.
+
+**④ Optimisation**
+
+- Run the optimisation. **PyPSA uses the HiGHS solver** to optimise hourly plant dispatch. Energy is purchased at spot prices to meet shortfalls, and BESS is charged only by the renewable plants.
+
+**⑤ Results**
+
+- Review generation, load matching, storage operation and procurement costs, including revenue from selling excess energy at spot prices.
+""")
     with requirements:
         s = _requirements()
     with plants:

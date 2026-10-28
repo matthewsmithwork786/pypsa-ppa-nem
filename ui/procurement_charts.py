@@ -20,7 +20,7 @@ def monthly_chart(dispatch):
         fig.add_trace(go.Bar(x=months, y=monthly[column], name=source, marker_color=COLOURS[source],
                              legendgroup=source, showlegend=source == "Spot purchases"), row=2, col=1)
     fig.update_xaxes(type="category", categoryorder="array", categoryarray=months)
-    fig.update_yaxes(title_text="GWh")
+    fig.update_yaxes(title_text="GWh", tickformat=",.0f", hoverformat=",.0f")
     fig.update_layout(height=700, barmode="relative", bargap=0.2, hovermode="x unified",
                       legend=dict(orientation="h", y=1.13, x=0), margin=dict(l=65, r=20, t=100, b=40))
     return fig
@@ -37,6 +37,7 @@ def hourly_chart(dispatch):
                       yaxis_title="Power (MW)", xaxis_title="AEST",
                       xaxis_rangeslider_visible=True, legend=dict(orientation="h", y=1.15),
                       margin=dict(l=65, r=20, t=65, b=40))
+    fig.update_yaxes(tickformat=",.0f", hoverformat=",.0f")
     return fig
 
 
@@ -45,4 +46,5 @@ def storage_chart(dispatch):
                            marker_color=COLOURS["Battery discharge"]))
     fig.update_layout(height=280, yaxis_title="Stored energy (MWh)", xaxis_title="AEST", bargap=0,
                       margin=dict(l=65, r=20, t=20, b=40))
+    fig.update_yaxes(tickformat=",.0f", hoverformat=",.0f")
     return fig

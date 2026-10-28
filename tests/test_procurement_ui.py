@@ -12,7 +12,7 @@ def test_five_page_workflow_runs_and_invalidates_edited_results():
     assert not app.exception
     assert len(app.tabs) == 5
     assert not app.tabs[0].info
-    assert len(app.tabs[0].markdown) == 1
+    assert len(app.tabs[0].markdown) == 2
     assert "PyPSA" in app.tabs[0].markdown[0].value
     assert "selected historical year" in app.tabs[0].markdown[0].value
     assert app.number_input(key="simple_util").value == 75
