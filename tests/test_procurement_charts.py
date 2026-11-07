@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from ui.procurement_charts import COLOURS, hourly_chart, monthly_chart
+from ui.procurement_charts import COLOURS, generation_duration_png, hourly_chart, monthly_chart
 from ui.procurement_plants import apply_map_selection
 from ui.tabs.nem_map import _tooltip
 
@@ -36,6 +36,26 @@ def test_hourly_columns_show_negative_charging_and_range_control():
     assert set(bars) == {"PV", "Wind", "Battery discharge", "Battery charge", "Spot purchases"}
     np.testing.assert_allclose(bars["Battery charge"].y, -d["Battery charge"])
     assert fig.data[-1].name == "Load"
+
+
+def test_generation_duration_ranks_the_stack_and_load_together(monkeypatch):
+    d = dispatch().iloc[:4].copy()
+    d["PV"] = [10, 0, 20, 10]
+    d["Wind"] = [10, 5, 10, 0]
+    d["Battery discharge"] = [0, 30, 0, 10]
+    d["Spot purchases"] = [0, 0, 0, 50]
+    d["Load"] = [55, 60, 65, 70]
+    figures = []
+    monkeypatch.setattr("ui.procurement_charts.Figure.savefig",
+                        lambda figure, *args, **kwargs: figures.append(figure))
+
+    generation_duration_png(d)
+
+    ax = figures[0].axes[0]
+    assert [patch.get_label() for patch in ax.patches] == ["PV", "Wind", "Battery discharge"]
+    np.testing.assert_array_equal(ax.patches[-1].get_data().values, [35, 30, 20, 20])
+    np.testing.assert_array_equal(ax.patches[-1].get_data().edges, [0, 1, 2, 3, 4])
+    np.testing.assert_array_equal(ax.lines[0].get_ydata(), [60, 65, 55, 70])
 
 
 def test_map_click_selects_correct_technology_and_does_not_override_later_dropdown():

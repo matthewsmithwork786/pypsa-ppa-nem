@@ -1,5 +1,10 @@
 """Consistent procurement charts with shared monthly column positions."""
+from io import BytesIO
+
+import numpy as np
 import plotly.graph_objects as go
+from matplotlib.figure import Figure
+from matplotlib.ticker import StrMethodFormatter
 from plotly.subplots import make_subplots
 
 COLOURS = {"PV": "#F4C542", "Wind": "#2E8B57", "Battery discharge": "#7B3FB2",
@@ -38,6 +43,36 @@ def hourly_chart(dispatch):
                       xaxis_rangeslider_visible=True, legend=dict(orientation="h", y=1.15),
                       margin=dict(l=65, r=20, t=65, b=40))
     return fig
+
+
+def generation_duration_png(dispatch) -> bytes:
+    """Render all hours as contiguous stacked columns in a static PNG."""
+    sources = ["PV", "Wind", "Battery discharge"]
+    generation = dispatch[sources].sum(axis=1).to_numpy()
+    ranked = dispatch.iloc[np.argsort(-generation, kind="stable")]
+    edges = np.arange(len(ranked) + 1)
+
+    fig = Figure(figsize=(10, 4), layout="constrained")
+    ax = fig.subplots()
+    bottom = np.zeros(len(ranked))
+    for source in sources:
+        top = bottom + ranked[source].to_numpy()
+        ax.stairs(top, edges, baseline=bottom, fill=True, linewidth=0,
+                  color=COLOURS[source], label=source)
+        bottom = top
+    ax.plot(edges[:-1] + 0.5, ranked["Load"], color=COLOURS["Load"],
+            linewidth=1.5, label="Load")
+    ax.set(xlim=(0, len(ranked)), ylim=(0, None), ylabel="Power (MW)",
+           xlabel="Hours ranked by generation (highest to lowest)")
+    ax.xaxis.set_major_formatter(StrMethodFormatter("{x:,.0f}"))
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.set_axisbelow(True)
+    ax.grid(axis="y", alpha=0.22)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1), ncols=4, frameon=False)
+
+    png = BytesIO()
+    fig.savefig(png, format="png", dpi=150)
+    return png.getvalue()
 
 
 def storage_chart(dispatch):

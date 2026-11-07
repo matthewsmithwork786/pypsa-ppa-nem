@@ -13,8 +13,11 @@ from ppa.procurement import (
 )
 from ppa.procurement_excel import export_procurement
 from ppa.procurement_reporting import SUBTOTALS, cost_breakdown, financial_summary
-from ui.procurement_charts import monthly_chart, hourly_chart, storage_chart
+from ui.procurement_charts import generation_duration_png, hourly_chart, monthly_chart, storage_chart
 from ui.procurement_plants import plant_map
+
+
+_generation_duration_png = st.cache_data(show_spinner=False, max_entries=8)(generation_duration_png)
 
 
 @st.cache_data
@@ -204,6 +207,10 @@ def _results(result):
         st.caption(f"Achieved wind share of contracted renewable energy: {d.Wind.sum() / gross if gross else 0:.2%}. Capacities are whole MW.")
     st.subheader("Generation & load")
     st.plotly_chart(monthly_chart(d), width="stretch")
+    st.markdown("**Full-year generation duration chart**")
+    st.image(_generation_duration_png(d[["PV", "Wind", "Battery discharge", "Load"]]), width="stretch")
+    st.caption(f"All {len(d):,} hours, ranked by combined solar PV, wind and battery discharge. "
+               "The red line shows load in the corresponding hour. Solar and wind include output used for charging or sold as excess.")
     with st.expander("Hourly generation & storage", expanded=False):
         first, last = d.index[0].date(), d.index[-1].date()
         start, end = st.slider("Time series view — date range to inspect", min_value=first, max_value=last,
