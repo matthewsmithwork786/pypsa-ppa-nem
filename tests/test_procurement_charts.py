@@ -53,7 +53,7 @@ def test_generation_duration_ranks_the_stack_and_load_together(monkeypatch):
     d["Wind supply"] = d["Wind"] - [0, 0, 3, 0]
     d["BESS supply"] = d["Battery discharge"]
     d["Battery charge"] = [0, 0, 15, 0]
-    d["Excess sold"] = [0, 0, 0, 0]
+    d["Excess sold"] = [0, 5, 0, 0]
     d["Renewable delivery"] = [20, 35, 15, 20]
     generation_duration_png(d, 25)
 
@@ -63,7 +63,7 @@ def test_generation_duration_ranks_the_stack_and_load_together(monkeypatch):
     np.testing.assert_array_equal(ax.patches[2].get_data().edges, [0, 1, 2, 3, 4])
     np.testing.assert_array_equal(ax.patches[3].get_data().values, [0, 0, 0, -15])
     assert ax.get_ylim()[0] == -25
-    assert [label.get_text() for label in ax.texts] == ["0.00 GWh excess sold", "36.0% of load met"]
+    assert [label.get_text() for label in ax.texts] == ["5.6% of generation excess", "36.0% of load met"]
     np.testing.assert_array_equal(ax.lines[-1].get_ydata(), [60, 55, 70, 65])
 
 

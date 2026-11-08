@@ -77,11 +77,12 @@ def generation_duration_png(dispatch, max_charge_mw: float) -> bytes:
     ax.grid(axis="y", alpha=0.22)
     ax.legend(loc="lower left", bbox_to_anchor=(0, 1), ncols=5, frameon=False)
 
-    excess_gwh = ranked["Excess sold"].sum() / 1_000
+    net_generation = generation.sum()
+    excess_share = ranked["Excess sold"].sum() / net_generation if net_generation > 0 else 0.0
     load_met = ranked["Renewable delivery"].sum() / ranked["Load"].sum()
     label_style = dict(ha="right", va="center", fontsize=10, zorder=5,
                        bbox=dict(facecolor="white", edgecolor="none", alpha=0.9, pad=3))
-    ax.text(0.97, 0.92, f"{excess_gwh:,.2f} GWh excess sold",
+    ax.text(0.97, 0.92, f"{excess_share:.1%} of generation excess",
             transform=ax.transAxes, **label_style)
     # At the right edge, the lowest generation hours leave room under load.
     right_load = ranked["Load"].iloc[int(0.85 * len(ranked)):].median()
