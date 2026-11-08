@@ -46,30 +46,48 @@ def hourly_chart(dispatch):
     return fig
 
 
-def generation_duration_png(dispatch) -> bytes:
+def generation_duration_png(dispatch, max_charge_mw: float) -> bytes:
     """Render all hours as contiguous stacked columns in a static PNG."""
-    sources = ["PV", "Wind", "Battery discharge"]
-    generation = dispatch[sources].sum(axis=1).to_numpy()
+    sources = {"PV supply": "PV", "Wind supply": "Wind"}
+    if max_charge_mw > 0:
+        sources["BESS supply"] = "Battery discharge"
+    generation = dispatch[list(sources)].sum(axis=1).to_numpy()
     ranked = dispatch.iloc[np.argsort(-generation, kind="stable")]
     edges = np.arange(len(ranked) + 1)
 
     fig = Figure(figsize=(10, 4), layout="constrained")
     ax = fig.subplots()
     bottom = np.zeros(len(ranked))
-    for source in sources:
+    for source, label in sources.items():
         top = bottom + ranked[source].to_numpy()
         ax.stairs(top, edges, baseline=bottom, fill=True, linewidth=0,
-                  color=COLOURS[source], label=source)
+                  color=COLOURS[label], label=label)
         bottom = top
+    if max_charge_mw > 0:
+        ax.stairs(-ranked["Battery charge"].to_numpy(), edges, fill=True, linewidth=0,
+                  color=COLOURS["Battery charge"], label="Battery charge")
+        ax.axhline(0, color="#555555", linewidth=0.7)
     ax.plot(edges[:-1] + 0.5, ranked["Load"], color=COLOURS["Load"],
             linewidth=1.5, label="Load")
-    ax.set(xlim=(0, len(ranked)), ylim=(0, None), ylabel="Power (MW)",
-           xlabel="Hours ranked by generation (highest to lowest)")
+    ax.set(xlim=(0, len(ranked)), ylim=(-max_charge_mw, None), ylabel="Power (MW)",
+           xlabel="Hours ranked by net generation (highest to lowest)")
     ax.xaxis.set_major_formatter(StrMethodFormatter("{x:,.0f}"))
     ax.spines[["top", "right"]].set_visible(False)
     ax.set_axisbelow(True)
     ax.grid(axis="y", alpha=0.22)
-    ax.legend(loc="lower left", bbox_to_anchor=(0, 1), ncols=4, frameon=False)
+    ax.legend(loc="lower left", bbox_to_anchor=(0, 1), ncols=5, frameon=False)
+
+    excess_gwh = ranked["Excess sold"].sum() / 1_000
+    load_met = ranked["Renewable delivery"].sum() / ranked["Load"].sum()
+    label_style = dict(ha="right", va="center", fontsize=10, zorder=5,
+                       bbox=dict(facecolor="white", edgecolor="none", alpha=0.9, pad=3))
+    ax.text(0.97, 0.92, f"{excess_gwh:,.2f} GWh excess sold",
+            transform=ax.transAxes, **label_style)
+    # At the right edge, the lowest generation hours leave room under load.
+    right_load = ranked["Load"].iloc[int(0.85 * len(ranked)):].median()
+    label_height = 0.5 * right_load if right_load > 0 else 0.25 * ranked["Load"].max()
+    ax.text(0.97, label_height, f"{load_met:.1%} of load met",
+            transform=ax.get_yaxis_transform(), **label_style)
 
     png = BytesIO()
     fig.savefig(png, format="png", dpi=150)

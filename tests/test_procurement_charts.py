@@ -49,13 +49,22 @@ def test_generation_duration_ranks_the_stack_and_load_together(monkeypatch):
     monkeypatch.setattr("ui.procurement_charts.Figure.savefig",
                         lambda figure, *args, **kwargs: figures.append(figure))
 
-    generation_duration_png(d)
+    d["PV supply"] = d["PV"] - [0, 0, 12, 0]
+    d["Wind supply"] = d["Wind"] - [0, 0, 3, 0]
+    d["BESS supply"] = d["Battery discharge"]
+    d["Battery charge"] = [0, 0, 15, 0]
+    d["Excess sold"] = [0, 0, 0, 0]
+    d["Renewable delivery"] = [20, 35, 15, 20]
+    generation_duration_png(d, 25)
 
     ax = figures[0].axes[0]
-    assert [patch.get_label() for patch in ax.patches] == ["PV", "Wind", "Battery discharge"]
-    np.testing.assert_array_equal(ax.patches[-1].get_data().values, [35, 30, 20, 20])
-    np.testing.assert_array_equal(ax.patches[-1].get_data().edges, [0, 1, 2, 3, 4])
-    np.testing.assert_array_equal(ax.lines[0].get_ydata(), [60, 65, 55, 70])
+    assert [patch.get_label() for patch in ax.patches] == ["PV", "Wind", "Battery discharge", "Battery charge"]
+    np.testing.assert_array_equal(ax.patches[2].get_data().values, [35, 20, 20, 15])
+    np.testing.assert_array_equal(ax.patches[2].get_data().edges, [0, 1, 2, 3, 4])
+    np.testing.assert_array_equal(ax.patches[3].get_data().values, [0, 0, 0, -15])
+    assert ax.get_ylim()[0] == -25
+    assert [label.get_text() for label in ax.texts] == ["0.00 GWh excess sold", "36.0% of load met"]
+    np.testing.assert_array_equal(ax.lines[-1].get_ydata(), [60, 55, 70, 65])
 
 
 def test_map_click_selects_correct_technology_and_does_not_override_later_dropdown():

@@ -190,7 +190,14 @@ def _summary(s, ts, description):
     st.dataframe(pd.DataFrame(entries.items(), columns=["Assumption", "Value"]), hide_index=True, width="stretch")
 
 
-def _results(result):
+@st.cache_data(show_spinner="Calculating dispatch without BESS…", max_entries=8)
+def _dispatch_without_bess(ts, assumptions, pv_mw, wind_mw):
+    fixed = replace(assumptions, mode="Fixed", pv_mw=pv_mw, wind_mw=wind_mw,
+                    bess_mw=0, bess_mwh=0)
+    return optimise_procurement(ts, fixed)["dispatch"]
+
+
+def _results(result, ts):
     st.header("Results · data centre perspective")
     cols = st.columns(4)
     for col, label, value in zip(cols[:3], ["Spot-only cost", "Portfolio net cost", "Savings versus spot"],
@@ -209,9 +216,27 @@ def _results(result):
     st.subheader("Generation & load")
     st.plotly_chart(monthly_chart(d), width="stretch")
     st.markdown("**Full-year generation duration chart**")
-    st.image(_generation_duration_png(d[["PV", "Wind", "Battery discharge", "Load"]]), width="stretch")
-    st.caption(f"All {len(d):,} hours, ranked by combined solar PV, wind and battery discharge. "
-               "The red line shows load in the corresponding hour. Solar and wind include output used for charging or sold as excess.")
+    without_bess = st.toggle("Show without BESS", disabled=caps["BESS"] == 0,
+                             help="Recalculates dispatch with the same solar and wind capacities, load and prices.")
+    chart_data = d
+    charge_limit = caps["BESS"]
+    if without_bess and charge_limit > 0:
+        try:
+            chart_data = _dispatch_without_bess(ts, s, caps["PV"], caps["Wind"])
+            charge_limit = 0
+        except ValueError as exc:
+            st.error(f"Could not calculate the comparison. Showing the portfolio with BESS. {exc}")
+
+    chart_dispatch = chart_data[["PV supply", "Wind supply", "BESS supply", "Battery charge", "Load",
+                                 "Excess sold", "Renewable delivery"]]
+    st.image(_generation_duration_png(chart_dispatch, charge_limit), width="stretch")
+    if charge_limit > 0:
+        st.caption("Solar and wind exclude curtailment and the full input to battery charging, including losses. "
+                   "Charging appears below zero.")
+    elif without_bess and caps["BESS"] > 0:
+        st.caption("Dispatch recalculated without BESS using the same solar and wind capacities, load and prices. "
+                   "The other results describe the original portfolio.")
+    st.caption(f"All {len(chart_data):,} hours are ranked by net generation. The area above the red load line is excess sold.")
     with st.expander("Hourly generation & storage", expanded=False):
         first, last = d.index[0].date(), d.index[-1].date()
         start, end = st.slider("Time series view — date range to inspect", min_value=first, max_value=last,
@@ -310,7 +335,7 @@ def render():
     with results:
         saved = st.session_state.get("simple_result")
         if saved and saved[0] == fingerprint:
-            _results(saved[1])
+            _results(saved[1], ts)
         elif saved:
             st.info("Inputs have changed. Run optimisation again to update the results.")
         else:
