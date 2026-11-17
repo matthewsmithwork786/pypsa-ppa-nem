@@ -31,6 +31,7 @@ class Procurement:
     wind_mw: float = 100.0
     bess_mw: float = 25.0
     bess_mwh: float = 100.0
+    protected_annual_share: float = 0.0
 
     @property
     def storage_duration_h(self):
@@ -44,7 +45,7 @@ def validate_inputs(ts: pd.DataFrame, s: Procurement) -> None:
         raise ValueError("Choose NSW, AEMO or Choose capacity.")
     scalars = [s.peak_mw, s.utilisation, s.annual_match, s.wind_share,
                s.storage_share, s.duration_h, s.pv_tariff, s.wind_tariff, s.storage_tariff,
-               s.pv_mw, s.wind_mw, s.bess_mw, s.bess_mwh]
+               s.pv_mw, s.wind_mw, s.bess_mw, s.bess_mwh, s.protected_annual_share]
     if not np.isfinite(scalars).all() or not np.isfinite(s.band_shares).all():
         raise ValueError("All assumptions must be finite numbers.")
     if s.peak_mw <= 0 or not 0 < s.utilisation <= 1 or s.duration_h <= 0:
@@ -55,6 +56,8 @@ def validate_inputs(ts: pd.DataFrame, s: Procurement) -> None:
     if min(s.pv_tariff, s.wind_tariff, s.storage_tariff) <= 0:
         raise ValueError("Procurement tariffs must be positive.")
     if s.mode == "Fixed":
+        if s.protected_annual_share < 0:
+            raise ValueError("Protected annual generation must be non-negative.")
         if min(s.pv_mw, s.wind_mw, s.bess_mw, s.bess_mwh) < 0:
             raise ValueError("Chosen capacities must be non-negative.")
         if any(not float(v).is_integer() for v in (s.pv_mw, s.wind_mw, s.bess_mw)):
@@ -119,6 +122,38 @@ def _network(ts, s, capacities=None):
     return n
 
 
+def _limit_dispatch_curtailment(n, ts, s, generation, storage_power):
+    m = n.model
+    g = m.variables["Generator-p"]
+    curtailment = g.sel(name="Curtailment")
+    load = ts.ts_LoadMW
+    if s.mode == "Fixed" and s.protected_annual_share > 0:
+        weight = n.snapshot_weightings.generators
+        target = s.protected_annual_share * float((load * weight).sum())
+        budget = max(0.0, float((generation * weight).sum()) - target)
+        m.add_constraints((curtailment * weight).sum() <= budget, name="Annual_curtailment_limit")
+
+    # With non-negative prices, surplus can always go to export.
+    surplus = (generation + storage_power - load).clip(lower=0).clip(upper=generation)
+    surplus = surplus.where(ts.ts_MktPrice < 0, 0.0)
+    m.add_constraints(curtailment <= surplus, name="Curtailment_surplus_limit")
+    negative_hours = ts.index[ts.ts_MktPrice < 0]
+    if len(negative_hours):
+        spot = g.sel(name="Spot")
+        # Spot and exports settle at the same price. Even at full charging power,
+        # generation above load can only cause offsetting purchases and sales.
+        shortfall = (load + storage_power - generation).clip(lower=0).clip(upper=load)
+        m.add_constraints(spot.sel(snapshot=negative_hours) <= shortfall.loc[negative_hours],
+                          name="Spot_shortfall_limit")
+        hours = ts.index[(surplus > 0) & (shortfall > 0)]
+        if len(hours):
+            curtailing = m.add_variables(binary=True, coords=[hours], name="Curtailing")
+            m.add_constraints(curtailment.sel(snapshot=hours) <= surplus.loc[hours] * curtailing,
+                              name="Curtailment_mode")
+            m.add_constraints(spot.sel(snapshot=hours) <= shortfall.loc[hours] * (1 - curtailing),
+                              name="Load_before_curtailment")
+
+
 def _solve(n, ts, s):
     m = n.optimize.create_model(include_objective_constant=False)
     g = m.variables["Generator-p"]
@@ -144,6 +179,10 @@ def _solve(n, ts, s):
     discharge = m.variables["StorageUnit-p_dispatch"].sel(name="BESS")
     m.add_constraints(discharge <= delivery, name="Storage_to_customer")
     storage = n.components.storage_units.static
+    if not storage.p_nom_extendable.BESS:
+        generators = n.components.generators.static
+        generation = generators.at["PV", "p_nom"] * ts.ts_PVGen + generators.at["Wind", "p_nom"] * ts.ts_WindGen
+        _limit_dispatch_curtailment(n, ts, s, generation, float(storage.p_nom.BESS))
     if not storage.p_nom_extendable.BESS and storage.p_nom.BESS > 0:
         # Negative spot prices can otherwise reward simultaneous charge/discharge.
         charging = m.add_variables(binary=True, coords=[n.snapshots], name="BESS_charging")
@@ -198,6 +237,8 @@ def optimise_procurement(ts: pd.DataFrame, s: Procurement) -> dict:
     annual_load = float(dispatch.Load.sum())
     if s.mode != "Fixed":
         compliance.append(("Annual renewable matching", s.annual_match, generated / annual_load))
+    elif s.protected_annual_share > 0:
+        compliance.append(("Protected annual renewable generation", s.protected_annual_share, generated / annual_load))
     if s.mode == "AEMO":
         for band, share in enumerate(s.band_shares):
             part = dispatch.loc[dispatch.index.hour // 6 == band]

@@ -37,9 +37,9 @@ def _timeseries(pv, wind, year, load):
                          "ts_MktPrice": price, "ts_LoadMW": load})
 
 
-def _percent(label, default, key, maximum=100.0):
+def _percent(label, default, key, maximum=100.0, help=None):
     return st.number_input(label, min_value=0.0, max_value=float(maximum), value=float(default),
-                           step=5.0, key=key) / 100
+                           step=5.0, key=key, help=help) / 100
 
 
 def _requirements():
@@ -64,11 +64,17 @@ def _requirements():
                 with col:
                     capacities.append(st.number_input(label, min_value=0.0 if key == "bess_energy" else 0, value=default,
                                                       step=5.0 if key == "bess_energy" else 1, key=f"simple_fixed_{key}"))
-            st.caption("The selected capacities stay fixed. The model optimises hourly dispatch and reports the matching achieved; NSW and AEMO minimum targets are not imposed. PV and wind use MW; BESS uses both MW and MWh.")
+            protected_share = _percent(
+                "Protected renewable generation (% of annual load)", 0, "simple_fixed_protected_share", 300,
+                help="Limits how much annual wind and solar generation can be curtailed. "
+                     "If available generation is below the selected level, all generation is protected and the run shows the shortfall. "
+                     "At 0%, there is no annual curtailment limit.",
+            )
+            st.caption("The selected capacities stay fixed. Curtailment is only allowed after the customer load is met in that hour.")
             if capacities[2] > 0:
                 st.caption(f"Chosen storage duration: {capacities[3] / capacities[2]:g} hours.")
         return replace(s, mode="Fixed", pv_mw=capacities[0], wind_mw=capacities[1],
-                       bess_mw=capacities[2], bess_mwh=capacities[3])
+                       bess_mw=capacities[2], bess_mwh=capacities[3], protected_annual_share=protected_share)
     requirement_mode = st.radio("Procurement requirements", ["NSW", "AEMO"], horizontal=True,
                                 key="simple_requirement_mode")
     if requirement_mode == "NSW":
@@ -185,7 +191,8 @@ def _summary(s, ts, description):
         entries.update({f"Coverage {band}": f"{share:.0%}" for band, share in zip(BANDS, s.band_shares)})
     else:
         entries.update({"PV capacity": f"{s.pv_mw:,.0f} MW", "Wind capacity": f"{s.wind_mw:,.0f} MW",
-                        "BESS capacity": f"{s.bess_mw:,.0f} MW / {s.bess_mwh:,.2f} MWh"})
+                        "BESS capacity": f"{s.bess_mw:,.0f} MW / {s.bess_mwh:,.2f} MWh",
+                        "Protected renewable generation": f"{s.protected_annual_share:.1%} of annual load"})
     st.dataframe(pd.DataFrame(entries.items(), columns=["Assumption", "Value"]), hide_index=True, width="stretch")
 
 
@@ -225,6 +232,10 @@ def _results(result):
         if not result["compliance"].empty:
             st.markdown("**Scenario targets**")
             st.dataframe(result["compliance"].style.format({"Target": "{:.1%}", "Achieved": "{:.1%}"}), hide_index=True, width="stretch")
+        if s.mode == "Fixed" and s.protected_annual_share > 0:
+            shortfall = s.protected_annual_share * d.Load.sum() - (d.PV + d.Wind).sum()
+            if shortfall > 1e-6:
+                st.info(f"Available renewable generation falls {shortfall / 1000:,.2f} GWh short of the selected level. All available generation was protected from curtailment.")
         st.caption("Annual volume matching is generation after curtailment divided by annual load; it includes exports and counts stored energy only once. Wind share here is contracted wind generation divided by annual load, rather than total renewable generation. Time matching is the energy-weighted share of load served by renewables in the same hour, including renewable-charged BESS, aggregated over each band or the whole year. BESS percentage uses power (MW) divided by the specified peak load. A dash means there is no load in that band.")
     with st.expander("Financial analysis · procurement versus spot", expanded=True):
         summary = financial_summary(result).rename(columns={"A$": "A$ million"})

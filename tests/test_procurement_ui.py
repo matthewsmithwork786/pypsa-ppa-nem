@@ -22,6 +22,7 @@ def test_five_page_workflow_runs_and_invalidates_edited_results():
     assert "simple_nsw_annual" in keys
     assert "simple_aemo_annual" not in keys
     assert "simple_fixed_pv" not in keys
+    assert "simple_fixed_protected_share" not in keys
     assert app.slider(key="simple_cf_min_wind").value == 0
     assert app.slider(key="simple_cf_min_pv").value == 0
     assert app.multiselect(key="simple_map_regions").value
@@ -64,6 +65,8 @@ def test_five_page_workflow_runs_and_invalidates_edited_results():
     app.number_input(key="simple_fixed_pv").set_value(120)
     app.number_input(key="simple_fixed_wind").set_value(80)
     app.number_input(key="simple_fixed_bess").set_value(10)
+    assert app.number_input(key="simple_fixed_protected_share").value == 0
+    app.number_input(key="simple_fixed_protected_share").set_value(300.0)
     app.number_input(key="simple_fixed_bess_energy").set_value(60.0).run()
     app.button[0].click().run()
     assert not app.exception
@@ -72,7 +75,9 @@ def test_five_page_workflow_runs_and_invalidates_edited_results():
     assert result["capacities"] == {"PV": 120, "Wind": 80, "BESS": 10}
     assert result["assumptions"].storage_duration_h == 6
     assert len(result["matching"]) == 8
-    assert result["compliance"].empty
+    assert result["compliance"].iloc[0].Target == 3
+    assert result["dispatch"].Curtailed.sum() == pytest.approx(0, abs=1e-6)
+    assert any("short of the selected level" in x.value for x in app.info)
 
 
 def test_capacity_factor_filters_apply_to_dropdowns_and_allow_empty_results():

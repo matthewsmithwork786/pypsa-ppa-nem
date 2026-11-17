@@ -112,6 +112,44 @@ def test_chosen_capacity_has_no_matching_targets_and_reports_all_metrics():
             assert value == pytest.approx(40 / 90)
 
 
+@pytest.mark.parametrize(("protected_share", "curtailed"), [(0, 30), (1.5, 10), (2, 0)])
+def test_fixed_capacity_protects_generation_and_serves_load_before_curtailing(protected_share, curtailed):
+    ts = year_data()
+    ts["ts_MktPrice"] = 100.0
+    ts["ts_LoadMW"] = 20.0
+    ts["ts_WindGen"] = 0.30
+    ts.iloc[0] = [0, 0.50, 20.0, -100.0]
+    ts.iloc[1] = [0, 0.20, 20.0, 100.0]
+    # At 150%, 10 MWh remain above the protected annual volume.
+    s = Procurement(mode="Fixed", pv_mw=0, wind_mw=100, bess_mw=0, bess_mwh=0,
+                    protected_annual_share=protected_share)
+    result = optimise_procurement(ts, s)
+    d = result["dispatch"]
+    assert d.Curtailed.sum() == pytest.approx(curtailed)
+    assert d["Renewable delivery"].iloc[0] == pytest.approx(20)
+    assert d["Spot purchases"].iloc[0] == pytest.approx(0)
+    assert d["Excess sold"].iloc[0] == pytest.approx(30 - curtailed)
+    assert result["fees"]["Wind PPA"] == pytest.approx(100 * ts.ts_WindGen.sum() * s.wind_tariff)
+    if protected_share:
+        row = result["compliance"].iloc[0]
+        assert row.Target == protected_share
+        assert row.Achieved == pytest.approx((d.Wind.sum() - curtailed) / d.Load.sum())
+
+
+def test_load_before_curtailment_with_storage():
+    ts = year_data(wind=0.0)
+    ts["ts_LoadMW"] = 20.0
+    ts["ts_MktPrice"] = 0.0
+    ts.iloc[0] = [0, 0.25, 20.0, -100.0]
+    ts.iloc[1] = [0, 0, 20.0, 400.0]
+    s = Procurement(mode="Fixed", pv_mw=0, wind_mw=100, bess_mw=10, bess_mwh=4)
+    d = optimise_procurement(ts, s)["dispatch"]
+    assert d.Curtailed.iloc[0] > 0
+    assert d["Battery charge"].iloc[0] > 0
+    assert d["Spot purchases"].iloc[0] == pytest.approx(0)
+    assert d["Renewable delivery"].iloc[0] == pytest.approx(d.Load.iloc[0])
+
+
 def test_chosen_bess_power_and_energy_are_independent():
     ts = year_data().astype("float32")
     r = optimise_procurement(ts, Procurement(mode="Fixed", pv_mw=180, wind_mw=75, bess_mw=13, bess_mwh=78))
