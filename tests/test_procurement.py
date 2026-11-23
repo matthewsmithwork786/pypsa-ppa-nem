@@ -33,7 +33,7 @@ def test_nsw_energy_mix_storage_and_annual_matching(nsw_result):
     assert all(float(v).is_integer() for v in r["capacities"].values())
     assert (d.Wind + d.PV - d.Curtailed).sum() >= d.Load.sum() - 1e-4
     assert r["capacities"]["BESS"] == 26
-    assert r["fees"]["BESS fee"] == pytest.approx(26 * 4 * 6000 * 12)
+    assert r["fees"]["BESS fee"] == pytest.approx(26 * 4 * 3000 * 12)
 
 
 def test_aemo_nighttime_targets_require_storage_without_wind(aemo_result):
@@ -117,7 +117,7 @@ def test_chosen_bess_power_and_energy_are_independent():
     r = optimise_procurement(ts, Procurement(mode="Fixed", pv_mw=180, wind_mw=75, bess_mw=13, bess_mwh=78))
     assert r["capacities"] == {"PV": 180, "Wind": 75, "BESS": 13}
     assert r["assumptions"].storage_duration_h == 6
-    assert r["fees"]["BESS fee"] == pytest.approx(78 * 6000 * 12)
+    assert r["fees"]["BESS fee"] == pytest.approx(78 * 3000 * 12)
     d = r["dispatch"]
     assert d["Stored energy"].max() <= 78 + 1e-5
     assert d["Battery discharge"].max() <= 13 + 1e-5
@@ -207,7 +207,7 @@ def test_workbook_formulas_cached_values_format_and_sheets(nsw_result):
     assert cached["E18"].value == pytest.approx(nsw_result["net_cost"] / nsw_result["dispatch"].Load.sum())
     assert ws["E15"].font.bold
     assert "0.00" in ws["E15"].number_format
-    assert ws["D7"].value == 6000
+    assert ws["D7"].value == 3000
     assert ws["E24"].value == "=B24*12*D24"
     assert ws["E26"].value == "=-B26*1000*D26"
     assert ws["D25"].value.startswith("=IF(SUM(")

@@ -28,7 +28,7 @@ def test_five_page_workflow_runs_and_invalidates_edited_results():
     assert app.session_state["simple_PV_plant"] is not None
     assert app.number_input(key="simple_pv_price").value == 80
     assert app.number_input(key="simple_wind_price").value == 130
-    assert app.number_input(key="simple_bess_price").value == 6000
+    assert app.number_input(key="simple_bess_price").value == 3000
     app.button[0].click().run()
     assert not app.exception
     assert not app.error

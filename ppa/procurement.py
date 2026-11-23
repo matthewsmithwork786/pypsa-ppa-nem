@@ -26,7 +26,7 @@ class Procurement:
     band_shares: tuple = (0.2, 0.4, 0.4, 0.2)
     pv_tariff: float = 80.0
     wind_tariff: float = 130.0
-    storage_tariff: float = 6000.0  # A$/MWh of energy capacity/month
+    storage_tariff: float = 3000.0  # A$/MWh of energy capacity/month
     pv_mw: float = 200.0
     wind_mw: float = 100.0
     bess_mw: float = 25.0

@@ -162,7 +162,7 @@ def _select_plants(s):
     with columns[1]:
         wind = st.number_input("Wind PPA tariff (A$/MWh)", min_value=0.01, value=130.0, step=5.0, key="simple_wind_price")
     with columns[2]:
-        bess = st.number_input("BESS tolling (A$/MWh/month)", min_value=0.01, value=6000.0, step=100.0, key="simple_bess_price",
+        bess = st.number_input("BESS tolling (A$/MWh/month)", min_value=0.01, value=s.storage_tariff, step=100.0, key="simple_bess_price",
                                help="A fixed monthly fee per MWh of storage energy capacity, regardless of energy throughput.")
     st.caption(f"At {s.storage_duration_h:g} hours, the BESS fee is AUD {bess * s.storage_duration_h * 12:,.0f} per MW per year.")
     st.caption(f"PPA fees cover the full contracted profile, including deemed generation if curtailed. BESS round-trip efficiency is {BESS_EFFICIENCY_STORE * BESS_EFFICIENCY_DISPATCH:.0%} ({BESS_EFFICIENCY_STORE:.0%} charging × {BESS_EFFICIENCY_DISPATCH:.0%} discharging); charging is renewable-only. Prices are constant for this one-year comparison.")
