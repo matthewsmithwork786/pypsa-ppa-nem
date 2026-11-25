@@ -1,4 +1,4 @@
-"""Five-page customer procurement workflow."""
+"""Customer procurement workflow."""
 from dataclasses import asdict, replace
 import hashlib
 
@@ -14,6 +14,7 @@ from ppa.procurement import (
 from ppa.procurement_excel import export_procurement
 from ppa.procurement_reporting import SUBTOTALS, cost_breakdown, financial_summary
 from ui.procurement_charts import generation_duration_png, hourly_chart, monthly_chart, storage_chart
+from ui.procurement_hedging import render_hedging
 from ui.procurement_plants import plant_map
 
 
@@ -104,7 +105,7 @@ def _requirements():
 def _select_plants(s):
     st.header("Select plants & PPA tariffs")
     source = st.radio("Generation profiles", ["Cached NEM plants", "Upload my own template"], horizontal=True, key="simple_source")
-    ts, description = None, ""
+    ts, description, uploaded_prices = None, "", None
     try:
         if source == "Cached NEM plants":
             years = [year for year in nem_data.available_years()
@@ -157,6 +158,7 @@ def _select_plants(s):
                 if minutes <= 0 or 60 % minutes != 0:
                     raise ValueError("The input interval must divide one hour evenly.")
                 ts = prepare_custom_timeseries(raw)
+                uploaded_prices = raw["ts_MktPrice"]
                 description = f"Custom upload · {upload.name}"
     except (ValueError, FileNotFoundError, KeyError) as exc:
         st.error(str(exc))
@@ -171,7 +173,7 @@ def _select_plants(s):
                                help="A fixed monthly fee per MWh of storage energy capacity, regardless of energy throughput.")
     st.caption(f"At {s.storage_duration_h:g} hours, the BESS fee is AUD {bess * s.storage_duration_h * 12:,.0f} per MW per year.")
     st.caption(f"PPA fees cover the full contracted profile, including deemed generation if curtailed. BESS round-trip efficiency is {BESS_EFFICIENCY_STORE * BESS_EFFICIENCY_DISPATCH:.0%} ({BESS_EFFICIENCY_STORE:.0%} charging × {BESS_EFFICIENCY_DISPATCH:.0%} discharging); charging is renewable-only. Prices are constant for this one-year comparison.")
-    return replace(s, pv_tariff=pv, wind_tariff=wind, storage_tariff=bess), ts, description
+    return replace(s, pv_tariff=pv, wind_tariff=wind, storage_tariff=bess), ts, description, uploaded_prices
 
 
 def _summary(s, ts, description):
@@ -262,13 +264,16 @@ def _workbook(result):
 
 def render():
     st.title("Data centre renewable procurement")
-    intro, requirements, plants, run, results = st.tabs(["① Introduction", "② Requirements", "③ Plants & tariffs", "④ Optimisation", "⑤ Results"])
+    intro, requirements, plants, run, results, hedging = st.tabs([
+        "① Introduction", "② Requirements", "③ Plants & tariffs", "④ Optimisation", "⑤ Results",
+        "⑥ Hedging",
+    ])
     with intro:
         st.write("Model the wind, solar and storage procurement needed to meet proposed government procurement requirements, optimised using the energy modelling software PyPSA and real operating plant generation profiles from the selected historical year.")
     with requirements:
         s = _requirements()
     with plants:
-        s, ts, description = _select_plants(s)
+        s, ts, description, uploaded_prices = _select_plants(s)
     fingerprint = hashlib.sha256(b"procurement-v4" + repr(asdict(s)).encode() + description.encode() +
                                   (pd.util.hash_pandas_object(ts).values.tobytes() if ts is not None else b"")).hexdigest()
     with run:
@@ -289,7 +294,7 @@ def render():
                 with st.spinner("Dispatching the chosen capacities over the full year…" if s.mode == "Fixed" else "Sizing the portfolio and dispatching the full year…"):
                     result = optimise_procurement(ts, s)
                 st.session_state["simple_result"] = (fingerprint, result)
-                st.success("Optimisation complete. Open Results to review the portfolio.")
+                st.success("Optimisation complete. Open Results to review the portfolio or Hedging to price caps and swaps.")
             except ValueError as exc:
                 st.error(str(exc))
     with results:
@@ -300,3 +305,11 @@ def render():
             st.info("Inputs have changed. Run optimisation again to update the results.")
         else:
             st.info("Run optimisation to see the portfolio, generation charts and financial analysis.")
+
+    with hedging:
+        if saved and saved[0] == fingerprint:
+            render_hedging(saved[1], uploaded_prices)
+        elif saved:
+            st.info("Inputs have changed. Run optimisation again to update the hedging analysis.")
+        else:
+            st.info("Run optimisation to calculate the residual spot exposure and compare hedges.")

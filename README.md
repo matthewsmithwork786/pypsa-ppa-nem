@@ -1,12 +1,13 @@
 # Data centre renewable procurement
 
-This branch provides a five-page Streamlit workflow for one-year procurement modelling:
+This branch provides a six-page Streamlit workflow for one-year procurement modelling:
 
 1. **Introduction** — purpose and calculation approach.
 2. **Requirements** — select **Find optimal capacity** and either NSW or AEMO requirements, or **Manually choose capacity** to enter PV MW, wind MW, BESS MW and BESS MWh yourself.
 3. **Plants & tariffs** — choose cached wind/PV profiles using a map or dropdowns with minimum wind/PV capacity-factor filters, or upload a CSV, then set PPA and storage fees.
 4. **Optimisation** — review assumptions and size the portfolio.
 5. **Results** — generation, load coverage, storage, requirements achieved and customer cash flows.
+6. **Hedging** — price $300 and $600 caps, a baseload swap and a daily block swap on the portfolio’s remaining wholesale exposure.
 
 The scenario names are user-defined modelling cases, not a certification of current NSW rules or an AEMO proposal.
 
@@ -45,6 +46,12 @@ Every results page reports annual renewable volume matching, wind generation / a
 - Customer net cost = PV PPA fee + wind PPA fee + BESS fee + spot shortfall purchases − excess sales revenue.
 - The spot-only counterfactual uses the exact same hourly load and spot prices.
 - Both costs exclude network charges, retailer margins, financing, taxes and separate certificate purchases. All NEM generation settles at NSW spot prices; regional basis and transmission constraints are excluded.
+
+## Residual load hedging
+
+The Hedging page compares spot purchases less excess sales before and after financial settlements. Enter fixed contract MW and prices. Cap premiums apply to every model hour, and payouts apply when the spot price exceeds the strike. Swaps pay the fixed leg and receive the spot leg during their delivery window. The daily block uses AEST and can cross midnight.
+
+Caps settle on five-minute NSW prices from 1 October 2021, on half-hourly averages of dispatch prices as a proxy before then, and at the available price resolution for custom uploads. If the finer series does not reconcile to the dispatch hours, the page uses hourly prices and shows the fallback. Dispatch stays hourly. Annual portfolio cost includes the original PPAs and BESS toll, while daily risk measures focus on net spot exposure and hedge settlements.
 
 ## Data and uploads
 

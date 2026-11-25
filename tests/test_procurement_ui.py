@@ -6,11 +6,13 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 
-def test_five_page_workflow_runs_and_invalidates_edited_results():
+def test_six_page_workflow_runs_and_invalidates_edited_results():
     app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "streamlit_app.py"),
                             default_timeout=360).run()
     assert not app.exception
-    assert len(app.tabs) == 5
+    assert len(app.tabs) == 6
+    assert "Hedging" in app.tabs[5].label
+    assert app.tabs[5].info
     assert not app.tabs[0].info
     assert len(app.tabs[0].markdown) == 1
     assert "PyPSA" in app.tabs[0].markdown[0].value
@@ -40,6 +42,16 @@ def test_five_page_workflow_runs_and_invalidates_edited_results():
     assert app.metric[3].value == f"A${result['net_cost'] / d.Load.sum():,.2f}/MWh"
     assert d.Load.sum() == 75 * 8760
     assert d["Excess sold"].sum() > 0
+    hedge_metrics = {m.label: m.value for m in app.tabs[5].metric}
+    assert hedge_metrics["Portfolio before hedges"] == app.metric[3].value
+    assert hedge_metrics["Portfolio after hedges"] == app.metric[3].value
+    app.number_input(key="hedge_cap_mw_300").set_value(10.0)
+    app.number_input(key="hedge_swap_mw_block").set_value(15.0).run()
+    assert not app.exception
+    assert app.session_state["simple_result"][1]["net_cost"] == result["net_cost"]
+    hedge_metrics = {m.label: m.value for m in app.tabs[5].metric}
+    assert hedge_metrics["Net hedge cost"] != "A$0.00/MWh"
+    assert any("five-minute NSW" in c.value for c in app.tabs[5].caption)
     app.radio(key="simple_requirement_mode").set_value("AEMO").run()
     assert not app.exception
     assert not app.metric
